@@ -1,0 +1,15 @@
+file=/mnt/data/report-studio-architecture.md
+status=development-baseline-frozen
+version=1.0.0
+review_status=multi-pass-self-review-passed
+review_method=user-approved-adversarial-self-review
+lines=2519
+bytes=122039
+sha256=b0d6e78632576ffc3983fd9afd33b73f04d15436521fb130b20d8bc073d8caa1
+code_fences=146
+json_blocks=21
+adrs=62
+MVP_items=44
+consistency_items=48
+errors=0
+warnings=0
