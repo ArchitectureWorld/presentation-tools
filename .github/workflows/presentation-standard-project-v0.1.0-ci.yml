@@ -1,0 +1,67 @@
+name: Presentation Standard Project v0.1.0 CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'contracts/presentation-standard-project/**'
+      - 'docs/architecture/report-studio-architecture.md'
+      - 'docs/handoff/PRESENTATION_TO_PRE_DESIGN_STANDARD_PROJECT_RESPONSE_V0.1.0.md'
+      - 'docs/acceptance/presentation-standard-project-directory-v0.1.0-verification.md'
+      - '.github/workflows/presentation-standard-project-v0.1.0-ci.yml'
+  pull_request:
+    paths:
+      - 'contracts/presentation-standard-project/**'
+      - 'docs/architecture/report-studio-architecture.md'
+      - 'docs/handoff/PRESENTATION_TO_PRE_DESIGN_STANDARD_PROJECT_RESPONSE_V0.1.0.md'
+      - 'docs/acceptance/presentation-standard-project-directory-v0.1.0-verification.md'
+      - '.github/workflows/presentation-standard-project-v0.1.0-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install locked validation dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0
+          npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+
+      - name: Verify Presentation Contract
+        run: |
+          npm test --prefix contracts/presentation-standard-project
+          npm run verify --prefix contracts/presentation-standard-project | tee /tmp/presentation-standard.log
+          grep -F 'PRESENTATION_STANDARD_PROJECT_V0_1_0_PASS' /tmp/presentation-standard.log
+
+      - name: Verify Report Studio remains unaffected
+        env:
+          CHROMIUM_PATH: google-chrome
+        run: npm run verify:all
+
+      - name: Enforce Contract boundary and repository hygiene
+        run: |
+          test "$(cat contracts/presentation-standard-project/STANDARD_VERSION)" = '0.1.0'
+          test ! -e contracts/presentation-standard-project-v1
+          ! grep -R --line-number -E '"(snapshotRevision|lastModifiedRevision|syncOrigin|baseRevision|presentationRevision|UpstreamSyncRecord)"|assessUpstreamRefresh' \
+            contracts/presentation-standard-project/schemas \
+            contracts/presentation-standard-project/src
+          ! grep -R --line-number -F 'Presentation Standard Project Directory v1' \
+            contracts/presentation-standard-project \
+            docs/architecture/report-studio-architecture.md
+          git diff --check
