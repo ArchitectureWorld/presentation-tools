@@ -1,0 +1,12 @@
+{
+  "name": "@architectureworld/presentation-tools",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @architectureworld/studio-dev-harness dev"
+  }
+}
