@@ -1,0 +1,20 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/source-material-manifest.schema.json",
+  "documentType": "SourceMaterialManifest",
+  "standardVersion": "0.1.0",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "materials": [
+    {
+      "sourceMaterialId": "source_material_01992a80-0000-7000-8000-000000000211",
+      "originalFileName": "场地指标.csv",
+      "alternateOriginalFileNames": [],
+      "category": "data",
+      "relativePath": "source-materials/data/场地指标.csv",
+      "mimeType": "text/csv",
+      "sizeBytes": 97,
+      "sha256": "cb42f853b7959a847ad4fd1c01cacb704539e59ebdb561c25bee40379bb784ff",
+      "importedAt": "2026-09-02T00:10:00Z",
+      "status": "available"
+    }
+  ]
+}

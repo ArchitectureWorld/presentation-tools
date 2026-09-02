@@ -1,0 +1,31 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/outline-document.schema.json",
+  "documentType": "OutlineDocument",
+  "standardVersion": "0.1.0",
+  "outlineDocumentId": "outline_01992a80-0000-7000-8000-000000000103",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "nodes": [
+    {
+      "outlineNodeId": "outline_node_01992a80-0000-7000-8000-000000000110",
+      "parentOutlineNodeId": null,
+      "kind": "chapter",
+      "title": "场地价值与更新重点",
+      "summary": "说明现状数据、核心判断与更新抓手。",
+      "order": 0,
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    }
+  ]
+}

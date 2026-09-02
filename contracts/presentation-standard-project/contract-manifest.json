@@ -1,0 +1,25 @@
+{
+  "standardName": "Presentation Standard Project Directory",
+  "standardVersion": "0.1.0",
+  "schemaDraft": "https://json-schema.org/draft/2020-12/schema",
+  "schemaRoot": "schemas/0.1.0",
+  "schemaSetSha256": "5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc",
+  "packageName": "@architectureworld/presentation-contracts",
+  "packageVersion": "0.1.0",
+  "requiredSchemas": {
+    "ProjectManifest": "schemas/0.1.0/project-manifest.schema.json",
+    "ProjectRulesDocument": "schemas/0.1.0/project-rules-document.schema.json",
+    "OutlineDocument": "schemas/0.1.0/outline-document.schema.json",
+    "PageManifest": "schemas/0.1.0/page-manifest.schema.json",
+    "DraftPageDocument": "schemas/0.1.0/draft-page-document.schema.json",
+    "SourceMaterialManifest": "schemas/0.1.0/source-material-manifest.schema.json",
+    "AssetManifest": "schemas/0.1.0/asset-manifest.schema.json"
+  },
+  "typesEntry": "src/index.d.ts",
+  "idFactoryEntry": "src/ids.mjs#createStableId",
+  "projectFactoryEntry": "src/factory.mjs#createProjectDirectoryPlan",
+  "documentValidatorEntry": "src/ajv-validation.mjs#validateDocumentWithAjv",
+  "projectValidatorEntry": "src/ajv-validation.mjs#validateProjectDirectoryWithAjv",
+  "cliEntry": "bin/presentation-contracts.mjs",
+  "consumerMethod": "Pin the exact npm package version and lockfile integrity, then verify SCHEMASET.sha256 before schema registration. Release artifacts may only mirror the same tarball."
+}

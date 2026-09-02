@@ -1,0 +1,30 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-rules-document.schema.json",
+  "documentType": "ProjectRulesDocument",
+  "standardVersion": "0.1.0",
+  "projectRulesId": "project_rules_01992a80-0000-7000-8000-000000000102",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "audiences": [
+    "项目决策团队"
+  ],
+  "purposes": [
+    "前期方案汇报"
+  ],
+  "language": "zh-CN",
+  "writingRules": [
+    "结论优先",
+    "单页表达一个核心结论"
+  ],
+  "terminology": {
+    "规划净用地": "项目红线内可建设用地面积"
+  },
+  "truthConstraints": [
+    "数据必须能够追溯至项目资料或明确来源"
+  ],
+  "visualIntent": [
+    "默认采用 16:9 画布"
+  ],
+  "prohibitedContent": [
+    "不得虚构项目指标"
+  ]
+}

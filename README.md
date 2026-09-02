@@ -5,20 +5,20 @@ Report Studio `v0.1.0` 当前正式范围是大纲、草案、批注、DSH 原�
 ## 当前部署基线
 
 ```text
-Branch: integration/report-studio-mvp-v0.1.0
+Branch: main
 DSH plugin: @architectureworld/report-studio-dsh@0.1.0
 Tested DSH: 0.1.1-rc.2
 Profile: web
 ```
 
-当前版本必须从上述支线获取；`main` 尚不是本轮交付来源。
+当前正式部署来源为 `main`。
 
 ## DSH 原生安装
 
 ```bash
 git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
-git checkout integration/report-studio-mvp-v0.1.0
+git checkout main
 git pull --ff-only
 corepack enable
 dsh plugin --profile web add ./packages/studio-dsh-plugin
@@ -54,3 +54,16 @@ npm run smoke:dsh
 ## 独立调试模式
 
 `npm start` 仍可用于独立调试；正式使用以 DSH 原生插件为准。
+
+<!-- PRESENTATION_STANDARD_PROJECT_V0_1_0_START -->
+
+## Presentation 标准项目格式 0.1.0
+
+标准项目文件 Contract 位于 [`contracts/presentation-standard-project`](contracts/presentation-standard-project)，供 `pre-design` 等上游 DSH 插件以精确版本创建、填写和验证中立项目目录。该 Contract 不承担 Agent、审批、Revision、同步或调用方恢复职责。
+
+```bash
+npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+npm run verify --prefix contracts/presentation-standard-project
+```
+
+<!-- PRESENTATION_STANDARD_PROJECT_V0_1_0_END -->

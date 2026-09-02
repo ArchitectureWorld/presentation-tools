@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/draft-page-document.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "DraftPageDocument",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/draft-page-document.schema.json"
+    },
+    "documentType": {
+      "const": "DraftPageDocument"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "draftDocumentId": {
+      "$ref": "common.schema.json#/$defs/draftDocumentId"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "pageId": {
+      "$ref": "common.schema.json#/$defs/pageId"
+    },
+    "contentBlocks": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contentBlockId": {
+                "$ref": "common.schema.json#/$defs/contentBlockId"
+              },
+              "type": {
+                "const": "heading"
+              },
+              "role": {
+                "enum": [
+                  "page_title",
+                  "subtitle",
+                  "section_title"
+                ]
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceRefs": {
+                "$ref": "common.schema.json#/$defs/sourceRefs"
+              }
+            },
+            "required": [
+              "contentBlockId",
+              "type",
+              "role",
+              "order",
+              "content"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contentBlockId": {
+                "$ref": "common.schema.json#/$defs/contentBlockId"
+              },
+              "type": {
+                "const": "text"
+              },
+              "role": {
+                "enum": [
+                  "key_message",
+                  "body",
+                  "caption",
+                  "source_note"
+                ]
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceRefs": {
+                "$ref": "common.schema.json#/$defs/sourceRefs"
+              },
+              "contentNature": {
+                "$ref": "common.schema.json#/$defs/contentNature"
+              }
+            },
+            "required": [
+              "contentBlockId",
+              "type",
+              "role",
+              "order",
+              "content"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contentBlockId": {
+                "$ref": "common.schema.json#/$defs/contentBlockId"
+              },
+              "type": {
+                "const": "list"
+              },
+              "role": {
+                "enum": [
+                  "key_message",
+                  "body"
+                ]
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "listStyle": {
+                "enum": [
+                  "ordered",
+                  "unordered"
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "listItemId": {
+                      "$ref": "common.schema.json#/$defs/listItemId"
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sourceRefs": {
+                      "$ref": "common.schema.json#/$defs/sourceRefs"
+                    },
+                    "order": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "contentNature": {
+                      "$ref": "common.schema.json#/$defs/contentNature"
+                    }
+                  },
+                  "required": [
+                    "listItemId",
+                    "content"
+                  ]
+                },
+                "minItems": 1
+              },
+              "sourceRefs": {
+                "$ref": "common.schema.json#/$defs/sourceRefs"
+              }
+            },
+            "required": [
+              "contentBlockId",
+              "type",
+              "role",
+              "order",
+              "listStyle",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contentBlockId": {
+                "$ref": "common.schema.json#/$defs/contentBlockId"
+              },
+              "type": {
+                "const": "metric_group"
+              },
+              "role": {
+                "enum": [
+                  "key_message",
+                  "body"
+                ]
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "metricId": {
+                      "$ref": "common.schema.json#/$defs/metricId"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {
+                      "$ref": "common.schema.json#/$defs/semanticScalar"
+                    },
+                    "unit": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "note": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sourceRefs": {
+                      "$ref": "common.schema.json#/$defs/sourceRefs"
+                    },
+                    "order": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "contentNature": {
+                      "$ref": "common.schema.json#/$defs/contentNature"
+                    }
+                  },
+                  "required": [
+                    "metricId",
+                    "label",
+                    "value",
+                    "unit",
+                    "note"
+                  ]
+                },
+                "minItems": 1
+              },
+              "sourceRefs": {
+                "$ref": "common.schema.json#/$defs/sourceRefs"
+              }
+            },
+            "required": [
+              "contentBlockId",
+              "type",
+              "role",
+              "order",
+              "metrics"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contentBlockId": {
+                "$ref": "common.schema.json#/$defs/contentBlockId"
+              },
+              "type": {
+                "const": "table"
+              },
+              "role": {
+                "const": "body"
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "tableColumnId": {
+                      "$ref": "common.schema.json#/$defs/tableColumnId"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "order": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "tableColumnId",
+                    "label",
+                    "order"
+                  ]
+                },
+                "minItems": 1
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "tableRowId": {
+                      "$ref": "common.schema.json#/$defs/tableRowId"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "cells": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "tableCellId": {
+                            "$ref": "common.schema.json#/$defs/tableCellId"
+                          },
+                          "tableColumnId": {
+                            "$ref": "common.schema.json#/$defs/tableColumnId"
+                          },
+                          "content": {
+                            "$ref": "common.schema.json#/$defs/semanticScalar"
+                          },
+                          "sourceRefs": {
+                            "$ref": "common.schema.json#/$defs/sourceRefs"
+                          },
+                          "contentNature": {
+                            "$ref": "common.schema.json#/$defs/contentNature"
+                          }
+                        },
+                        "required": [
+                          "tableCellId",
+                          "tableColumnId",
+                          "content"
+                        ]
+                      },
+                      "minItems": 1
+                    },
+                    "sourceRefs": {
+                      "$ref": "common.schema.json#/$defs/sourceRefs"
+                    }
+                  },
+                  "required": [
+                    "tableRowId",
+                    "label",
+                    "order",
+                    "cells"
+                  ]
+                },
+                "minItems": 1
+              },
+              "sourceRefs": {
+                "$ref": "common.schema.json#/$defs/sourceRefs"
+              }
+            },
+            "required": [
+              "contentBlockId",
+              "type",
+              "role",
+              "order",
+              "columns",
+              "rows"
+            ]
+          }
+        ]
+      }
+    },
+    "scriptBlocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scriptBlockId": {
+            "$ref": "common.schema.json#/$defs/scriptBlockId"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "estimatedDurationSeconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceRefs": {
+            "$ref": "common.schema.json#/$defs/sourceRefs"
+          },
+          "referencedContentBlockIds": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/contentBlockId"
+            },
+            "uniqueItems": true
+          },
+          "referencedAssetIds": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/assetId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "scriptBlockId",
+          "order",
+          "content",
+          "estimatedDurationSeconds"
+        ]
+      }
+    },
+    "pageAssets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pageAssetId": {
+            "$ref": "common.schema.json#/$defs/pageAssetId"
+          },
+          "assetId": {
+            "$ref": "common.schema.json#/$defs/assetId"
+          },
+          "role": {
+            "enum": [
+              "primary",
+              "supporting",
+              "background",
+              "reference"
+            ]
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "caption": {
+            "type": "string"
+          },
+          "sourceRefs": {
+            "$ref": "common.schema.json#/$defs/sourceRefs"
+          }
+        },
+        "required": [
+          "pageAssetId",
+          "assetId",
+          "role",
+          "order",
+          "caption"
+        ]
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "draftDocumentId",
+    "projectId",
+    "pageId",
+    "contentBlocks",
+    "scriptBlocks",
+    "pageAssets"
+  ]
+}

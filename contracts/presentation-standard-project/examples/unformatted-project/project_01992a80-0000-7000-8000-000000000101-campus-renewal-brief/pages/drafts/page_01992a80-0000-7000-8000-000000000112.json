@@ -1,0 +1,245 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/draft-page-document.schema.json",
+  "documentType": "DraftPageDocument",
+  "standardVersion": "0.1.0",
+  "draftDocumentId": "draft_page_01992a80-0000-7000-8000-000000000122",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "pageId": "page_01992a80-0000-7000-8000-000000000112",
+  "contentBlocks": [
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000132",
+      "type": "heading",
+      "role": "page_title",
+      "order": 0,
+      "content": "指标形成可执行的更新抓手",
+      "sourceRefs": []
+    },
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000138",
+      "type": "text",
+      "role": "body",
+      "order": 1,
+      "content": "将原始指标转化为面积、强度和公共空间三组决策信息，为下一阶段方案比较提供统一依据。",
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    },
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000137",
+      "type": "table",
+      "role": "body",
+      "order": 2,
+      "columns": [
+        {
+          "tableColumnId": "table_column_01992a80-0000-7000-8000-000000000161",
+          "label": "指标",
+          "order": 0
+        },
+        {
+          "tableColumnId": "table_column_01992a80-0000-7000-8000-000000000162",
+          "label": "项目值",
+          "order": 1
+        }
+      ],
+      "rows": [
+        {
+          "tableRowId": "table_row_01992a80-0000-7000-8000-000000000171",
+          "label": "用地",
+          "order": 0,
+          "cells": [
+            {
+              "tableCellId": "table_cell_01992a80-0000-7000-8000-000000000181",
+              "tableColumnId": "table_column_01992a80-0000-7000-8000-000000000161",
+              "content": "规划净用地",
+              "sourceRefs": [
+                {
+                  "provider": "pre-design",
+                  "sourceProjectId": "project_001",
+                  "sourceRevision": 42,
+                  "objectIds": [
+                    "DG05"
+                  ],
+                  "evidenceIds": [
+                    "evidence_031"
+                  ],
+                  "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+                }
+              ],
+              "contentNature": "fact"
+            },
+            {
+              "tableCellId": "table_cell_01992a80-0000-7000-8000-000000000182",
+              "tableColumnId": "table_column_01992a80-0000-7000-8000-000000000162",
+              "content": "12,800 ㎡",
+              "sourceRefs": [
+                {
+                  "provider": "pre-design",
+                  "sourceProjectId": "project_001",
+                  "sourceRevision": 42,
+                  "objectIds": [
+                    "DG05"
+                  ],
+                  "evidenceIds": [
+                    "evidence_031"
+                  ],
+                  "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+                }
+              ],
+              "contentNature": "fact"
+            }
+          ],
+          "sourceRefs": [
+            {
+              "provider": "pre-design",
+              "sourceProjectId": "project_001",
+              "sourceRevision": 42,
+              "objectIds": [
+                "DG05"
+              ],
+              "evidenceIds": [
+                "evidence_031"
+              ],
+              "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+            }
+          ]
+        },
+        {
+          "tableRowId": "table_row_01992a80-0000-7000-8000-000000000172",
+          "label": "建设",
+          "order": 1,
+          "cells": [
+            {
+              "tableCellId": "table_cell_01992a80-0000-7000-8000-000000000183",
+              "tableColumnId": "table_column_01992a80-0000-7000-8000-000000000161",
+              "content": "建筑面积",
+              "sourceRefs": [
+                {
+                  "provider": "pre-design",
+                  "sourceProjectId": "project_001",
+                  "sourceRevision": 42,
+                  "objectIds": [
+                    "DG05"
+                  ],
+                  "evidenceIds": [
+                    "evidence_031"
+                  ],
+                  "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+                }
+              ],
+              "contentNature": "fact"
+            },
+            {
+              "tableCellId": "table_cell_01992a80-0000-7000-8000-000000000184",
+              "tableColumnId": "table_column_01992a80-0000-7000-8000-000000000162",
+              "content": "26,500 ㎡",
+              "sourceRefs": [
+                {
+                  "provider": "pre-design",
+                  "sourceProjectId": "project_001",
+                  "sourceRevision": 42,
+                  "objectIds": [
+                    "DG05"
+                  ],
+                  "evidenceIds": [
+                    "evidence_031"
+                  ],
+                  "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+                }
+              ],
+              "contentNature": "fact"
+            }
+          ],
+          "sourceRefs": [
+            {
+              "provider": "pre-design",
+              "sourceProjectId": "project_001",
+              "sourceRevision": 42,
+              "objectIds": [
+                "DG05"
+              ],
+              "evidenceIds": [
+                "evidence_031"
+              ],
+              "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+            }
+          ]
+        }
+      ],
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    }
+  ],
+  "scriptBlocks": [
+    {
+      "scriptBlockId": "script_block_01992a80-0000-7000-8000-000000000192",
+      "order": 0,
+      "content": "第二页展示从原始资料到正式汇报图表的转换关系，并说明这些指标如何进入方案判断。",
+      "estimatedDurationSeconds": 30,
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ],
+      "referencedContentBlockIds": [
+        "content_block_01992a80-0000-7000-8000-000000000132",
+        "content_block_01992a80-0000-7000-8000-000000000138"
+      ],
+      "referencedAssetIds": []
+    }
+  ],
+  "pageAssets": [
+    {
+      "pageAssetId": "page_asset_01992a80-0000-7000-8000-000000000201",
+      "assetId": "asset_01992a80-0000-7000-8000-000000000221",
+      "role": "primary",
+      "order": 0,
+      "caption": "由原始场地指标派生的正式采用图表",
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    }
+  ]
+}
