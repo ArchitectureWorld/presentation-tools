@@ -54,6 +54,8 @@ async function loadClientBundle() {
   return { exported, React, window, windowListeners, effects }
 }
 
+const plain = value => JSON.parse(JSON.stringify(value))
+
 test('native DSH client registers the Report Studio view and sends prompts through the current session', async () => {
   const { exported, window, windowListeners } = await loadClientBundle()
   assert.deepEqual([...exported.inject], ['slots', 'sessions'])
@@ -120,11 +122,11 @@ test('native DSH client registers the Report Studio view and sends prompts throu
   }
   for (const listener of windowListeners.get('message') ?? []) await listener(event)
 
-  assert.deepEqual(promptCalls, [{
+  assert.deepEqual(plain(promptCalls), [{
     content: [{ type: 'text', text: '请读取当前 Report Studio 项目并处理批注。' }],
     mode: 'queue',
   }])
-  assert.deepEqual(promptResults, [{
+  assert.deepEqual(plain(promptResults), [{
     payload: {
       type: 'report-studio.prompt-result',
       requestId: 'prompt-1',
