@@ -1,23 +1,64 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 
 const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || '@deepseek-ai/dsh@0.1.1-rc.2'
+const DSH_BIN = process.env.REPORT_STUDIO_DSH_BIN?.trim() || ''
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const plugin = join(root, 'packages', 'studio-dsh-plugin')
 
-function run(command, args, options = {}) {
+async function resolveDshCommand() {
+  if (DSH_BIN) {
+    await access(DSH_BIN, constants.X_OK)
+    return { command: DSH_BIN, prefix: [], label: DSH_BIN, packageResolution: false }
+  }
+  return {
+    command: 'npx',
+    prefix: ['--yes', DSH_PACKAGE],
+    label: `npx --yes ${DSH_PACKAGE}`,
+    packageResolution: true,
+  }
+}
+
+function run(command, args, { timeoutMs = 180000, ...options } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options })
     let stdout = ''
     let stderr = ''
-    child.stdout.on('data', chunk => { stdout += chunk })
-    child.stderr.on('data', chunk => { stderr += chunk })
-    child.once('error', reject)
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (settled) return
+      child.kill('SIGTERM')
+      setTimeout(() => child.exitCode === null && child.kill('SIGKILL'), 3000).unref()
+      settled = true
+      reject(new Error(`${command} ${args.join(' ')} timed out after ${timeoutMs}ms\n${stdout}\n${stderr}`))
+    }, timeoutMs)
+    timeout.unref()
+
+    child.stdout.on('data', chunk => {
+      const text = chunk.toString()
+      stdout += text
+      process.stdout.write(text)
+    })
+    child.stderr.on('data', chunk => {
+      const text = chunk.toString()
+      stderr += text
+      process.stderr.write(text)
+    })
+    child.once('error', error => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(error)
+    })
     child.once('exit', code => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
       if (code === 0) resolvePromise({ stdout, stderr })
       else reject(new Error(`${command} ${args.join(' ')} failed (${code})\n${stdout}\n${stderr}`))
     })
@@ -35,7 +76,7 @@ async function freePort() {
   return port
 }
 
-async function waitForHealth(url, child, logs, timeoutMs = 90000) {
+async function waitForHealth(url, child, logs, timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`DSH exited before health check (${child.exitCode})\n${logs()}`)
@@ -50,30 +91,68 @@ async function waitForHealth(url, child, logs, timeoutMs = 90000) {
 
 const home = await mkdtemp(join(tmpdir(), 'report-studio-dsh-home-'))
 const env = { ...process.env, DSH_HOME: home, CI: '1', NO_COLOR: '1' }
+const dsh = await resolveDshCommand()
+const invoke = args => [dsh.command, [...dsh.prefix, ...args]]
 let child
 try {
-  const npxPrefix = ['--yes', '--package', DSH_PACKAGE, 'dsh']
-  const version = await run('npx', [...npxPrefix, '--version'], { cwd: root, env })
-  await run('npx', [...npxPrefix, 'plugin', '--profile', 'web', 'add', plugin], { cwd: root, env })
-  const dumped = await run('npx', [...npxPrefix, '--profile', 'web', '--dump-config'], { cwd: root, env })
-  if (!dumped.stdout.includes('@architectureworld/report-studio-dsh')) throw new Error(`DSH composed config does not contain Report Studio plugin.\n${dumped.stdout}`)
+  console.log(`DSH smoke 1/5: resolve CLI (${dsh.label})`)
+  const [versionCommand, versionArgs] = invoke(['--version'])
+  const version = await run(versionCommand, versionArgs, {
+    cwd: root,
+    env,
+    timeoutMs: dsh.packageResolution ? 600000 : 30000,
+  })
+
+  console.log('DSH smoke 2/5: install Report Studio bundle into an isolated web profile')
+  const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', plugin])
+  await run(addCommand, addArgs, { cwd: root, env, timeoutMs: 600000 })
+
+  console.log('DSH smoke 3/5: verify composed profile')
+  const [dumpCommand, dumpArgs] = invoke(['--profile', 'web', '--dump-config'])
+  const dumped = await run(dumpCommand, dumpArgs, { cwd: root, env, timeoutMs: 180000 })
+  if (!dumped.stdout.includes('@architectureworld/report-studio-dsh')) {
+    throw new Error(`DSH composed config does not contain Report Studio plugin.\n${dumped.stdout}`)
+  }
+
   const port = await freePort()
   let stdout = ''
   let stderr = ''
-  child = spawn('npx', [...npxPrefix, '--profile', 'web', '--port', String(port), '--no-open'], {
+  const [startCommand, startArgs] = invoke(['--profile', 'web', '--port', String(port), '--no-open'])
+  console.log(`DSH smoke 4/5: start web profile on 127.0.0.1:${port}`)
+  child = spawn(startCommand, startArgs, {
     cwd: root,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  child.stdout.on('data', chunk => { stdout += chunk })
-  child.stderr.on('data', chunk => { stderr += chunk })
+  child.stdout.on('data', chunk => {
+    const text = chunk.toString()
+    stdout += text
+    process.stdout.write(text)
+  })
+  child.stderr.on('data', chunk => {
+    const text = chunk.toString()
+    stderr += text
+    process.stderr.write(text)
+  })
   const logs = () => `${stdout}\n${stderr}`
   const healthUrl = `http://127.0.0.1:${port}/report-studio/api/health?sessionId=smoke-session`
   const health = await waitForHealth(healthUrl, child, logs)
-  if (health.agentMode !== 'dsh-native' || health.agentConfigured !== true) throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
-  const page = await fetch(`http://127.0.0.1:${port}/report-studio/?sessionId=smoke-session`).then(response => response.text())
-  const nativeRuntime = await fetch(`http://127.0.0.1:${port}/report-studio/dsh-native-runtime.js`).then(response => response.text())
-  if (!page.includes('Report Studio') || !nativeRuntime.includes('report-studio.prompt')) throw new Error('DSH route did not serve the production Report Studio UI.')
+  if (health.agentMode !== 'dsh-native' || health.agentConfigured !== true) {
+    throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
+  }
+
+  console.log('DSH smoke 5/5: verify production UI and native browser bridge')
+  const pageResponse = await fetch(`http://127.0.0.1:${port}/report-studio/?sessionId=smoke-session`)
+  const runtimeResponse = await fetch(`http://127.0.0.1:${port}/report-studio/dsh-native-runtime.js`)
+  if (!pageResponse.ok || !runtimeResponse.ok) {
+    throw new Error(`DSH route failed: page=${pageResponse.status}, runtime=${runtimeResponse.status}`)
+  }
+  const page = await pageResponse.text()
+  const nativeRuntime = await runtimeResponse.text()
+  if (!page.includes('Report Studio') || !nativeRuntime.includes('report-studio.prompt')) {
+    throw new Error('DSH route did not serve the production Report Studio UI.')
+  }
+
   console.log('Report Studio native DSH runtime smoke PASS')
   console.log(`dsh=${version.stdout.trim()}`)
   console.log('profile=web')
