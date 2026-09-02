@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createStudioDshRuntime } from './runtime.js'
 
 export const name = 'report-studio-dsh'
@@ -61,54 +60,61 @@ function outputJson(value) {
 
 function toolOutput() {
   return {
-    schema: { type: 'json' },
+    schema: {},
     render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
   }
 }
 
 function registerTools(ctx, runtime) {
-  ctx.tools.register(defineTool({
+  ctx.tools.register({
     name: 'studio_get_context',
     description: '读取当前 DSH Session 绑定的 Report Studio v0.1.0 大纲、草案、批注轮次、Submission、Proposal 与 Revision 上下文。修改前必须先调用。',
-    parameters: {},
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
     output: toolOutput(),
     async execute(_args, exec) {
       return outputJson(await runtime.getContext(sessionIdOf(exec)))
     },
-  }))
+  })
 
-  ctx.tools.register(defineTool({
+  ctx.tools.register({
     name: 'studio_apply_commands',
     description: '根据一个不可变 ReviewSubmission 提交结构化修改命令并创建 Proposal。该工具不会直接覆盖正式内容，仍需用户在 Report Studio 中确认。',
     parameters: {
-      submissionId: {
-        type: 'string',
-        required: true,
-        description: 'ReviewSubmission 提示中提供的稳定 ID。',
-      },
-      message: {
-        type: 'string',
-        required: true,
-        description: '面向用户的修改说明。',
-      },
-      commands: {
-        type: 'array',
-        required: true,
-        description: 'Report Studio 受控结构化命令数组。',
-        items: {
-          type: 'object',
-          additionalProperties: true,
-          properties: {
-            type: { type: 'string', required: true },
+      type: 'object',
+      properties: {
+        submissionId: {
+          type: 'string',
+          description: 'ReviewSubmission 提示中提供的稳定 ID。',
+        },
+        message: {
+          type: 'string',
+          description: '面向用户的修改说明。',
+        },
+        commands: {
+          type: 'array',
+          description: 'Report Studio 受控结构化命令数组。',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string' },
+            },
+            required: ['type'],
+            additionalProperties: true,
           },
         },
       },
+      required: ['submissionId', 'message', 'commands'],
+      additionalProperties: false,
     },
     output: toolOutput(),
     async execute(args, exec) {
       return outputJson(await runtime.applyCommands(sessionIdOf(exec), args))
     },
-  }))
+  })
 }
 
 async function serveStatic(request, response, url) {
