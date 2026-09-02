@@ -6,6 +6,7 @@ on:
       - 'apps/studio-local/**'
       - 'packages/studio-core/**'
       - 'scripts/verify-v0.1.0.mjs'
+      - 'scripts/verify-responsive-ui.mjs'
       - 'package.json'
       - '.github/workflows/report-studio-v0.1.0-ci.yml'
   pull_request:
@@ -13,6 +14,7 @@ on:
       - 'apps/studio-local/**'
       - 'packages/studio-core/**'
       - 'scripts/verify-v0.1.0.mjs'
+      - 'scripts/verify-responsive-ui.mjs'
       - 'package.json'
       - '.github/workflows/report-studio-v0.1.0-ci.yml'
 
@@ -22,6 +24,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,5 +32,9 @@ jobs:
           node-version: '22'
       - name: Run automated tests
         run: npm test
-      - name: Run v0.1.0 end-to-end verification
+      - name: Run domain and persistence verification
         run: npm run verify
+      - name: Run responsive Chromium verification
+        env:
+          CHROMIUM_PATH: google-chrome
+        run: npm run verify:ui
