@@ -1,0 +1,55 @@
+name: Materialize Report Studio architecture
+
+on:
+  push:
+    branches:
+      - architecture/report-studio-mvp-baseline-v1.0.0
+    paths:
+      - 'docs/architecture/.source/**'
+      - 'scripts/materialize-report-studio-architecture.mjs'
+      - '.github/workflows/materialize-report-studio-architecture.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-report-studio-architecture-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the architecture branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Materialize and verify the architecture mother file
+        run: node scripts/materialize-report-studio-architecture.mjs
+
+      - name: Commit the verified readable files
+        shell: bash
+        run: |
+          if git diff --quiet -- \
+            docs/architecture/report-studio-architecture.md \
+            docs/review/report-studio-architecture-materialization.txt; then
+            echo 'Architecture files already match the verified source.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            docs/architecture/report-studio-architecture.md \
+            docs/review/report-studio-architecture-materialization.txt
+          git commit -m 'docs: materialize Report Studio architecture baseline v1.0.0'
+          git push origin HEAD:${{ github.ref_name }}
