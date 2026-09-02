@@ -5,16 +5,24 @@ on:
     paths:
       - 'apps/studio-local/**'
       - 'packages/studio-core/**'
+      - 'packages/studio-dsh-plugin/**'
       - 'scripts/verify-v0.1.0.mjs'
       - 'scripts/verify-responsive-ui.mjs'
+      - 'scripts/verify-dsh-plugin.mjs'
+      - 'scripts/smoke-dsh-native.mjs'
+      - 'DSH_INSTALL.md'
       - 'package.json'
       - '.github/workflows/report-studio-v0.1.0-ci.yml'
   pull_request:
     paths:
       - 'apps/studio-local/**'
       - 'packages/studio-core/**'
+      - 'packages/studio-dsh-plugin/**'
       - 'scripts/verify-v0.1.0.mjs'
       - 'scripts/verify-responsive-ui.mjs'
+      - 'scripts/verify-dsh-plugin.mjs'
+      - 'scripts/smoke-dsh-native.mjs'
+      - 'DSH_INSTALL.md'
       - 'package.json'
       - '.github/workflows/report-studio-v0.1.0-ci.yml'
 
@@ -38,3 +46,39 @@ jobs:
         env:
           CHROMIUM_PATH: google-chrome
         run: npm run verify:ui
+      - name: Verify native DSH plugin contract
+        run: npm run verify:dsh
+
+  dsh-smoke:
+    if: github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Enable pnpm for DSH profile plugin management
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+          pnpm --version
+      - name: Install pinned DSH CLI with visible output
+        shell: bash
+        run: |
+          set -euo pipefail
+          DSH_PREFIX="$RUNNER_TEMP/report-studio-dsh-cli"
+          mkdir -p "$DSH_PREFIX"
+          timeout 900s npm install \
+            --prefix "$DSH_PREFIX" \
+            --no-audit \
+            --no-fund \
+            --loglevel=notice \
+            @deepseek-ai/dsh@0.1.1-rc.2
+          DSH_BIN="$DSH_PREFIX/node_modules/.bin/dsh"
+          test -x "$DSH_BIN"
+          "$DSH_BIN" --version
+          echo "REPORT_STUDIO_DSH_BIN=$DSH_BIN" >> "$GITHUB_ENV"
+      - name: Install plugin, boot DSH Web and verify native Report Studio route
+        run: npm run smoke:dsh
