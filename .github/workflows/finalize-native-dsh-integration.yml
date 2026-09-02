@@ -112,3 +112,5 @@ jobs:
           test -n "$(git diff --cached --name-only)"
           git commit -m 'feat: add native DSH Report Studio integration'
           git push origin HEAD:${{ github.ref_name }}
+
+# retry: 2
