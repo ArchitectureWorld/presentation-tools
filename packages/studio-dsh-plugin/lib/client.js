@@ -90,18 +90,23 @@ window.__ModuleLoader__.load({
 
     function apply(ctx) {
       const sessions = ctx.get('sessions')
+      if (!sessions) throw new Error('report-studio-dsh: sessions service unavailable')
+
       ctx.slots.inject('conversation.view', () => ctx.slots.register({
         name: 'conversation.view',
         id: 'report-studio',
         order: 50,
         label: 'Report Studio',
-      }, props => React.createElement(ReportStudioView, { sessionId: props.sessionId, sessions })))
+        inject: () => ({ sessions }),
+      }, ReportStudioView))
+
       ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
         name: 'conversation.session.header.actions',
         id: 'report-studio',
         order: 70,
         label: 'Report Studio',
-      }, props => React.createElement(HeaderAction, { sessionId: props.sessionId, sessions })))
+        inject: () => ({ sessions }),
+      }, HeaderAction))
     }
 
     module.exports = { inject, apply }
