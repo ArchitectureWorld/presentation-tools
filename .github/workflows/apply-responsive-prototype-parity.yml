@@ -1,0 +1,104 @@
+name: Apply responsive prototype-parity UI
+
+on:
+  push:
+    branches:
+      - integration/report-studio-mvp-v0.1.0
+    paths:
+      - '.github/workflows/apply-responsive-prototype-parity.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-responsive-prototype-parity-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Reassemble verified responsive UI payload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shas=(
+            ea32bbf77ce8ced8e78316bdd7ce0f99ad4a9659
+            72071ac396709ef0b79bc3514153ae9cce6b1851
+            e189e374dd8e830c576127849216e5de62d6c5f2
+            d3862e03d5f50494de7daa9929c8a0e00014c7dc
+            d34d86012d856c667311a292273f4882726767b7
+            e1904221bc48e627cdf296ebdc9132b8341e2dca
+            62af80cc3f62866166a8660153614e4a47ab1e40
+            073b8038f1da7e471a419c9bc697771d3df858da
+            223b5893945bde81d1fdd2b0b8d629466bf02917
+            62fb84fa0077d44f9de9abff1a554f1683f8b646
+            bb1436ce6faf785b06941fb537675e6e355e0e80
+            8f1a9cfbb8e7392b9b9bd6d7316b096adcdc8dad
+            fc6521c2b9afb6834f671a3b4494da9a2197fe83
+            b7a81f70087aaccde9274ef0b5934533893d8ed9
+          )
+
+          : > /tmp/report-studio-responsive-ui.b64
+          for sha in "${shas[@]}"; do
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/ArchitectureWorld/presentation-tools/git/blobs/${sha}" \
+              | jq -r '.content' \
+              | tr -d '\n' \
+              | base64 --decode \
+              >> /tmp/report-studio-responsive-ui.b64
+          done
+
+          base64 --decode /tmp/report-studio-responsive-ui.b64 > /tmp/report-studio-responsive-ui.tar.gz
+          echo 'ffc9464ae7dcfe0418d1f5ab6c6d0f18d98786ddf803b64860f92f212a58989c  /tmp/report-studio-responsive-ui.tar.gz' | sha256sum --check -
+          tar -tzf /tmp/report-studio-responsive-ui.tar.gz
+          tar -xzf /tmp/report-studio-responsive-ui.tar.gz -C "$GITHUB_WORKSPACE"
+
+      - name: Run complete v0.1.0 verification
+        env:
+          REPORT_STUDIO_UI_SCREENSHOT_DIR: /tmp/report-studio-responsive-ui-screenshots
+        run: npm run verify:all
+
+      - name: Commit responsive prototype-parity implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add \
+            README.md \
+            package.json \
+            apps/studio-local/public/index.html \
+            apps/studio-local/public/styles.css \
+            apps/studio-local/public/app.js \
+            apps/studio-local/agent-fab.test.mjs \
+            apps/studio-local/responsive-ui.test.mjs \
+            apps/studio-local/ui.contract.test.mjs \
+            scripts/verify-responsive-ui.mjs \
+            docs/deployment/report-studio-v0.1.0-local-deployment.md \
+            docs/handoff/2026-09-02-report-studio-v0.1.0-runnable-handoff.md \
+            docs/superpowers/plans/2026-09-02-report-studio-responsive-prototype-parity.md \
+            .github/workflows/report-studio-v0.1.0-ci.yml
+          git rm .github/workflows/apply-responsive-prototype-parity.yml
+          git diff --cached --check
+          git status --short
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'feat: restore responsive prototype-parity UI'
+          git push origin HEAD:${{ github.ref_name }}
