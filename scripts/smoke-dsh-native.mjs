@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 
@@ -14,7 +14,35 @@ const plugin = join(root, 'packages', 'studio-dsh-plugin')
 async function resolveDshCommand() {
   if (DSH_BIN) {
     await access(DSH_BIN, constants.X_OK)
+    if (process.platform === 'win32' && /\.(?:cmd|ps1|bat)$/i.test(DSH_BIN)) {
+      const entry = join(dirname(DSH_BIN), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+      await access(entry, constants.R_OK)
+      return {
+        command: process.execPath,
+        prefix: [entry],
+        label: `${process.execPath} ${entry}`,
+        packageResolution: false,
+      }
+    }
     return { command: DSH_BIN, prefix: [], label: DSH_BIN, packageResolution: false }
+  }
+  if (process.platform === 'win32') {
+    const prefixes = [process.env.npm_config_prefix, process.env.APPDATA && join(process.env.APPDATA, 'npm')]
+      .map(value => value?.trim())
+      .filter(Boolean)
+    for (const prefix of prefixes) {
+      const entry = join(prefix, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+      try {
+        await access(entry, constants.R_OK)
+        return {
+          command: process.execPath,
+          prefix: [entry],
+          label: `${process.execPath} ${entry}`,
+          packageResolution: false,
+        }
+      } catch {}
+    }
+    throw new Error('Windows 未找到全局 DSH，请先安装 @deepseek-ai/dsh@0.1.1-rc.2')
   }
   return {
     command: 'npx',
