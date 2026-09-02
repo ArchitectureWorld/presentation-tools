@@ -69,6 +69,7 @@ jobs:
           echo 'ffc9464ae7dcfe0418d1f5ab6c6d0f18d98786ddf803b64860f92f212a58989c  /tmp/report-studio-responsive-ui.tar.gz' | sha256sum --check -
           tar -tzf /tmp/report-studio-responsive-ui.tar.gz
           tar -xzf /tmp/report-studio-responsive-ui.tar.gz -C "$GITHUB_WORKSPACE"
+          git checkout HEAD -- .github/workflows/report-studio-v0.1.0-ci.yml
 
       - name: Prefer installed Google Chrome on GitHub runner
         shell: bash
@@ -84,14 +85,6 @@ jobs:
           if script.count(old_candidates) != 1:
               raise SystemExit(f'unexpected browser candidate declaration count: {script.count(old_candidates)}')
           script_path.write_text(script.replace(old_candidates, new_candidates, 1), encoding='utf-8')
-
-          ci_path = Path('.github/workflows/report-studio-v0.1.0-ci.yml')
-          ci = ci_path.read_text(encoding='utf-8')
-          old_step = "      - name: Run responsive Chromium verification\n        run: npm run verify:ui\n"
-          new_step = "      - name: Run responsive Chromium verification\n        env:\n          CHROMIUM_PATH: google-chrome\n        run: npm run verify:ui\n"
-          if ci.count(old_step) != 1:
-              raise SystemExit(f'unexpected responsive CI step count: {ci.count(old_step)}')
-          ci_path.write_text(ci.replace(old_step, new_step, 1), encoding='utf-8')
           PY
           google-chrome --version
 
@@ -120,8 +113,7 @@ jobs:
             scripts/verify-responsive-ui.mjs \
             docs/deployment/report-studio-v0.1.0-local-deployment.md \
             docs/handoff/2026-09-02-report-studio-v0.1.0-runnable-handoff.md \
-            docs/superpowers/plans/2026-09-02-report-studio-responsive-prototype-parity.md \
-            .github/workflows/report-studio-v0.1.0-ci.yml
+            docs/superpowers/plans/2026-09-02-report-studio-responsive-prototype-parity.md
           git rm .github/workflows/apply-responsive-prototype-parity.yml
           git diff --cached --check
           git status --short
