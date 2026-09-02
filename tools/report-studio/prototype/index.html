@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>汇报制作系统｜交互原型</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="project-brand">
+        <div class="project-glyph" aria-hidden="true">研</div>
+        <div class="project-copy">
+          <strong id="project-title">智慧园区建设可行性研究报告</strong>
+          <span>汇报制作项目 · 单人系统</span>
+        </div>
+      </div>
+
+      <nav class="stage-nav" aria-label="制作阶段">
+        <button class="stage-tab" data-stage="outline" type="button">大纲阶段</button>
+        <button class="stage-tab" data-stage="draft" type="button">草案阶段</button>
+        <button class="stage-tab" data-stage="layout" type="button">排版阶段</button>
+      </nav>
+
+      <div class="top-actions">
+        <span id="save-status" class="save-status">已保存</span>
+        <button id="export-state" class="icon-button" type="button" title="导出原型状态">⇩</button>
+        <button id="reset-demo" class="icon-button" type="button" title="重置演示数据">↺</button>
+        <button class="icon-button" type="button" title="更多">•••</button>
+      </div>
+    </header>
+
+    <nav id="page-strip" class="page-strip" aria-label="汇报页面"></nav>
+
+    <main class="workspace-shell">
+      <section id="stage-workspace" class="stage-workspace" aria-live="polite"></section>
+
+      <aside class="comment-panel" aria-label="批注">
+        <header class="comment-panel-header">
+          <div>
+            <div class="comment-title-row">
+              <h2 id="comment-scope-title">批注</h2>
+              <span id="comment-count" class="count-badge">0</span>
+            </div>
+            <p id="comment-scope-hint">当前作用域</p>
+          </div>
+        </header>
+
+        <div class="comment-filter" role="tablist" aria-label="批注状态筛选">
+          <button class="filter-tab active" data-filter="all" type="button">全部</button>
+          <button class="filter-tab" data-filter="unfinished" type="button">未完成</button>
+          <button class="filter-tab" data-filter="completed" type="button">已完成</button>
+        </div>
+
+        <div class="comment-scroll-region" data-comment-scroll-region>
+          <div id="comment-list" class="comment-list" role="region" aria-label="批注批次列表，可上下滚动" tabindex="0"></div>
+        </div>
+
+        <footer class="comment-composer">
+          <div class="composer-heading">
+            <strong id="composer-title">单条批注（加入本轮）</strong>
+            <span class="composer-heading-actions">
+              <button id="clear-composer-round" class="text-button" type="button" hidden>回到本轮</button>
+              <button id="clear-target" class="text-button" type="button">清除定位</button>
+            </span>
+          </div>
+          <div id="selected-target" class="selected-target">未选择对象，将批注当前作用域</div>
+          <textarea id="comment-input" rows="3" maxlength="500" placeholder="在这里输入一条批注…"></textarea>
+          <div class="composer-actions">
+            <div class="composer-tools" aria-label="批注附件工具">
+              <button type="button" title="关联当前对象">⌁</button>
+              <button type="button" title="添加截图（原型占位）">▣</button>
+            </div>
+            <button id="add-comment" class="secondary-button" type="button">＋ 添加批注</button>
+          </div>
+        </footer>
+      </aside>
+    </main>
+  </div>
+
+  <button id="selection-popover" class="selection-popover" type="button" hidden>批注选中文字</button>
+  <input id="asset-upload" type="file" accept="image/*,video/*" hidden>
+
+  <div id="asset-modal" class="modal" hidden>
+    <button class="modal-backdrop" data-close-modal type="button" aria-label="关闭预览"></button>
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="asset-modal-title">
+      <header>
+        <div>
+          <small id="asset-modal-meta"></small>
+          <h2 id="asset-modal-title">素材预览</h2>
+        </div>
+        <button data-close-modal class="icon-button" type="button">×</button>
+      </header>
+      <div id="asset-modal-content" class="asset-modal-content"></div>
+    </section>
+  </div>
+
+  <div id="payload-modal" class="modal" hidden>
+    <button class="modal-backdrop" data-close-payload type="button" aria-label="关闭结构化提交包"></button>
+    <section class="modal-card payload-card" role="dialog" aria-modal="true" aria-labelledby="payload-title">
+      <header>
+        <div>
+          <small>原型调试视图</small>
+          <h2 id="payload-title">结构化提交包</h2>
+        </div>
+        <button data-close-payload class="icon-button" type="button">×</button>
+      </header>
+      <pre id="payload-content"></pre>
+    </section>
+  </div>
+
+  <button id="agent-fab" class="agent-fab" type="button" aria-label="打开 Agent 聊天窗口" title="打开 Agent">
+    <span class="agent-orb-image" aria-hidden="true"></span>
+  </button>
+
+  <div id="agent-modal" class="modal agent-modal" hidden>
+    <button class="modal-backdrop" data-close-agent-modal type="button" aria-label="关闭 Agent 对话"></button>
+    <section class="modal-card agent-chat-card" role="dialog" aria-modal="true" aria-labelledby="agent-chat-title">
+      <header class="agent-chat-header">
+        <div class="agent-chat-title-group">
+          <div class="agent-chat-glyph" aria-hidden="true"><span class="agent-orb-image" aria-hidden="true"></span></div>
+          <div>
+            <small>悬浮助手</small>
+            <h2 id="agent-chat-title">Agent</h2>
+          </div>
+        </div>
+        <div class="agent-chat-actions">
+          <button id="agent-new-chat" class="icon-button" type="button" title="新建对话">＋</button>
+          <button class="icon-button" data-close-agent-modal type="button" title="关闭">×</button>
+        </div>
+      </header>
+      <div class="agent-chat-context">
+        <span id="agent-context-page" class="context-chip">当前页</span>
+        <span id="agent-context-stage" class="context-chip">当前阶段</span>
+      </div>
+      <div id="agent-chat-list" class="agent-chat-list" role="log" aria-live="polite"></div>
+      <footer class="agent-chat-composer">
+        <button id="agent-attach" class="icon-button" type="button" title="添加附件（原型占位）">⌁</button>
+        <textarea id="agent-chat-input" rows="2" maxlength="1200" placeholder="请输入您的问题或需求…"></textarea>
+        <button id="agent-send" class="primary-button agent-send-button" type="button">发送</button>
+      </footer>
+      <p class="agent-chat-hint">Agent 为原型演示助手，回复内容为模拟结果。</p>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="../src/studio-model.js"></script>
+  <script src="../src/mock-studio-adapter.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

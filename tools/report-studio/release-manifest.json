@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "product": "report-studio-interaction-prototype",
+  "displayName": "Report Studio 三阶段交互原型",
+  "version": "0.8.1",
+  "releaseDate": "2026-09-02",
+  "status": "runnable-interaction-prototype",
+  "runtime": {
+    "node": ">=20",
+    "browserVerification": "Chromium DevTools Protocol"
+  },
+  "artifacts": [
+    {
+      "path": "dist/report-studio-prototype-v0.8.1.html",
+      "mediaType": "text/html",
+      "sizeBytes": 212919,
+      "sha256": "94e8b74c4582274e4ff5238c5f8385961b345564a4214b7b9fe2563f950dc226",
+      "purpose": "Self-contained runnable interaction prototype"
+    }
+  ],
+  "verification": {
+    "automatedTests": {
+      "passed": 57,
+      "failed": 0
+    },
+    "build": "passed",
+    "browserInteractionVerification": "passed",
+    "previewSizeConstraint": "passed"
+  },
+  "authoritativeVersionSources": [
+    "VERSION",
+    "package.json#version",
+    "release-manifest.json#version",
+    "scripts/build-single-file.js#report-studio-build"
+  ]
+}

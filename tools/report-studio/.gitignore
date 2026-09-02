@@ -1,0 +1,6 @@
+node_modules/
+report-studio-prototype.html
+screenshots/*.png
+artifacts/*.zip
+.DS_Store
+*.log

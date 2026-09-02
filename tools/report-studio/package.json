@@ -1,0 +1,15 @@
+{
+  "name": "report-studio-interaction-prototype",
+  "version": "0.8.1",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build": "node scripts/build-single-file.js",
+    "verify:release": "node scripts/verify-release-metadata.js",
+    "verify:browser": "node scripts/verify-browser.js"
+  },
+  "description": "Runnable interaction prototype for a three-stage presentation production workspace",
+  "engines": {
+    "node": ">=20"
+  }
+}
