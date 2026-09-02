@@ -212,9 +212,10 @@ async function main() {
     await cdp.send('Log.enable');
 
     const publicDir = new URL('../apps/studio-local/public/', import.meta.url);
-    const [htmlSource, cssSource, appSource, seededState, seededHealth] = await Promise.all([
+    const [htmlSource, cssSource, nativeSource, appSource, seededState, seededHealth] = await Promise.all([
       readFile(new URL('index.html', publicDir), 'utf8'),
       readFile(new URL('styles.css', publicDir), 'utf8'),
+      readFile(new URL('dsh-native-runtime.js', publicDir), 'utf8'),
       readFile(new URL('app.js', publicDir), 'utf8'),
       fetch(`${baseUrl}/api/state`).then(response => response.json()),
       fetch(`${baseUrl}/api/health`).then(response => response.json()),
@@ -241,9 +242,11 @@ async function main() {
           };
         })();
       <\/script>`;
+    const inlineScript = source => source.replaceAll('</script>', '<\/script>');
     const inlineDocument = htmlSource
-      .replace('<link rel="stylesheet" href="/styles.css">', `<style>${cssSource}</style>`)
-      .replace('<script type="module" src="/app.js"></script>', `${fetchStub}<script type="module">${appSource.replaceAll('</script>', '<\/script>')}<\/script>`);
+      .replace(/<link rel="stylesheet" href="(?:\.\/|\/)styles\.css">/, `<style>${cssSource}</style>`)
+      .replace(/<script src="(?:\.\/|\/)dsh-native-runtime\.js"><\/script>/, `<script>${inlineScript(nativeSource)}<\/script>`)
+      .replace(/<script type="module" src="(?:\.\/|\/)app\.js"><\/script>/, `${fetchStub}<script type="module">${inlineScript(appSource)}<\/script>`);
     const frameTree = await cdp.send('Page.getFrameTree');
     await cdp.send('Page.setDocumentContent', {
       frameId: frameTree.frameTree.frame.id,
