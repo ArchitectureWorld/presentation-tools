@@ -5,6 +5,7 @@ const root = new URL('./public/', import.meta.url);
 
 test('UI exposes v0.1.0 outline draft workflow and defers layout', async () => {
   const html = await readFile(new URL('index.html', root), 'utf8');
+  assert.match(html, /<link rel="icon" href="data:,">/);
   assert.match(html, /Report Studio/); assert.match(html, /v0\.1\.0/); assert.match(html, /data-stage="outline"/); assert.match(html, /data-stage="draft"/); assert.match(html, /data-stage="layout"/); assert.match(html, /v0\.2\.0/); assert.match(html, /annotation-panel/); assert.match(html, /agent-fab/);
 });
 
