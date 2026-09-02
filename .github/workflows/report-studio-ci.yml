@@ -1,0 +1,44 @@
+name: Report Studio CI
+
+on:
+  push:
+    paths:
+      - 'tools/report-studio/**'
+      - '.github/workflows/report-studio-ci.yml'
+  pull_request:
+    paths:
+      - 'tools/report-studio/**'
+      - '.github/workflows/report-studio-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/report-studio
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Build self-contained prototype
+        run: npm run build
+
+      - name: Compare build with versioned release artifact
+        run: |
+          RELEASE_HTML=$(node -p "require('./release-manifest.json').artifacts.find(item => item.mediaType === 'text/html').path")
+          cmp --silent report-studio-prototype.html "$RELEASE_HTML"
+
+      - name: Verify release metadata and checksums
+        run: npm run verify:release
