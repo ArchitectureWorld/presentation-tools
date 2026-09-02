@@ -51,6 +51,16 @@ jobs:
           PY
           python .tmp-materialize-native-dsh.py
           rm .tmp-materialize-native-dsh.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/verify-dsh-plugin.mjs')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '"\'/report-studio/?sessionId=\'"',
+              '"/report-studio/?sessionId=${encodeURIComponent(sessionId)}"',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
 
       - name: Run core verification
         run: |
@@ -113,4 +123,4 @@ jobs:
           git commit -m 'feat: add native DSH Report Studio integration'
           git push origin HEAD:${{ github.ref_name }}
 
-# retry: 2
+# retry: 3
