@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node apps/studio-local/server.mjs",
     "dev": "node --watch apps/studio-local/server.mjs",
     "test": "node --test packages/studio-core/*.test.mjs apps/studio-local/*.test.mjs",
-    "verify": "node scripts/verify-v0.1.0.mjs"
+    "verify": "node scripts/verify-v0.1.0.mjs",
+    "verify:ui": "node scripts/verify-responsive-ui.mjs",
+    "verify:all": "npm test && npm run verify && npm run verify:ui"
   }
 }

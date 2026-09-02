@@ -21,14 +21,20 @@ async function loadBrowserApp() {
   const elements = new Map([
     ['#toast', element({ hidden: true })],
     ['#project-title', element()],
+    ['#save-status', element()],
+    ['#page-strip', element({ hidden: true })],
     ['#revision-number', element()],
     ['#outline-stage', element()],
     ['#draft-stage', element()],
     ['#scope-label', element()],
     ['#annotation-count', element()],
     ['#annotation-target', element()],
+    ['#composer-title', element()],
+    ['#clear-composer-round', element({ hidden: true })],
     ['#review-history', element()],
     ['#agent-status', element()],
+    ['#agent-context-page', element()],
+    ['#agent-context-stage', element()],
     ['#agent-feed', element()],
     ['#agent-modal', element({ hidden: true })],
     ['#annotation-input', element()],
@@ -60,8 +66,16 @@ async function loadBrowserApp() {
     },
   };
 
+  const window = {
+    setTimeout() {},
+    clearTimeout() {},
+    requestAnimationFrame(callback) { callback(); },
+    confirm() { return true; },
+  };
+
   const context = {
     document,
+    window,
     fetch: async path => ({
       ok: true,
       async json() {
@@ -70,8 +84,9 @@ async function loadBrowserApp() {
           : structuredClone(initialState);
       },
     }),
-    setTimeout() {},
-    confirm() { return true; },
+    setTimeout: window.setTimeout,
+    clearTimeout: window.clearTimeout,
+    confirm: window.confirm,
     FileReader: class {},
     console,
     structuredClone,
