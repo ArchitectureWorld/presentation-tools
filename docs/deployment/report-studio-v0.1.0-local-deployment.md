@@ -1,493 +1,462 @@
 # Report Studio v0.1.0 本地安装与部署说明
 
-## 1. 文件用途
+## 1. 当前可部署状态
 
-本文件面向本地开发 Agent、开发人员和验收人员，目标是：**拿到仓库后，不需要重新询问项目背景，即可完成环境检查、依赖安装、本地启动、DSH 接入验证、测试和故障定位。**
-
-当前版本统一为：
+`v0.1.0` 已提供可直接运行的本地程序，当前生产范围为：
 
 ```text
-Report Studio v0.1.0
+大纲
+草案
+本页素材（基础图片）
+批注自动保存
+ReviewRound / 多次 ReviewSubmission
+Revision
+本地持久化与重启恢复
+Proposal 确认应用
+可选外部 DSH Bridge
 ```
 
-当前第一阶段目标是：**优先完成大纲 + 草案阶段，使其可以直接投入实际使用。排版阶段进入 v0.2.0。**
+排版阶段属于 `v0.2.0`，当前 UI 只保留禁用入口。
 
-当前通用平台不依赖 `pre-design`。
+当前程序**不依赖 pre-design，也不需要 pnpm/npm install**。运行时零第三方依赖，仅要求 Node.js 22+。
 
 ---
 
-## 2. v0.1.0 本地可用目标
-
-本地部署成功后，至少应能完成：
+## 2. 环境要求
 
 ```text
-打开 Report Studio
-→ 新建/打开项目
-→ 编辑大纲
-→ 生成并切换草案页面
-→ 编辑 heading / text / list / 讲解稿
-→ 管理本页素材引用
-→ 添加批注并自动保存
-→ 同一 ReviewRound 多次“提给Agent”
-→ DSH Agent 返回 Proposal
-→ 用户确认应用
-→ 形成 Revision
-→ 关闭并重新启动后恢复项目、草案、批注和历史 Submission
+Git      >= 2.40
+Node.js  >= 22
+浏览器   Chrome / Edge / Safari 现代版本
 ```
 
-v0.1.0 **不以排版完成为本地部署成功条件**。排版入口可以保留，但正式排版能力属于 v0.2.0。
+检查：
+
+```bash
+git --version
+node --version
+npm --version
+```
+
+`node --version` 必须为 `v22` 或更高。
 
 ---
 
-## 3. 支持环境
+## 3. 获取代码
 
-### 3.1 必需工具
+当前开发分支：
 
-建议开发环境：
-
-```text
-Git        >= 2.40
-Node.js    22.x LTS
-pnpm       10+（workspace 建立后以 packageManager 字段为准）
-Chromium / Chrome（用于浏览器 E2E）
+```bash
+git clone https://github.com/ArchitectureWorld/presentation-tools.git
+cd presentation-tools
+git checkout integration/report-studio-mvp-v0.1.0
 ```
 
-如果仓库后续在根 `package.json` 固定了 `packageManager`，必须优先使用该版本，不得继续以本文建议值覆盖仓库事实。
+确认：
 
-### 3.2 DSH
+```bash
+git branch --show-current
+node -p "require('./package.json').version"
+```
 
-Report Studio 的 Agent 能力必须复用 **DSH Harness**，不得另建模型 Runtime。
+预期：
 
-开发 Agent 开始 DSH 接入前必须先检测本机实际 DSH 环境：
+```text
+integration/report-studio-mvp-v0.1.0
+0.1.0
+```
+
+PR 合并到 `main` 后直接使用 `main` 即可。
+
+---
+
+## 4. 一键启动
+
+仓库根目录执行：
+
+```bash
+npm start
+```
+
+默认地址：
+
+```text
+http://127.0.0.1:4173
+```
+
+启动成功会输出：
+
+```text
+Report Studio v0.1.0 running at http://127.0.0.1:4173
+Data: <path>/.report-studio-data/state.json
+```
+
+浏览器打开该地址即可使用。
+
+### 开发模式
+
+```bash
+npm run dev
+```
+
+使用 Node `--watch` 自动重启服务。
+
+---
+
+## 5. 数据保存位置
+
+默认：
+
+```text
+<仓库根目录>/.report-studio-data/state.json
+```
+
+可指定独立目录：
+
+### macOS / Linux
+
+```bash
+REPORT_STUDIO_DATA_DIR=/absolute/path/report-studio-data npm start
+```
+
+### Windows PowerShell
+
+```powershell
+$env:REPORT_STUDIO_DATA_DIR="D:\report-studio-data"
+npm start
+```
+
+所有正式大纲、草案、批注、ReviewRound、Submission、Proposal 和 Revision 均写入服务器端 JSON；浏览器 `localStorage` 不是业务事实源。
+
+写入采用：
+
+```text
+同目录临时文件
+→ 完整写入
+→ rename 替换 state.json
+```
+
+因此进程重启后可直接恢复。
+
+### 备份
+
+关闭程序后复制整个数据目录即可：
+
+```bash
+cp -R .report-studio-data .report-studio-data.backup
+```
+
+Windows 可直接复制该目录。
+
+---
+
+## 6. 端口与监听地址
+
+默认：
+
+```text
+HOST=127.0.0.1
+PORT=4173
+```
+
+修改示例：
+
+### macOS / Linux
+
+```bash
+HOST=0.0.0.0 PORT=4180 npm start
+```
+
+### Windows PowerShell
+
+```powershell
+$env:HOST="0.0.0.0"
+$env:PORT="4180"
+npm start
+```
+
+仅在可信局域网环境下使用 `0.0.0.0`。
+
+---
+
+## 7. 当前功能使用顺序
+
+### 大纲
+
+1. 修改顶部项目名称；
+2. 点击 `+ 一级章节`；
+3. 可继续添加子级；
+4. 标题直接输入修改；
+5. 使用 `↑ / ↓` 调整同层顺序；
+6. 点击 `生成页` 进入该节点对应草案页；
+7. 可对具体节点点击 `批注`。
+
+所有大纲内容修改都会形成新的项目 Revision。
+
+### 草案
+
+当前支持：
+
+```text
+页面标题
+正文
+要点列表
+讲解稿
+本页图片素材
+```
+
+编辑后点击 `保存草案`。
+
+### 批注
+
+```text
+添加批注
+→ 自动保存，不增加内容 Revision
+→ 提给Agent
+→ 创建 ReviewRound + ReviewSubmission #1
+```
+
+如果一轮没有解决完：
+
+```text
+点击“继续本轮”
+→ 添加新的补充批注
+→ 再次“提给Agent”
+→ 同一 ReviewRound 下创建 ReviewSubmission #2
+```
+
+历史 Submission 不会被第二次提交覆盖。
+
+`标记完成` 由用户手动执行；Agent 返回不会自动把问题设为完成。
+
+---
+
+## 8. DSH Agent Bridge
+
+### 8.1 当前原则
+
+Report Studio 不内置第二套模型 Runtime。Agent 能力通过外部 DSH-compatible HTTP Bridge 接入。
+
+未配置 Bridge 时：
+
+- 大纲、草案、素材、批注、Submission、Revision 全部正常使用；
+- Agent 悬浮窗明确显示 `DSH Bridge 未配置`；
+- 不会伪造 Mock Agent 回复。
+
+### 8.2 配置
+
+环境变量：
+
+```text
+REPORT_STUDIO_AGENT_URL
+REPORT_STUDIO_AGENT_TIMEOUT_MS    默认 60000
+```
+
+示例：
+
+```bash
+REPORT_STUDIO_AGENT_URL=http://127.0.0.1:5050/report-studio npm start
+```
+
+Windows PowerShell：
+
+```powershell
+$env:REPORT_STUDIO_AGENT_URL="http://127.0.0.1:5050/report-studio"
+npm start
+```
+
+### 8.3 Bridge 请求合同
+
+批注提交：
+
+```json
+{
+  "kind": "report_studio.review_submission",
+  "submission": {
+    "id": "submission_xxx",
+    "reviewRoundId": "round_xxx",
+    "number": 1,
+    "baseRevision": 5,
+    "annotations": []
+  },
+  "context": {
+    "projectId": "project_xxx",
+    "projectTitle": "项目名称",
+    "scopeKey": "draft:page_xxx"
+  }
+}
+```
+
+普通聊天：
+
+```json
+{
+  "kind": "report_studio.chat",
+  "text": "优化当前页标题",
+  "context": {
+    "projectId": "project_xxx",
+    "currentRevision": 5,
+    "stage": "draft",
+    "pageId": "page_xxx"
+  }
+}
+```
+
+Bridge 必须返回：
+
+```json
+{
+  "message": "已生成修改建议",
+  "commands": [
+    {
+      "type": "outline.rename",
+      "nodeId": "outline_xxx",
+      "title": "新标题"
+    }
+  ],
+  "sessionRef": "optional-dsh-session-ref"
+}
+```
+
+当前可安全执行的 Agent Command 与人工内容操作共用受控领域入口。返回 commands 后 Studio 创建 Proposal，**必须由用户点击“确认应用”后才正式产生新 Revision**。
+
+### 8.4 DSH 本机适配
+
+由于不同 DSH 版本/本地 Profile 的具体 HTTP/插件桥接入口可能不同，部署 Agent 必须先执行：
 
 ```bash
 dsh --version
 ```
 
-然后记录实际版本到：
+然后用该机器实际 DSH Harness 实现一个满足上述 HTTP 合同的轻量 Adapter，并把 URL 填入 `REPORT_STUDIO_AGENT_URL`。
 
-```text
-docs/spikes/dsh-local-environment.md
-```
-
-不得在没有检测的情况下假设用户机器上的 DSH 版本、Storage Provider、Profile 路径或插件目录。
+不得把猜测的 DSH CLI 命令写死到 Report Studio 核心。
 
 ---
 
-## 4. 获取代码
+## 9. 自动测试与验收
+
+无需安装依赖。
+
+执行：
 
 ```bash
-git clone https://github.com/ArchitectureWorld/presentation-tools.git
-cd presentation-tools
-git fetch --all --prune
-git checkout integration/report-studio-mvp-v0.1.0
-```
-
-当 v0.1.0 整合 PR 合并到 `main` 后，应改为：
-
-```bash
-git checkout main
-git pull --ff-only
-```
-
-部署 Agent 必须先确认当前版本：
-
-```bash
-git branch --show-current
-git log -1 --oneline
-```
-
-并核对根 README 显示：
-
-```text
-Report Studio v0.1.0
-```
-
----
-
-## 5. 当前原型快速验证
-
-在正式 TypeScript MVP 尚未完全落地时，可先验证历史 UI 原型没有损坏。
-
-```bash
-cd tools/report-studio
 npm test
-npm run build
-npm run verify:release
+npm run verify
 ```
 
-如本机已有 Chromium：
-
-```bash
-npm run verify:browser
-```
-
-历史原型可直接打开：
+当前实现已验证：
 
 ```text
-tools/report-studio/dist/report-studio-prototype-v0.8.1.html
+13 automated tests PASS
+Report Studio v0.1.0 verification PASS
+revision=4
+outline_nodes=1
+draft_pages=1
+review_submissions=2
 ```
 
-注意：该原型只用于 UI/交互回归，不是 v0.1.0 正式数据层，也不代表 DSH 已接通。
-
----
-
-## 6. 正式 v0.1.0 Workspace 安装
-
-当根 workspace 已按开发计划建立后，统一从仓库根目录安装：
-
-```bash
-corepack enable
-pnpm install --frozen-lockfile
-```
-
-如果是首次建立 lockfile 的实现分支，可使用：
-
-```bash
-pnpm install
-```
-
-提交前必须生成并提交 lockfile。后续 Agent 不允许删除 lockfile 后重新解析依赖。
-
-预期正式结构：
+`npm run verify` 会自动创建临时项目并执行：
 
 ```text
-apps/
-└─ studio-dev-harness/
-
-packages/
-├─ studio-contracts/
-├─ studio-core/
-├─ studio-storage/
-├─ studio-dsh-plugin/
-├─ studio-ui/
-└─ studio-testkit/
-```
-
-v0.1.0 第一阶段允许 `studio-ui` 暂时只实现 Outline + Draft；Layout 只保留入口和兼容边界。
-
----
-
-## 7. 本地开发启动
-
-最终根 `package.json` 必须提供稳定脚本。开发 Agent应将以下脚本视为 v0.1.0 的目标接口：
-
-```bash
-pnpm dev
-pnpm build
-pnpm typecheck
-pnpm test
-pnpm test:e2e
-```
-
-建议语义：
-
-```text
-pnpm dev        启动 studio-dev-harness 本地工作台
-pnpm build      构建全部正式 packages / app
-pnpm typecheck  TypeScript 全仓类型检查
-pnpm test       contract + domain + storage + integration 单元/集成测试
-pnpm test:e2e   浏览器端 Outline/Draft 主流程
-```
-
-若上述脚本尚未存在，**当前实现 PR 的职责之一就是建立它们**；不要让每个 Agent 使用不同命令启动项目。
-
----
-
-## 8. 本地数据目录
-
-正式业务数据不得写入浏览器 `localStorage` 作为事实源。
-
-开发环境必须将数据根放在明确可识别的本地目录，例如：
-
-```text
-<repo>/.local/report-studio/
-```
-
-建议结构：
-
-```text
-.local/report-studio/
-├─ control/
-├─ objects/
-├─ staging/
-├─ derived/
-├─ exports/
-└─ logs/
-```
-
-`.local/` 必须加入 `.gitignore`。
-
-正式接入 DSH Storage 后，物理路径应由 DSH/配置层解析，领域代码不得硬编码用户目录或 `~/.dsh`。
-
-开发环境应支持显式覆盖，例如：
-
-```bash
-REPORT_STUDIO_DATA_DIR=/absolute/path/to/data pnpm dev
-```
-
-具体环境变量名称一旦在代码中落地，必须同步更新本文，不允许文档和实现各自维护一套名称。
-
----
-
-## 9. DSH 接入部署
-
-### 9.1 原则
-
-```text
-Report Studio UI
-→ Studio Application API
-→ DshStudioAdapter
-→ 当前 DSH Session / Harness
-```
-
-必须满足：
-
-- 普通悬浮 Agent 聊天进入当前 DSH Session；
-- ReviewSubmission 进入同一 Session 的可追踪任务时间线；
-- `studio_get_context` / `studio_apply_commands` 由 DSH Harness 调用；
-- UI 不直接调用模型；
-- Studio Tool 内部不再次调用模型；
-- Agent 不能直接覆盖 Canonical Project State。
-
-### 9.2 本地插件安装方式
-
-由于 DSH 仍处于快速演进阶段，具体插件安装命令必须以实现时检测到的本机 DSH 版本为准。
-
-开发 Agent需要完成并写入本文件的最终步骤应类似：
-
-```bash
-# 1. 构建 Studio DSH plugin
-pnpm --filter studio-dsh-plugin build
-
-# 2. 将本地产物安装/链接到当前 DSH profile
-# <REAL_DSH_LOCAL_PLUGIN_COMMAND>
-
-# 3. 启动/重载 DSH
-# <REAL_DSH_START_OR_RELOAD_COMMAND>
-```
-
-**在真实 Spike 验证前，不允许用猜测的 DSH 命令冒充部署说明。**
-
-完成 DSH Spike 的 PR 必须把占位符替换为经过本机验证的实际命令，并记录：
-
-```text
-DSH version
-Profile
-Plugin install command
-Plugin reload command
-Session binding evidence
-Storage Provider
+项目改名
+→ 新建大纲
+→ 生成草案页
+→ 保存正文/要点/讲解稿
+→ 添加批注
+→ Submission #1
+→ 同一 Round 补充批注
+→ Submission #2
+→ 停止服务
+→ 重新读取数据
+→ 检查完整恢复
 ```
 
 ---
 
-## 10. v0.1.0 本地验收步骤
+## 10. 健康检查
 
-### 10.1 基础启动
-
-```bash
-pnpm install --frozen-lockfile
-pnpm typecheck
-pnpm test
-pnpm dev
-```
-
-浏览器打开终端输出的本地地址。
-
-### 10.2 大纲验收
-
-必须验证：
-
-1. 创建项目；
-2. 新增一级/二级大纲节点；
-3. 修改标题；
-4. 调整层级和顺序；
-5. 刷新/重启后稳定 ID 不变；
-6. 提交大纲批注给 Agent；
-7. Proposal 不自动覆盖正式内容；
-8. 接受后形成新 Revision。
-
-### 10.3 草案验收
-
-必须验证：
-
-1. 大纲节点生成稳定 `pageId`；
-2. 页面切换；
-3. 编辑标题、正文、列表、讲解稿；
-4. 本页素材引用可加载；
-5. 对内容块添加批注；
-6. draft 批注自动保存；
-7. 首次提交形成 `ReviewRound + ReviewSubmission #1`；
-8. Agent 未完全解决时继续在同一 Round 添加意见；
-9. 再次提交形成 `ReviewSubmission #2`；
-10. 两次 Submission 历史均可追溯且不可被覆盖；
-11. 用户明确标记 resolved；
-12. 重启后项目、Revision、批注和 Round 历史完整恢复。
-
-### 10.4 DSH 验收
-
-必须验证：
-
-- 当前 Session 连续；
-- 普通聊天可用；
-- ReviewSubmission 可以投递；
-- Studio Tool 调用出现在 DSH 可追踪事件中；
-- Proposal 与对应 Submission / ReviewRun 关联；
-- 不存在第二套 Agent Runtime。
-
----
-
-## 11. 开发 Agent 必须执行的检查
-
-任何实现 Agent 在声明“本地部署完成”前至少执行：
+启动后：
 
 ```bash
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm test:e2e
+curl http://127.0.0.1:4173/api/health
 ```
 
-并记录实际结果。
+预期类似：
 
-若只修改历史原型，则还需：
+```json
+{
+  "ok": true,
+  "version": "v0.1.0",
+  "dataPath": ".../.report-studio-data/state.json",
+  "agentConfigured": false
+}
+```
+
+查看当前项目状态：
 
 ```bash
-cd tools/report-studio
-npm test
-npm run build
-npm run verify:release
-npm run verify:browser
-```
-
-不得以“页面能打开”代替正式验收。
-
----
-
-## 12. 常见故障定位顺序
-
-### 无法安装依赖
-
-依次检查：
-
-```text
-Node 版本
-→ corepack / pnpm 版本
-→ packageManager
-→ lockfile
-→ registry / network
-```
-
-禁止直接删除 lockfile 作为第一处理方式。
-
-### 页面打开但数据丢失
-
-检查：
-
-```text
-REPORT_STUDIO_DATA_DIR
-→ ControlStore
-→ ProjectHead
-→ RevisionRecord
-→ Snapshot hash
-```
-
-不要先从 React State 或 localStorage 恢复正式数据。
-
-### Agent 能聊天但不能修改内容
-
-检查：
-
-```text
-DSH Session binding
-→ ReviewSubmission
-→ ReviewRun
-→ studio_get_context
-→ allowedCommands / writableIds
-→ studio_apply_commands
-→ Proposal
-→ baseRevision / Head CAS
-```
-
-不要通过 UI 直接写状态绕过问题。
-
-### 批注重复提交
-
-检查：
-
-```text
-reviewRoundId
-reviewSubmissionId
-submissionNumber
-idempotencyKey
-ReviewRun
-```
-
-同一用户轮次允许多次 Submission，但同一个 Submission 的网络重试不得产生第二份业务任务。
-
-### 重启后无法恢复
-
-检查：
-
-```text
-ProjectHead
-→ RevisionRecord
-→ Canonical Snapshot
-→ AnnotationDraftScopeRecord
-→ ReviewRoundControlRecord
-→ pending ReviewRun / Proposal
+curl http://127.0.0.1:4173/api/state
 ```
 
 ---
 
-## 13. v0.1.0 与 v0.2.0 边界
+## 11. 常见故障
 
-### v0.1.0：必须可直接使用
+### `npm start` 报 Node 版本问题
+
+升级到 Node 22+。
+
+### 4173 端口被占用
+
+```bash
+PORT=4180 npm start
+```
+
+### 重启后项目不是原项目
+
+确认启动时使用了相同的 `REPORT_STUDIO_DATA_DIR`。
+
+### Agent 按钮提示 Bridge 未配置
+
+这是正常状态，不影响人工工作流。配置 `REPORT_STUDIO_AGENT_URL` 后重启。
+
+### Agent 已返回但内容没变化
+
+这是正确行为：Agent 结果先形成 Proposal。必须在右侧批注轮次内点击 `确认应用`。
+
+### Proposal 报 `stale_revision`
+
+说明 Proposal 生成后项目内容又被人工修改。旧 Proposal 不允许覆盖新 Revision，需要重新提交当前轮次。
+
+---
+
+## 12. v0.1.0 / v0.2.0 边界
+
+### v0.1.0 当前可用
 
 ```text
 Outline
 Draft
-Page assets basic references
+Basic Page Assets
 Annotations
 ReviewRound / ReviewSubmission
-DSH Agent
 Proposal
 Revision
-Persistence / recovery
+Persistence / Recovery
+External DSH Bridge Contract
 ```
 
-### v0.2.0：排版阶段
+### v0.2.0 后续
 
 ```text
+正式排版画布
 LayoutPageDocument
 OpenPencil / Layout Adapter
-元素拖拽与样式
 sourceRef live / detached / orphaned
+视觉样式和几何
 草案 ↔ 排版同步
-布局渲染
-排版导出深化
+排版导出
 ```
 
-因此部署 Agent 不得因为 v0.2.0 排版尚未开发而阻止 v0.1.0 大纲/草案版本发布。
-
----
-
-## 14. 文档维护规则
-
-本文件是 **v0.1.0 本地安装与部署权威说明**。
-
-任何 PR 只要改变以下任意一项，就必须同步修改本文：
-
-- Node / pnpm 版本；
-- 根安装命令；
-- dev/build/test 脚本；
-- 环境变量；
-- 数据目录；
-- DSH 插件安装方式；
-- DSH Profile / Storage Provider；
-- 本地端口或启动地址；
-- E2E 运行方式；
-- 发布/升级/重启步骤。
-
-**代码可以变化，但部署说明不得落后于可运行版本。**
+当前部署不应等待 v0.2.0。
