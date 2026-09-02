@@ -70,8 +70,34 @@ jobs:
           tar -tzf /tmp/report-studio-responsive-ui.tar.gz
           tar -xzf /tmp/report-studio-responsive-ui.tar.gz -C "$GITHUB_WORKSPACE"
 
+      - name: Prefer installed Google Chrome on GitHub runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          script_path = Path('scripts/verify-responsive-ui.mjs')
+          script = script_path.read_text(encoding='utf-8')
+          old_candidates = "const candidates = [configured, 'chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'].filter(Boolean);"
+          new_candidates = "const candidates = [configured, 'google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser'].filter(Boolean);"
+          if script.count(old_candidates) != 1:
+              raise SystemExit(f'unexpected browser candidate declaration count: {script.count(old_candidates)}')
+          script_path.write_text(script.replace(old_candidates, new_candidates, 1), encoding='utf-8')
+
+          ci_path = Path('.github/workflows/report-studio-v0.1.0-ci.yml')
+          ci = ci_path.read_text(encoding='utf-8')
+          old_step = "      - name: Run responsive Chromium verification\n        run: npm run verify:ui\n"
+          new_step = "      - name: Run responsive Chromium verification\n        env:\n          CHROMIUM_PATH: google-chrome\n        run: npm run verify:ui\n"
+          if ci.count(old_step) != 1:
+              raise SystemExit(f'unexpected responsive CI step count: {ci.count(old_step)}')
+          ci_path.write_text(ci.replace(old_step, new_step, 1), encoding='utf-8')
+          PY
+          google-chrome --version
+
       - name: Run complete v0.1.0 verification
         env:
+          CHROMIUM_PATH: google-chrome
           REPORT_STUDIO_UI_SCREENSHOT_DIR: /tmp/report-studio-responsive-ui-screenshots
         run: npm run verify:all
 
