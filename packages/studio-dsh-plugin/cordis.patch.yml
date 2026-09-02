@@ -1,0 +1,3 @@
+- insert:
+    - id: report-studio-dsh
+      name: '@architectureworld/report-studio-dsh'
