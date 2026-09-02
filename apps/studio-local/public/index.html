@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1018">
+  <title>Report Studio v0.1.0</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="project-brand">
+        <div class="project-glyph" aria-hidden="true">研</div>
+        <div class="project-copy">
+          <input id="project-title" class="project-title" aria-label="项目名称" autocomplete="off">
+          <span>通用汇报项目 · 本地自动保存</span>
+        </div>
+      </div>
+
+      <nav class="stage-nav" aria-label="制作阶段">
+        <button class="stage-tab active" data-stage="outline" type="button">大纲阶段</button>
+        <button class="stage-tab" data-stage="draft" type="button">草案阶段</button>
+        <button class="stage-tab" data-stage="layout" type="button" disabled title="排版将在 v0.2.0 开放">
+          排版阶段 <small>v0.2.0</small>
+        </button>
+      </nav>
+
+      <div class="top-actions">
+        <span id="save-status" class="save-status">已保存</span>
+        <span class="version-chip">v0.1.0</span>
+        <span class="revision-pill">Revision <b id="revision-number">0</b></span>
+      </div>
+    </header>
+
+    <nav id="page-strip" class="page-strip" aria-label="草案页面" hidden></nav>
+
+    <main class="workspace-shell">
+      <section id="stage-workspace" class="stage-workspace" aria-live="polite">
+        <div id="outline-stage" class="stage-view"></div>
+        <div id="draft-stage" class="stage-view" hidden></div>
+      </section>
+
+      <aside id="annotation-panel" class="comment-panel" aria-label="批注">
+        <header class="comment-panel-header">
+          <div>
+            <div class="comment-title-row">
+              <h2>批注</h2>
+              <span id="annotation-count" class="count-badge">0</span>
+            </div>
+            <p id="scope-label">整份大纲</p>
+          </div>
+        </header>
+
+        <div class="comment-filter" role="tablist" aria-label="批注状态筛选">
+          <button class="filter-tab active" data-filter="all" type="button">全部</button>
+          <button class="filter-tab" data-filter="unfinished" type="button">未完成</button>
+          <button class="filter-tab" data-filter="completed" type="button">已完成</button>
+        </div>
+
+        <div class="comment-scroll-region">
+          <div id="review-history" class="comment-list" role="region" aria-label="批注轮次列表" tabindex="0"></div>
+        </div>
+
+        <footer class="comment-composer">
+          <div class="composer-heading">
+            <strong id="composer-title">单条批注（加入本轮）</strong>
+            <button id="clear-composer-round" class="text-button" type="button" hidden>回到本轮</button>
+          </div>
+          <div id="annotation-target" class="selected-target">未选择对象，将批注当前作用域</div>
+          <textarea id="annotation-input" rows="3" maxlength="500" placeholder="在这里输入一条批注…"></textarea>
+          <div class="composer-actions">
+            <span class="autosave-hint">添加后自动保存</span>
+            <button id="add-annotation" class="secondary-button" type="button">＋ 添加批注</button>
+          </div>
+        </footer>
+      </aside>
+    </main>
+  </div>
+
+  <button id="agent-fab" class="agent-fab" type="button" aria-label="打开项目 Agent" title="项目 Agent">
+    <span class="agent-orb-image" aria-hidden="true"></span>
+  </button>
+
+  <div id="agent-modal" class="modal agent-modal" hidden>
+    <button class="modal-backdrop" data-close-agent-modal type="button" aria-label="关闭 Agent 对话"></button>
+    <section class="modal-card agent-chat-card" role="dialog" aria-modal="true" aria-labelledby="agent-chat-title">
+      <header class="agent-chat-header">
+        <div class="agent-chat-title-group">
+          <div class="agent-chat-glyph" aria-hidden="true"><span class="agent-orb-image"></span></div>
+          <div>
+            <small>项目级连续会话</small>
+            <h2 id="agent-chat-title">项目 Agent</h2>
+            <span id="agent-status">检查 DSH Bridge…</span>
+          </div>
+        </div>
+        <button id="agent-close" class="icon-button" type="button" title="关闭 Agent">×</button>
+      </header>
+
+      <div class="agent-chat-context">
+        <span id="agent-context-page" class="context-chip">整份大纲</span>
+        <span id="agent-context-stage" class="context-chip">大纲阶段</span>
+      </div>
+
+      <div id="agent-feed" class="agent-chat-list" role="log" aria-live="polite"></div>
+
+      <footer class="agent-chat-composer">
+        <textarea id="agent-input" rows="2" maxlength="1200" placeholder="向当前项目 Agent 提问…"></textarea>
+        <button id="agent-send" class="primary-button agent-send-button" type="button">发送</button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="./dsh-native-runtime.js"></script><script type="module" src="./app.js"></script>
+</body>
+</html>

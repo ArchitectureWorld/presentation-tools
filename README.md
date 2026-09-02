@@ -1,65 +1,56 @@
-# Presentation Tools
+# Presentation Tools — Report Studio v0.1.0
 
-面向专业汇报生产流程的工具与原型仓库。
+Report Studio `v0.1.0` 当前正式范围是大纲、草案、批注、DSH 原生 Agent、Proposal/Revision 与持久化。正式排版进入 `v0.2.0`。
 
-## 当前交付
-
-| 工具 | 当前版本 | 状态 | 入口 |
-|---|---:|---|---|
-| Report Studio 三阶段交互原型 | `0.8.1` | 可运行前端交互原型；使用 Mock Adapter，尚未接入真实 DSH Agent/Project State | [`tools/report-studio/`](tools/report-studio/) |
-
-Report Studio 用于验证“**大纲 → 草案 → 排版**”三阶段工作台、页面级批注、批次级 Agent 提交、素材管理、草案文字人工编辑，以及项目级悬浮 Agent 会话。
-
-## 快速体验
-
-直接下载并打开：
+## 当前部署基线
 
 ```text
-tools/report-studio/dist/report-studio-prototype-v0.8.1.html
+Branch: integration/report-studio-mvp-v0.1.0
+DSH plugin: @architectureworld/report-studio-dsh@0.1.0
+Tested DSH: 0.1.1-rc.2
+Profile: web
 ```
 
-该文件为完全自包含的单文件原型，不依赖外部 CDN 或在线服务。
+当前版本必须从上述支线获取；`main` 尚不是本轮交付来源。
 
-## 仓库结构
-
-```text
-presentation-tools/
-├─ README.md
-├─ .github/workflows/report-studio-ci.yml
-├─ docs/
-│  ├─ acceptance/report-studio-v0.8.1-verification.md
-│  └─ handoff/2026-09-02-report-studio-v0.8.1-handoff.md
-└─ tools/report-studio/
-   ├─ VERSION
-   ├─ release-manifest.json
-   ├─ README.md
-   ├─ CHANGELOG.md
-   ├─ RELEASE-NOTES-v0.8.1.md
-   ├─ prototype/
-   ├─ src/
-   ├─ scripts/
-   ├─ tests/
-   ├─ integration/
-   └─ dist/
-```
-
-## 版本规则
-
-Report Studio 当前唯一发布版本为 `0.8.1`。以下文件必须保持一致：
-
-1. `tools/report-studio/VERSION`
-2. `tools/report-studio/package.json`
-3. `tools/report-studio/release-manifest.json`
-4. 单文件 HTML 中的 `report-studio-build` 元数据
-5. 发布文件名、Release Notes 与 Handoff 文档
-
-执行以下命令可自动校验版本和发布文件校验值：
+## DSH 原生安装
 
 ```bash
-cd tools/report-studio
-npm run verify:release
+git clone https://github.com/ArchitectureWorld/presentation-tools.git
+cd presentation-tools
+git checkout integration/report-studio-mvp-v0.1.0
+git pull --ff-only
+corepack enable
+dsh plugin --profile web add ./packages/studio-dsh-plugin
+dsh --profile web --dump-config
+dsh --profile web --no-open
 ```
 
-## 重要边界
+进入 DSH Session 后，选择 `Report Studio` 会话视图，或点击会话头部的 `Report Studio` 入口。
 
-当前成果是用于产品与交互验证的可运行原型，不是正式 DSH 插件交付。正式实施必须继续复用 DSH 的 Session、Project State、Command、Revision、Storage 与 Agent Harness，不应另建第二套独立 Agent 系统。
+完整部署说明：[`DSH_INSTALL.md`](DSH_INSTALL.md)。
+
+## 原生 DSH 能力
+
+```text
+/report-studio              DSH 同源 UI/API 路由
+conversation.view           Report Studio 会话视图
+session.header.actions      Report Studio 入口
+studio_get_context          受控项目上下文
+studio_apply_commands       生成待确认 Proposal
+```
+
+项目 Agent 和批注提交通过当前 DSH Session 的 `session.prompt(..., 'queue')` 进入 Harness。正式 DSH 模式不需要 `REPORT_STUDIO_AGENT_URL`。
+
+## 完整验证
+
+```bash
+npm run verify:all
+npm run smoke:dsh
+```
+
+`smoke:dsh` 会用临时 DSH Home 真实安装插件、启动 Web Profile 并检查原生路由。
+
+## 独立调试模式
+
+`npm start` 仍可用于独立调试；正式使用以 DSH 原生插件为准。
