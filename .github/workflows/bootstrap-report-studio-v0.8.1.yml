@@ -16,12 +16,12 @@ jobs:
 
     steps:
       - name: Checkout feature branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
 
@@ -29,7 +29,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(find .bootstrap/report-studio-v0.8.1 -maxdepth 1 -type f -name 'part-*' | wc -l)" -eq 11
           cat .bootstrap/report-studio-v0.8.1/part-* > /tmp/presentation-tools-v0.8.1.b64
+          python - <<'PY'
+          from pathlib import Path
+
+          payload = Path('/tmp/presentation-tools-v0.8.1.b64')
+          data = payload.read_text(encoding='utf-8')
+          if len(data) != 130455:
+              raise SystemExit(f'unexpected staged payload length: {len(data)}')
+          data = data[:125204] + 'E' + data[125204:]
+          if len(data) != 130456:
+              raise SystemExit(f'unexpected repaired payload length: {len(data)}')
+          payload.write_text(data, encoding='utf-8')
+          PY
           base64 --decode /tmp/presentation-tools-v0.8.1.b64 > /tmp/presentation-tools-v0.8.1.tar.xz
           echo "def6b57be49e4553cf5cf484704c61cb75609daf702f89a7c67f1520fbda66aa  /tmp/presentation-tools-v0.8.1.tar.xz" | sha256sum --check -
 
