@@ -1,0 +1,114 @@
+name: Finalize native DSH integration
+
+on:
+  push:
+    branches:
+      - integration/report-studio-mvp-v0.1.0
+    paths:
+      - '.github/workflows/finalize-native-dsh-integration.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-native-dsh-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+
+      - name: Materialize native DSH source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/apply-native-dsh-integration.yml').read_text(encoding='utf-8')
+          lines = source.splitlines()
+          start = next(i for i, line in enumerate(lines) if "python - <<'PY'" in line) + 1
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == 'PY')
+          script = textwrap.dedent('\n'.join(lines[start:end])) + '\n'
+          Path('.tmp-materialize-native-dsh.py').write_text(script, encoding='utf-8')
+          PY
+          python .tmp-materialize-native-dsh.py
+          rm .tmp-materialize-native-dsh.py
+
+      - name: Run core verification
+        run: |
+          npm test
+          npm run verify
+
+      - name: Run responsive UI verification
+        env:
+          CHROMIUM_PATH: google-chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('apps/studio-local/public/index.html')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('href="./styles.css"', 'href="/styles.css"')
+          text = text.replace('src="./app.js"', 'src="/app.js"')
+          path.write_text(text, encoding='utf-8')
+          PY
+          npm run verify:ui
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('apps/studio-local/public/index.html')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('href="/styles.css"', 'href="./styles.css"')
+          text = text.replace('src="/app.js"', 'src="./app.js"')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify native plugin contract
+        run: npm run verify:dsh
+
+      - name: Run real DSH install and boot smoke
+        run: npm run smoke:dsh
+
+      - name: Commit verified native integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            DSH_INSTALL.md \
+            README.md \
+            package.json \
+            apps/studio-local/public/index.html \
+            apps/studio-local/public/dsh-native-runtime.js \
+            apps/studio-local/dsh-native-ui.test.mjs \
+            packages/studio-dsh-plugin \
+            scripts/verify-dsh-plugin.mjs \
+            scripts/smoke-dsh-native.mjs \
+            docs/deployment/report-studio-v0.1.0-local-deployment.md \
+            docs/handoff/2026-09-02-report-studio-v0.1.0-runnable-handoff.md
+          git rm \
+            .github/workflows/apply-native-dsh-integration.yml \
+            .github/workflows/finalize-native-dsh-integration.yml
+          git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'feat: add native DSH Report Studio integration'
+          git push origin HEAD:${{ github.ref_name }}
