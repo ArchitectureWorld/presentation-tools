@@ -1,0 +1,33 @@
+name: Report Studio v0.1.0 CI
+
+on:
+  push:
+    paths:
+      - 'apps/studio-local/**'
+      - 'packages/studio-core/**'
+      - 'scripts/verify-v0.1.0.mjs'
+      - 'package.json'
+      - '.github/workflows/report-studio-v0.1.0-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/studio-local/**'
+      - 'packages/studio-core/**'
+      - 'scripts/verify-v0.1.0.mjs'
+      - 'package.json'
+      - '.github/workflows/report-studio-v0.1.0-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run automated tests
+        run: npm test
+      - name: Run v0.1.0 end-to-end verification
+        run: npm run verify
