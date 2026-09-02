@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           tar -xJf /tmp/presentation-tools-v0.8.1.tar.xz -C "$GITHUB_WORKSPACE"
           rm -rf .bootstrap
-          rm -f .github/workflows/bootstrap-report-studio-v0.8.1.yml
+          rm -f .github/workflows/report-studio-ci.yml
 
       - name: Verify Report Studio release
         shell: bash
