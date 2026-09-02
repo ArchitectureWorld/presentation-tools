@@ -59,22 +59,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Enable pnpm for DSH profile plugin management
+      - name: Enable pinned pnpm
         run: |
           corepack enable
           corepack prepare pnpm@10.15.0 --activate
           pnpm --version
-      - name: Install pinned DSH CLI with visible output
+      - name: Resolve pnpm store
+        shell: bash
+        run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      - name: Cache DSH package store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PNPM_STORE_PATH }}
+          key: report-studio-dsh-${{ runner.os }}-${{ runner.arch }}-0.1.1-rc.2
+      - name: Install pinned DSH CLI with visible progress
         shell: bash
         run: |
           set -euo pipefail
           DSH_PREFIX="$RUNNER_TEMP/report-studio-dsh-cli"
           mkdir -p "$DSH_PREFIX"
-          timeout 900s npm install \
-            --prefix "$DSH_PREFIX" \
-            --no-audit \
-            --no-fund \
-            --loglevel=notice \
+          printf '{"private":true}\n' > "$DSH_PREFIX/package.json"
+          timeout 600s pnpm --dir "$DSH_PREFIX" add \
+            --save-exact \
+            --reporter=append-only \
             @deepseek-ai/dsh@0.1.1-rc.2
           DSH_BIN="$DSH_PREFIX/node_modules/.bin/dsh"
           test -x "$DSH_BIN"
