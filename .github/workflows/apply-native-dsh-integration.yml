@@ -1,0 +1,1305 @@
+name: Apply native DSH integration
+
+on:
+  push:
+    branches:
+      - integration/report-studio-mvp-v0.1.0
+    paths:
+      - '.github/workflows/apply-native-dsh-integration.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-native-dsh-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+          pnpm --version
+
+      - name: Write native DSH plugin and deployment files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import textwrap
+
+          def write(path, content):
+              target = Path(path)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(textwrap.dedent(content).lstrip(), encoding='utf-8')
+
+          write('packages/studio-dsh-plugin/package.json', r'''
+          {
+            "name": "@architectureworld/report-studio-dsh",
+            "version": "0.1.0",
+            "description": "Report Studio v0.1.0 native DSH Web profile plugin",
+            "type": "module",
+            "main": "lib/index.js",
+            "exports": {
+              ".": "./lib/index.js",
+              "./client": "./lib/client.js",
+              "./cordis.patch.yml": "./cordis.patch.yml",
+              "./package.json": "./package.json"
+            },
+            "files": [
+              "lib/**",
+              "compatibility/**",
+              "cordis.patch.yml",
+              "README.md"
+            ],
+            "dsh": {
+              "bundle": {
+                "patch": "./cordis.patch.yml"
+              },
+              "client": {
+                "platform": "web",
+                "inject": []
+              }
+            },
+            "engines": {
+              "node": ">=22"
+            },
+            "dependencies": {
+              "@deepseek-ai/dsh-tools": "0.1.1-rc.2"
+            },
+            "peerDependencies": {
+              "@deepseek-ai/cordis": "4.0.1"
+            },
+            "license": "MIT"
+          }
+          ''')
+
+          write('packages/studio-dsh-plugin/cordis.patch.yml', r'''
+          - insert:
+              - id: report-studio-dsh
+                name: '@architectureworld/report-studio-dsh'
+          ''')
+
+          write('packages/studio-dsh-plugin/compatibility/dsh-baseline.json', r'''
+          {
+            "plugin": "@architectureworld/report-studio-dsh",
+            "pluginVersion": "0.1.0",
+            "testedDshVersion": "0.1.1-rc.2",
+            "testedProfile": "web",
+            "hostServices": ["tools", "webServer", "systemPrompt"],
+            "clientServices": ["slots", "sessions"],
+            "routes": ["/report-studio"],
+            "tools": ["studio_get_context", "studio_apply_commands"]
+          }
+          ''')
+
+          write('packages/studio-dsh-plugin/README.md', r'''
+          # `@architectureworld/report-studio-dsh` v0.1.0
+
+          Report Studio 的 DSH 原生组合包。它在 DSH Web Profile 中注册：
+
+          - `Report Studio` 会话视图；
+          - 会话头部 `Report Studio` 入口；
+          - `/report-studio` 同源 UI/API 路由；
+          - `studio_get_context`；
+          - `studio_apply_commands`；
+          - 当前 DSH Session 的原生 `session.prompt(..., 'queue')` 通路。
+
+          ## 安装
+
+          在仓库根目录执行：
+
+          ```bash
+          dsh plugin --profile web add ./packages/studio-dsh-plugin
+          dsh --profile web --dump-config
+          dsh --profile web --no-open
+          ```
+
+          经过验证的 DSH 基线：`0.1.1-rc.2`。
+
+          正式 DSH 模式不需要 `npm start`、`REPORT_STUDIO_AGENT_URL` 或外部 HTTP Bridge。
+
+          完整说明见仓库根目录 [`DSH_INSTALL.md`](../../DSH_INSTALL.md)。
+          ''')
+
+          write('packages/studio-dsh-plugin/lib/runtime.js', r'''
+          import { createHash } from 'node:crypto'
+          import { homedir } from 'node:os'
+          import { join, resolve } from 'node:path'
+          import { createRepository } from '../../../apps/studio-local/repository.mjs'
+          import {
+            acceptProposal as acceptCoreProposal,
+            createProposalFromAgent,
+            executeAction as executeCoreAction,
+            submitReviewRound,
+          } from '../../studio-core/index.mjs'
+
+          function cleanSessionId(value) {
+            const sessionId = String(value ?? '').trim()
+            if (!sessionId) throw Object.assign(new Error('缺少 DSH Session ID'), { statusCode: 400 })
+            return sessionId
+          }
+
+          function sessionDirectoryName(sessionId) {
+            return createHash('sha256').update(sessionId).digest('hex').slice(0, 32)
+          }
+
+          export function defaultDshDataRoot() {
+            const dshHome = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
+            return join(dshHome, 'report-studio-v0.1.0')
+          }
+
+          function reviewPrompt(sessionId, state, round, submission) {
+            return [
+              '[Report Studio v0.1.0 · DSH Native Review]',
+              `DSH Session ID: ${sessionId}`,
+              `Project ID: ${state.project.id}`,
+              `Project title: ${state.project.title}`,
+              `Current revision: ${state.project.currentRevision}`,
+              `ReviewRound ID: ${round.id}`,
+              `ReviewSubmission ID: ${submission.id}`,
+              `Submission number: ${submission.number}`,
+              `Base revision: ${submission.baseRevision}`,
+              '',
+              '处理要求：',
+              '1. 必须先调用 studio_get_context 读取当前会话绑定的 Report Studio 项目。',
+              `2. 根据本次批注完成修改建议后，调用 studio_apply_commands，并将 submissionId 固定为 ${submission.id}。`,
+              '3. studio_apply_commands 只创建 Proposal，不会直接覆盖正式内容；用户会在 Report Studio 中确认。',
+              '4. 不要假定所有批注能一次解决；只处理有充分依据的修改。',
+              '',
+              '本次不可变 ReviewSubmission：',
+              JSON.stringify(submission, null, 2),
+            ].join('\n')
+          }
+
+          function chatPrompt(sessionId, state, input) {
+            const text = String(input?.text ?? '').trim()
+            if (!text) throw Object.assign(new Error('消息不能为空'), { statusCode: 400 })
+            return [
+              '[Report Studio v0.1.0 · DSH Native Chat]',
+              `DSH Session ID: ${sessionId}`,
+              `Project ID: ${state.project.id}`,
+              `Project title: ${state.project.title}`,
+              `Current revision: ${state.project.currentRevision}`,
+              `Current stage: ${input?.stage || state.ui.stage}`,
+              `Current page ID: ${input?.pageId || state.ui.activePageId || 'none'}`,
+              '',
+              '你正在当前 DSH Session 中协助用户处理 Report Studio 项目。需要读取项目时调用 studio_get_context。',
+              '如用户要求修改正式内容，而当前上下文没有可关联的 ReviewSubmission，请先说明需要用户在界面中添加批注并“提给Agent”；不要绕过 Proposal/Revision 网关直接声称已修改。',
+              '',
+              `用户请求：${text}`,
+            ].join('\n')
+          }
+
+          export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {}) {
+            const root = resolve(dataRoot)
+            const repositories = new Map()
+
+            async function repositoryFor(rawSessionId) {
+              const sessionId = cleanSessionId(rawSessionId)
+              let pending = repositories.get(sessionId)
+              if (!pending) {
+                pending = createRepository(join(root, 'sessions', sessionDirectoryName(sessionId)))
+                repositories.set(sessionId, pending)
+              }
+              return pending
+            }
+
+            async function getState(sessionId) {
+              return structuredClone((await repositoryFor(sessionId)).getState())
+            }
+
+            async function executeAction(sessionId, action) {
+              const repository = await repositoryFor(sessionId)
+              const result = executeCoreAction(repository.getState(), action)
+              await repository.replace(result.state)
+              return structuredClone(repository.getState())
+            }
+
+            async function submitReview(sessionId, input) {
+              const id = cleanSessionId(sessionId)
+              const repository = await repositoryFor(id)
+              const submitted = submitReviewRound(repository.getState(), input)
+              await repository.replace(submitted.state)
+              return {
+                state: structuredClone(repository.getState()),
+                round: structuredClone(submitted.round),
+                submission: structuredClone(submitted.submission),
+                dshPrompt: {
+                  kind: 'report_studio.review_submission',
+                  sessionId: id,
+                  text: reviewPrompt(id, submitted.state, submitted.round, submitted.submission),
+                },
+              }
+            }
+
+            async function prepareChat(sessionId, input) {
+              const id = cleanSessionId(sessionId)
+              const state = (await repositoryFor(id)).getState()
+              return {
+                dshPrompt: {
+                  kind: 'report_studio.chat',
+                  sessionId: id,
+                  text: chatPrompt(id, state, input),
+                },
+              }
+            }
+
+            async function acceptProposal(sessionId, proposalId) {
+              const repository = await repositoryFor(sessionId)
+              const result = acceptCoreProposal(repository.getState(), proposalId)
+              await repository.replace(result.state)
+              return { state: structuredClone(repository.getState()), revision: structuredClone(result.revision) }
+            }
+
+            async function getContext(sessionId) {
+              const id = cleanSessionId(sessionId)
+              const state = await getState(id)
+              const latestSubmission = state.reviewSubmissions.at(-1) ?? null
+              return {
+                contractVersion: 'report-studio.v0.1.0',
+                sessionId: id,
+                project: state.project,
+                ui: state.ui,
+                outline: state.outline,
+                pages: state.pages,
+                annotations: state.annotations,
+                reviewRounds: state.reviewRounds,
+                reviewSubmissions: state.reviewSubmissions,
+                proposals: state.proposals,
+                latestSubmissionId: latestSubmission?.id ?? null,
+                writableCommands: [
+                  'project.rename',
+                  'outline.add',
+                  'outline.rename',
+                  'outline.move',
+                  'outline.delete',
+                  'draft.ensurePage',
+                  'draft.update',
+                ],
+              }
+            }
+
+            async function applyCommands(sessionId, input) {
+              const id = cleanSessionId(sessionId)
+              const repository = await repositoryFor(id)
+              const state = repository.getState()
+              const submissionId = String(input?.submissionId ?? '').trim()
+              if (!submissionId) throw new Error('submissionId 必填；请使用 ReviewSubmission 提示中的稳定 ID。')
+              const submission = state.reviewSubmissions.find(item => item.id === submissionId)
+              if (!submission) throw new Error(`ReviewSubmission '${submissionId}' 不存在于当前 DSH Session。`)
+              const message = String(input?.message ?? '').trim()
+              if (!message) throw new Error('message 必填。')
+              if (!Array.isArray(input?.commands) || input.commands.length === 0) throw new Error('commands 必须至少包含一条结构化修改命令。')
+              const proposed = createProposalFromAgent(state, submissionId, {
+                message,
+                commands: structuredClone(input.commands),
+                sessionRef: id,
+              })
+              await repository.replace(proposed.state)
+              return {
+                proposalId: proposed.proposal.id,
+                submissionId,
+                reviewRoundId: submission.reviewRoundId,
+                baseRevision: submission.baseRevision,
+                status: proposed.proposal.status,
+                currentRevision: repository.getState().project.currentRevision,
+              }
+            }
+
+            return Object.freeze({
+              dataRoot: root,
+              repositoryFor,
+              getState,
+              executeAction,
+              submitReview,
+              prepareChat,
+              acceptProposal,
+              getContext,
+              applyCommands,
+            })
+          }
+          ''')
+
+          write('packages/studio-dsh-plugin/lib/index.js', r'''
+          import { readFile } from 'node:fs/promises'
+          import { extname, join, normalize } from 'node:path'
+          import { fileURLToPath } from 'node:url'
+          import { defineTool } from '@deepseek-ai/dsh-tools'
+          import { createStudioDshRuntime } from './runtime.js'
+
+          export const name = 'report-studio-dsh'
+          export const inject = ['tools', 'webServer', 'systemPrompt']
+
+          const publicDir = fileURLToPath(new URL('../../../apps/studio-local/public/', import.meta.url))
+          const contentTypes = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp',
+          }
+
+          function sendJson(response, status, value) {
+            const body = JSON.stringify(value)
+            response.statusCode = status
+            response.setHeader('content-type', 'application/json; charset=utf-8')
+            response.setHeader('content-length', Buffer.byteLength(body))
+            response.setHeader('cache-control', 'no-store')
+            response.end(body)
+          }
+
+          async function readJson(request, limit = 20 * 1024 * 1024) {
+            const chunks = []
+            let size = 0
+            for await (const chunk of request) {
+              size += chunk.length
+              if (size > limit) throw Object.assign(new Error('请求体过大'), { statusCode: 413 })
+              chunks.push(chunk)
+            }
+            if (!chunks.length) return {}
+            try {
+              return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+            } catch {
+              throw Object.assign(new Error('JSON 格式错误'), { statusCode: 400 })
+            }
+          }
+
+          function sessionIdFrom(url) {
+            const value = url.searchParams.get('sessionId')?.trim()
+            if (!value) throw Object.assign(new Error('缺少 DSH Session ID'), { statusCode: 400 })
+            return value
+          }
+
+          function sessionIdOf(exec) {
+            if (exec.agent === undefined) throw new Error('Report Studio 工具必须在 DSH Agent Session 中调用。')
+            return String(exec.agent.id)
+          }
+
+          function outputJson(value) {
+            return JSON.parse(JSON.stringify(value))
+          }
+
+          function toolOutput() {
+            return {
+              schema: { type: 'json' },
+              render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+            }
+          }
+
+          function registerTools(ctx, runtime) {
+            ctx.tools.register(defineTool({
+              name: 'studio_get_context',
+              description: '读取当前 DSH Session 绑定的 Report Studio v0.1.0 大纲、草案、批注轮次、Submission、Proposal 与 Revision 上下文。修改前必须先调用。',
+              parameters: {},
+              output: toolOutput(),
+              async execute(_args, exec) {
+                return outputJson(await runtime.getContext(sessionIdOf(exec)))
+              },
+            }))
+
+            ctx.tools.register(defineTool({
+              name: 'studio_apply_commands',
+              description: '根据一个不可变 ReviewSubmission 提交结构化修改命令并创建 Proposal。该工具不会直接覆盖正式内容，仍需用户在 Report Studio 中确认。',
+              parameters: {
+                submissionId: {
+                  type: 'string',
+                  required: true,
+                  description: 'ReviewSubmission 提示中提供的稳定 ID。',
+                },
+                message: {
+                  type: 'string',
+                  required: true,
+                  description: '面向用户的修改说明。',
+                },
+                commands: {
+                  type: 'array',
+                  required: true,
+                  description: 'Report Studio 受控结构化命令数组。',
+                  items: {
+                    type: 'object',
+                    additionalProperties: true,
+                    properties: {
+                      type: { type: 'string', required: true },
+                    },
+                  },
+                },
+              },
+              output: toolOutput(),
+              async execute(args, exec) {
+                return outputJson(await runtime.applyCommands(sessionIdOf(exec), args))
+              },
+            }))
+          }
+
+          async function serveStatic(request, response, url) {
+            if (request.method !== 'GET' && request.method !== 'HEAD') return false
+            let relative = url.pathname.slice('/report-studio'.length)
+            if (relative === '' || relative === '/') relative = '/index.html'
+            const safe = normalize(relative).replace(/^([.][.][/\\])+/, '').replace(/^[/\\]+/, '')
+            const filePath = join(publicDir, safe)
+            if (!filePath.startsWith(publicDir)) return false
+            try {
+              const body = await readFile(filePath)
+              response.statusCode = 200
+              response.setHeader('content-type', contentTypes[extname(filePath).toLowerCase()] || 'application/octet-stream')
+              response.setHeader('content-length', body.length)
+              response.setHeader('x-content-type-options', 'nosniff')
+              response.setHeader('cache-control', safe === 'index.html' ? 'no-store' : 'public, max-age=60')
+              if (request.method === 'HEAD') response.end()
+              else response.end(body)
+              return true
+            } catch (error) {
+              if (error?.code === 'ENOENT') return false
+              throw error
+            }
+          }
+
+          function createRoute(runtime) {
+            return async (request, response) => {
+              const url = new URL(request.url ?? '/report-studio', 'http://dsh.local')
+              try {
+                if (url.pathname.startsWith('/report-studio/api/')) {
+                  const sessionId = sessionIdFrom(url)
+                  if (request.method === 'GET' && url.pathname === '/report-studio/api/health') {
+                    return sendJson(response, 200, {
+                      ok: true,
+                      version: 'v0.1.0',
+                      agentConfigured: true,
+                      agentMode: 'dsh-native',
+                      sessionId,
+                      dataRoot: runtime.dataRoot,
+                    })
+                  }
+                  if (request.method === 'GET' && url.pathname === '/report-studio/api/state') {
+                    return sendJson(response, 200, await runtime.getState(sessionId))
+                  }
+                  if (request.method === 'POST' && url.pathname === '/report-studio/api/action') {
+                    return sendJson(response, 200, await runtime.executeAction(sessionId, await readJson(request)))
+                  }
+                  if (request.method === 'POST' && url.pathname === '/report-studio/api/review/submit') {
+                    return sendJson(response, 200, await runtime.submitReview(sessionId, await readJson(request)))
+                  }
+                  if (request.method === 'POST' && url.pathname === '/report-studio/api/agent/chat') {
+                    return sendJson(response, 200, await runtime.prepareChat(sessionId, await readJson(request)))
+                  }
+                  const match = url.pathname.match(/^\/report-studio\/api\/proposal\/([^/]+)\/accept$/)
+                  if (request.method === 'POST' && match) {
+                    return sendJson(response, 200, await runtime.acceptProposal(sessionId, decodeURIComponent(match[1])))
+                  }
+                  return sendJson(response, 404, { error: 'not_found' })
+                }
+                if (await serveStatic(request, response, url)) return
+                sendJson(response, 404, { error: 'not_found' })
+              } catch (error) {
+                sendJson(response, error?.statusCode || 400, { error: error?.message || 'request_failed' })
+              }
+            }
+          }
+
+          export function apply(ctx, config = {}) {
+            const runtime = createStudioDshRuntime({ dataRoot: config.dataDir })
+            registerTools(ctx, runtime)
+            ctx.systemPrompt.section({
+              name: 'report-studio-v0.1.0',
+              order: 130,
+              text: [
+                'Report Studio v0.1.0 is available in this DSH Session.',
+                'For Report Studio review tasks, call studio_get_context before proposing changes.',
+                'Use studio_apply_commands only with the ReviewSubmission ID supplied by the user task.',
+                'studio_apply_commands creates a Proposal for human confirmation and never directly commits Project State.',
+              ].join('\n'),
+            })
+            ctx.effect(
+              () => ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime) }),
+              'report-studio-dsh: web route',
+            )
+          }
+          ''')
+
+          write('packages/studio-dsh-plugin/lib/client.js', r'''
+          window.__ModuleLoader__.load({
+            id: '@architectureworld/report-studio-dsh',
+            factory: (require) => {
+              var module = { exports: {} }
+              var exports = module.exports
+              const React = require('react')
+
+              const inject = ['slots', 'sessions']
+
+              function resultMessage(result) {
+                if (result?.ok) return { ok: true }
+                const error = result?.error
+                return {
+                  ok: false,
+                  error: error ? `${error.code || 'dsh_error'}: ${error.message || String(error)}` : 'DSH Session 拒绝了请求。',
+                }
+              }
+
+              function usePromptBridge({ sessionId, sessions, source }) {
+                React.useEffect(() => {
+                  const onMessage = async event => {
+                    const expected = source()
+                    if (!expected || event.source !== expected || event.origin !== window.location.origin) return
+                    const message = event.data
+                    if (!message || message.type !== 'report-studio.prompt' || message.sessionId !== sessionId) return
+                    const binding = sessions.binding(sessionId)
+                    const session = binding?.session
+                    let reply
+                    if (!session) {
+                      reply = { ok: false, error: '当前 DSH Session 不可用。' }
+                    } else {
+                      try {
+                        const text = String(message.text || '').trim()
+                        if (!text) throw new Error('Report Studio 提交了空任务。')
+                        reply = resultMessage(await session.prompt([{ type: 'text', text }], 'queue'))
+                      } catch (error) {
+                        reply = { ok: false, error: error?.message || String(error) }
+                      }
+                    }
+                    expected.postMessage({
+                      type: 'report-studio.prompt-result',
+                      requestId: message.requestId,
+                      sessionId,
+                      ...reply,
+                    }, window.location.origin)
+                  }
+                  window.addEventListener('message', onMessage)
+                  return () => window.removeEventListener('message', onMessage)
+                }, [sessionId, sessions, source])
+              }
+
+              function ReportStudioView({ sessionId, sessions }) {
+                const frameRef = React.useRef(null)
+                const source = React.useCallback(() => frameRef.current?.contentWindow || null, [])
+                usePromptBridge({ sessionId, sessions, source })
+                return React.createElement('iframe', {
+                  ref: frameRef,
+                  src: `/report-studio/?sessionId=${encodeURIComponent(sessionId)}`,
+                  title: 'Report Studio',
+                  style: { width: '100%', height: '100%', minHeight: 0, border: 0, display: 'block', background: '#080b11' },
+                  allow: 'clipboard-read; clipboard-write',
+                })
+              }
+
+              function HeaderAction({ sessionId, sessions }) {
+                const childRef = React.useRef(null)
+                const source = React.useCallback(() => childRef.current && !childRef.current.closed ? childRef.current : null, [])
+                usePromptBridge({ sessionId, sessions, source })
+                return React.createElement('button', {
+                  type: 'button',
+                  title: '在独立窗口打开 Report Studio（仍绑定当前 DSH Session）',
+                  onClick: () => {
+                    childRef.current = window.open(
+                      `/report-studio/?sessionId=${encodeURIComponent(sessionId)}`,
+                      `report-studio-${sessionId}`,
+                    )
+                    childRef.current?.focus()
+                  },
+                  style: {
+                    border: '1px solid rgba(255,255,255,.14)',
+                    borderRadius: 8,
+                    background: 'rgba(115,87,245,.16)',
+                    color: 'inherit',
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                    fontWeight: 650,
+                  },
+                }, 'Report Studio')
+              }
+
+              function apply(ctx) {
+                const sessions = ctx.get('sessions')
+                ctx.slots.inject('conversation.view', () => ctx.slots.register({
+                  name: 'conversation.view',
+                  id: 'report-studio',
+                  order: 50,
+                  label: 'Report Studio',
+                }, props => React.createElement(ReportStudioView, { sessionId: props.sessionId, sessions })))
+                ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+                  name: 'conversation.session.header.actions',
+                  id: 'report-studio',
+                  order: 70,
+                  label: 'Report Studio',
+                }, props => React.createElement(HeaderAction, { sessionId: props.sessionId, sessions })))
+              }
+
+              module.exports = { inject, apply }
+              return module.exports
+            },
+          })
+          ''')
+
+          write('packages/studio-dsh-plugin/runtime.test.mjs', r'''
+          import test from 'node:test'
+          import assert from 'node:assert/strict'
+          import { mkdtemp, rm } from 'node:fs/promises'
+          import { tmpdir } from 'node:os'
+          import { join } from 'node:path'
+          import { createStudioDshRuntime } from './lib/runtime.js'
+
+          test('native DSH runtime binds isolated Report Studio projects to session ids and creates proposals', async () => {
+            const root = await mkdtemp(join(tmpdir(), 'report-studio-dsh-runtime-'))
+            try {
+              const runtime = createStudioDshRuntime({ dataRoot: root })
+              let state = await runtime.executeAction('session-a', { type: 'outline.add', parentId: null, title: 'DSH 原生接入' })
+              const nodeId = state.outline[0].id
+              state = await runtime.executeAction('session-a', { type: 'annotation.add', scopeKey: 'outline:root', reviewRoundId: null, target: { type: 'outline-node', id: nodeId, label: 'DSH 原生接入' }, instruction: '将标题改为原生 DSH 工作台' })
+              const submitted = await runtime.submitReview('session-a', { scopeKey: 'outline:root', reviewRoundId: null })
+              assert.match(submitted.dshPrompt.text, /studio_get_context/)
+              assert.match(submitted.dshPrompt.text, new RegExp(submitted.submission.id))
+              const applied = await runtime.applyCommands('session-a', {
+                submissionId: submitted.submission.id,
+                message: '已形成标题修改建议',
+                commands: [{ type: 'outline.rename', nodeId, title: '原生 DSH 工作台' }],
+              })
+              assert.equal(applied.status, 'pending')
+              const sessionA = await runtime.getState('session-a')
+              assert.equal(sessionA.proposals.length, 1)
+              const sessionB = await runtime.getState('session-b')
+              assert.equal(sessionB.outline.length, 0)
+              assert.notEqual(sessionA.project.id, sessionB.project.id)
+            } finally {
+              await rm(root, { recursive: true, force: true })
+            }
+          })
+          ''')
+
+          write('apps/studio-local/public/dsh-native-runtime.js', r'''
+          (() => {
+            const sessionId = new URLSearchParams(window.location.search).get('sessionId')
+            const nativeMode = window.location.pathname.startsWith('/report-studio') && Boolean(sessionId)
+            if (!nativeMode) return
+
+            const pendingPrompts = new Map()
+            const nativeFetch = window.fetch.bind(window)
+
+            function apiPath(path) {
+              const url = new URL(`/report-studio${path}`, window.location.origin)
+              url.searchParams.set('sessionId', sessionId)
+              return `${url.pathname}${url.search}`
+            }
+
+            function updateNativeStatus() {
+              const status = document.querySelector('#agent-status')
+              if (status && status.textContent !== 'DSH 原生 Session 已连接') status.textContent = 'DSH 原生 Session 已连接'
+            }
+
+            function showRefreshNotice() {
+              if (document.querySelector('#report-studio-dsh-refresh')) return
+              const notice = document.createElement('button')
+              notice.id = 'report-studio-dsh-refresh'
+              notice.type = 'button'
+              notice.textContent = 'Agent Proposal 已返回 · 点击刷新'
+              notice.style.cssText = [
+                'position:fixed', 'right:18px', 'top:82px', 'z-index:9999',
+                'border:1px solid rgba(154,134,255,.55)', 'border-radius:10px',
+                'background:#241f43', 'color:#f4f6fb', 'padding:10px 14px',
+                'box-shadow:0 14px 40px rgba(0,0,0,.36)', 'cursor:pointer', 'font-weight:700',
+              ].join(';')
+              notice.addEventListener('click', () => window.location.reload())
+              document.body.appendChild(notice)
+            }
+
+            async function watchForProposal(previousCount) {
+              const deadline = Date.now() + 120000
+              while (Date.now() < deadline) {
+                await new Promise(resolve => window.setTimeout(resolve, 1500))
+                try {
+                  const response = await nativeFetch(apiPath('/api/state'), { headers: { accept: 'application/json' } })
+                  if (!response.ok) continue
+                  const current = await response.json()
+                  if ((current.proposals?.length ?? 0) <= previousCount) continue
+                  const active = document.activeElement
+                  const editing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+                  if (editing) showRefreshNotice()
+                  else window.location.reload()
+                  return
+                } catch {}
+              }
+            }
+
+            function requestPrompt(prompt, previousProposalCount) {
+              const target = window.parent !== window ? window.parent : window.opener
+              if (!target) return Promise.reject(new Error('未找到承载 Report Studio 的 DSH 会话窗口。'))
+              const requestId = `studio_prompt_${Date.now()}_${Math.random().toString(36).slice(2)}`
+              return new Promise((resolve, reject) => {
+                const timeout = window.setTimeout(() => {
+                  pendingPrompts.delete(requestId)
+                  reject(new Error('DSH Session 接收请求超时。'))
+                }, 60000)
+                pendingPrompts.set(requestId, { resolve, reject, timeout, previousProposalCount, kind: prompt.kind })
+                target.postMessage({
+                  type: 'report-studio.prompt',
+                  requestId,
+                  sessionId,
+                  kind: prompt.kind,
+                  text: prompt.text,
+                }, window.location.origin)
+              })
+            }
+
+            window.addEventListener('message', event => {
+              if (event.origin !== window.location.origin) return
+              const message = event.data
+              if (!message || message.type !== 'report-studio.prompt-result' || message.sessionId !== sessionId) return
+              const pending = pendingPrompts.get(message.requestId)
+              if (!pending) return
+              window.clearTimeout(pending.timeout)
+              pendingPrompts.delete(message.requestId)
+              if (!message.ok) {
+                pending.reject(new Error(message.error || 'DSH Session 拒绝了请求。'))
+                return
+              }
+              pending.resolve(message)
+              if (pending.kind === 'report_studio.review_submission') void watchForProposal(pending.previousProposalCount)
+            })
+
+            window.fetch = async (input, init) => {
+              const originalPath = typeof input === 'string' ? input : null
+              const resolvedInput = originalPath?.startsWith('/api/') ? apiPath(originalPath) : input
+              const response = await nativeFetch(resolvedInput, init)
+              if (!response.ok || !originalPath || !['/api/review/submit', '/api/agent/chat'].includes(originalPath)) return response
+              const payload = await response.clone().json().catch(() => null)
+              if (!payload?.dshPrompt) return response
+              await requestPrompt(payload.dshPrompt, payload.state?.proposals?.length ?? 0)
+              const adapted = originalPath === '/api/review/submit'
+                ? {
+                    ...payload,
+                    bridgeResult: { message: '已提交到当前 DSH Session', proposalId: null, sessionRef: sessionId },
+                  }
+                : { ...payload, message: '已发送到当前 DSH Session', sessionRef: sessionId }
+              return new Response(JSON.stringify(adapted), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: { 'content-type': 'application/json; charset=utf-8' },
+              })
+            }
+
+            const observer = new MutationObserver(updateNativeStatus)
+            observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+            window.addEventListener('DOMContentLoaded', updateNativeStatus, { once: true })
+            updateNativeStatus()
+          })()
+          ''')
+
+          write('apps/studio-local/dsh-native-ui.test.mjs', r'''
+          import test from 'node:test'
+          import assert from 'node:assert/strict'
+          import { readFile } from 'node:fs/promises'
+
+          const root = new URL('./public/', import.meta.url)
+
+          test('production browser loads the native DSH Session bridge before the application', async () => {
+            const html = await readFile(new URL('index.html', root), 'utf8')
+            const nativeIndex = html.indexOf('./dsh-native-runtime.js')
+            const appIndex = html.indexOf('./app.js')
+            assert.ok(nativeIndex >= 0)
+            assert.ok(appIndex > nativeIndex)
+          })
+
+          test('native browser bridge binds API and prompts to the current DSH Session', async () => {
+            const runtime = await readFile(new URL('dsh-native-runtime.js', root), 'utf8')
+            for (const token of [
+              "window.location.pathname.startsWith('/report-studio')",
+              "type: 'report-studio.prompt'",
+              'report-studio.prompt-result',
+              'window.parent !== window ? window.parent : window.opener',
+              'DSH 原生 Session 已连接',
+              "apiPath('/api/state')",
+            ]) assert.ok(runtime.includes(token), `missing ${token}`)
+          })
+
+          test('production assets resolve from root and the DSH subpath', async () => {
+            const html = await readFile(new URL('index.html', root), 'utf8')
+            assert.match(html, /href="\.\/styles\.css"/)
+            assert.match(html, /src="\.\/app\.js"/)
+            assert.doesNotMatch(html, /href="\/styles\.css"/)
+            assert.doesNotMatch(html, /src="\/app\.js"/)
+          })
+          ''')
+
+          write('scripts/verify-dsh-plugin.mjs', r'''
+          import assert from 'node:assert/strict'
+          import { readFile } from 'node:fs/promises'
+
+          const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
+          const packageJson = JSON.parse(await read('packages/studio-dsh-plugin/package.json'))
+          assert.equal(packageJson.name, '@architectureworld/report-studio-dsh')
+          assert.equal(packageJson.version, '0.1.0')
+          assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
+          assert.equal(packageJson.dsh?.client?.platform, 'web')
+          assert.equal(packageJson.exports?.['./client'], './lib/client.js')
+          assert.equal(packageJson.dependencies?.['@deepseek-ai/dsh-tools'], '0.1.1-rc.2')
+          const patch = await read('packages/studio-dsh-plugin/cordis.patch.yml')
+          assert.match(patch, /id: report-studio-dsh/)
+          assert.match(patch, /@architectureworld\/report-studio-dsh/)
+          const host = await read('packages/studio-dsh-plugin/lib/index.js')
+          for (const token of [
+            "inject = ['tools', 'webServer', 'systemPrompt']",
+            "path: '/report-studio'",
+            "name: 'studio_get_context'",
+            "name: 'studio_apply_commands'",
+            "agentMode: 'dsh-native'",
+          ]) assert.ok(host.includes(token), `missing host integration token: ${token}`)
+          const client = await read('packages/studio-dsh-plugin/lib/client.js')
+          for (const token of [
+            "id: '@architectureworld/report-studio-dsh'",
+            "name: 'conversation.view'",
+            "name: 'conversation.session.header.actions'",
+            "session.prompt([{ type: 'text', text }], 'queue')",
+            "'/report-studio/?sessionId='",
+          ]) assert.ok(client.includes(token), `missing client integration token: ${token}`)
+          const browser = await read('apps/studio-local/public/dsh-native-runtime.js')
+          for (const token of [
+            "window.location.pathname.startsWith('/report-studio')",
+            "type: 'report-studio.prompt'",
+            'report-studio.prompt-result',
+            "apiPath('/api/state')",
+          ]) assert.ok(browser.includes(token), `missing browser native bridge token: ${token}`)
+          const html = await read('apps/studio-local/public/index.html')
+          assert.match(html, /href="\.\/styles\.css"/)
+          assert.match(html, /src="\.\/app\.js"/)
+          console.log('Report Studio native DSH plugin verification PASS')
+          console.log('plugin=@architectureworld/report-studio-dsh@0.1.0')
+          console.log('baseline=@deepseek-ai/dsh@0.1.1-rc.2')
+          console.log('route=/report-studio')
+          console.log('tools=studio_get_context,studio_apply_commands')
+          ''')
+
+          write('scripts/smoke-dsh-native.mjs', r'''
+          import { spawn } from 'node:child_process'
+          import { mkdtemp, rm } from 'node:fs/promises'
+          import { tmpdir } from 'node:os'
+          import { join, resolve } from 'node:path'
+          import { fileURLToPath } from 'node:url'
+          import net from 'node:net'
+
+          const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || '@deepseek-ai/dsh@0.1.1-rc.2'
+          const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
+          const plugin = join(root, 'packages', 'studio-dsh-plugin')
+
+          function run(command, args, options = {}) {
+            return new Promise((resolvePromise, reject) => {
+              const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options })
+              let stdout = ''
+              let stderr = ''
+              child.stdout.on('data', chunk => { stdout += chunk })
+              child.stderr.on('data', chunk => { stderr += chunk })
+              child.once('error', reject)
+              child.once('exit', code => {
+                if (code === 0) resolvePromise({ stdout, stderr })
+                else reject(new Error(`${command} ${args.join(' ')} failed (${code})\n${stdout}\n${stderr}`))
+              })
+            })
+          }
+
+          async function freePort() {
+            const server = net.createServer()
+            await new Promise((resolvePromise, reject) => {
+              server.once('error', reject)
+              server.listen(0, '127.0.0.1', resolvePromise)
+            })
+            const port = server.address().port
+            await new Promise(resolvePromise => server.close(resolvePromise))
+            return port
+          }
+
+          async function waitForHealth(url, child, logs, timeoutMs = 90000) {
+            const deadline = Date.now() + timeoutMs
+            while (Date.now() < deadline) {
+              if (child.exitCode !== null) throw new Error(`DSH exited before health check (${child.exitCode})\n${logs()}`)
+              try {
+                const response = await fetch(url)
+                if (response.ok) return response.json()
+              } catch {}
+              await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
+            }
+            throw new Error(`Timed out waiting for ${url}\n${logs()}`)
+          }
+
+          const home = await mkdtemp(join(tmpdir(), 'report-studio-dsh-home-'))
+          const env = { ...process.env, DSH_HOME: home, CI: '1', NO_COLOR: '1' }
+          let child
+          try {
+            const npxPrefix = ['--yes', '--package', DSH_PACKAGE, 'dsh']
+            const version = await run('npx', [...npxPrefix, '--version'], { cwd: root, env })
+            await run('npx', [...npxPrefix, 'plugin', '--profile', 'web', 'add', plugin], { cwd: root, env })
+            const dumped = await run('npx', [...npxPrefix, '--profile', 'web', '--dump-config'], { cwd: root, env })
+            if (!dumped.stdout.includes('@architectureworld/report-studio-dsh')) throw new Error(`DSH composed config does not contain Report Studio plugin.\n${dumped.stdout}`)
+            const port = await freePort()
+            let stdout = ''
+            let stderr = ''
+            child = spawn('npx', [...npxPrefix, '--profile', 'web', '--port', String(port), '--no-open'], {
+              cwd: root,
+              env,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            })
+            child.stdout.on('data', chunk => { stdout += chunk })
+            child.stderr.on('data', chunk => { stderr += chunk })
+            const logs = () => `${stdout}\n${stderr}`
+            const healthUrl = `http://127.0.0.1:${port}/report-studio/api/health?sessionId=smoke-session`
+            const health = await waitForHealth(healthUrl, child, logs)
+            if (health.agentMode !== 'dsh-native' || health.agentConfigured !== true) throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
+            const page = await fetch(`http://127.0.0.1:${port}/report-studio/?sessionId=smoke-session`).then(response => response.text())
+            const nativeRuntime = await fetch(`http://127.0.0.1:${port}/report-studio/dsh-native-runtime.js`).then(response => response.text())
+            if (!page.includes('Report Studio') || !nativeRuntime.includes('report-studio.prompt')) throw new Error('DSH route did not serve the production Report Studio UI.')
+            console.log('Report Studio native DSH runtime smoke PASS')
+            console.log(`dsh=${version.stdout.trim()}`)
+            console.log('profile=web')
+            console.log(`health=${healthUrl}`)
+            console.log('plugin=@architectureworld/report-studio-dsh')
+          } finally {
+            if (child && child.exitCode === null) {
+              child.kill('SIGTERM')
+              await Promise.race([
+                new Promise(resolvePromise => child.once('exit', resolvePromise)),
+                new Promise(resolvePromise => setTimeout(resolvePromise, 5000)),
+              ])
+              if (child.exitCode === null) child.kill('SIGKILL')
+            }
+            await rm(home, { recursive: true, force: true })
+          }
+          ''')
+
+          index_path = Path('apps/studio-local/public/index.html')
+          index = index_path.read_text(encoding='utf-8')
+          index = index.replace('href="/styles.css"', 'href="./styles.css"')
+          index = index.replace('src="/app.js"', 'src="./app.js"')
+          native_script = '<script src="./dsh-native-runtime.js"></script>'
+          if native_script not in index:
+              target = '<script type="module" src="./app.js"></script>'
+              if target not in index:
+                  target = '<script src="./app.js"></script>'
+              if target not in index:
+                  raise SystemExit('unable to locate Report Studio app script in index.html')
+              index = index.replace(target, native_script + target, 1)
+          index_path.write_text(index, encoding='utf-8')
+
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          scripts = package['scripts']
+          scripts['test'] = 'node --test packages/studio-core/*.test.mjs packages/studio-dsh-plugin/*.test.mjs apps/studio-local/*.test.mjs'
+          scripts['verify:dsh'] = 'node scripts/verify-dsh-plugin.mjs'
+          scripts['smoke:dsh'] = 'node scripts/smoke-dsh-native.mjs'
+          scripts['verify:all'] = 'npm test && npm run verify && npm run verify:ui && npm run verify:dsh'
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          write('DSH_INSTALL.md', r'''
+          # Report Studio v0.1.0 — DSH 原生安装
+
+          本文件是交给本地部署 Agent 的首要入口。目标是把 Report Studio 安装到 DSH Web Profile，而不是启动独立网页后再配置外部 HTTP Bridge。
+
+          ## 固定基线
+
+          ```text
+          Repository: ArchitectureWorld/presentation-tools
+          Branch: integration/report-studio-mvp-v0.1.0
+          Report Studio: v0.1.0
+          Tested DSH: 0.1.1-rc.2
+          Profile: web
+          Plugin: @architectureworld/report-studio-dsh
+          ```
+
+          不得从 `main` 部署当前版本；`main` 仍可能落后于本支线。
+
+          ## 获取并核对代码
+
+          ```bash
+          git clone https://github.com/ArchitectureWorld/presentation-tools.git
+          cd presentation-tools
+          git fetch --all --prune
+          git checkout integration/report-studio-mvp-v0.1.0
+          git pull --ff-only
+          git branch --show-current
+          git log -1 --oneline
+          node -p "require('./package.json').version"
+          ```
+
+          必须存在 `packages/studio-dsh-plugin/`。如果目录不存在，说明使用了旧提交或错误分支。
+
+          ## 环境
+
+          ```bash
+          node --version
+          dsh --version
+          ```
+
+          要求 Node.js 22+；当前真实验收 DSH 基线为 `0.1.1-rc.2`。缺少 DSH 时：
+
+          ```bash
+          npm install --global @deepseek-ai/dsh@0.1.1-rc.2
+          ```
+
+          ## 安装和启动
+
+          ```bash
+          corepack enable
+          dsh plugin --profile web add ./packages/studio-dsh-plugin
+          dsh --profile web --dump-config
+          dsh --profile web --no-open
+          ```
+
+          dump-config 输出必须包含 `@architectureworld/report-studio-dsh`。进入 DSH Session 后，可从 `Report Studio` 会话视图或会话头部入口打开工作台。
+
+          ## 原生链路
+
+          ```text
+          Report Studio UI
+          → 同源 /report-studio API
+          → 当前 DSH Session
+          → session.prompt(..., 'queue')
+          → DSH Agent
+          → studio_get_context
+          → studio_apply_commands
+          → Proposal
+          → 用户确认
+          → Revision
+          ```
+
+          正式 DSH 模式不使用 `REPORT_STUDIO_AGENT_URL`、独立 4173 服务、第二套模型 Runtime 或 Mock Agent。
+
+          ## 数据
+
+          ```text
+          $DSH_HOME/report-studio-v0.1.0/sessions/<session-id-sha256>/state.json
+          ```
+
+          未设置 `DSH_HOME` 时使用 `~/.dsh/report-studio-v0.1.0/`。
+
+          ## 验证
+
+          ```bash
+          npm run verify:all
+          npm run smoke:dsh
+          ```
+
+          `smoke:dsh` 使用临时 DSH_HOME，真实完成插件安装、Web Profile 组合、DSH 启动和 `/report-studio` 健康检查。
+
+          ## 更新
+
+          ```bash
+          git checkout integration/report-studio-mvp-v0.1.0
+          git pull --ff-only
+          dsh plugin --profile web remove @architectureworld/report-studio-dsh
+          dsh plugin --profile web add ./packages/studio-dsh-plugin
+          dsh --profile web --dump-config
+          dsh --profile web --no-open
+          ```
+
+          ## 卸载
+
+          ```bash
+          dsh plugin --profile web remove @architectureworld/report-studio-dsh
+          ```
+          ''')
+
+          write('README.md', r'''
+          # Presentation Tools — Report Studio v0.1.0
+
+          Report Studio `v0.1.0` 当前正式范围是大纲、草案、批注、DSH 原生 Agent、Proposal/Revision 与持久化。正式排版进入 `v0.2.0`。
+
+          ## 当前部署基线
+
+          ```text
+          Branch: integration/report-studio-mvp-v0.1.0
+          DSH plugin: @architectureworld/report-studio-dsh@0.1.0
+          Tested DSH: 0.1.1-rc.2
+          Profile: web
+          ```
+
+          当前版本必须从上述支线获取；`main` 尚不是本轮交付来源。
+
+          ## DSH 原生安装
+
+          ```bash
+          git clone https://github.com/ArchitectureWorld/presentation-tools.git
+          cd presentation-tools
+          git checkout integration/report-studio-mvp-v0.1.0
+          git pull --ff-only
+          corepack enable
+          dsh plugin --profile web add ./packages/studio-dsh-plugin
+          dsh --profile web --dump-config
+          dsh --profile web --no-open
+          ```
+
+          进入 DSH Session 后，选择 `Report Studio` 会话视图，或点击会话头部的 `Report Studio` 入口。
+
+          完整部署说明：[`DSH_INSTALL.md`](DSH_INSTALL.md)。
+
+          ## 原生 DSH 能力
+
+          ```text
+          /report-studio              DSH 同源 UI/API 路由
+          conversation.view           Report Studio 会话视图
+          session.header.actions      Report Studio 入口
+          studio_get_context          受控项目上下文
+          studio_apply_commands       生成待确认 Proposal
+          ```
+
+          项目 Agent 和批注提交通过当前 DSH Session 的 `session.prompt(..., 'queue')` 进入 Harness。正式 DSH 模式不需要 `REPORT_STUDIO_AGENT_URL`。
+
+          ## 完整验证
+
+          ```bash
+          npm run verify:all
+          npm run smoke:dsh
+          ```
+
+          `smoke:dsh` 会用临时 DSH Home 真实安装插件、启动 Web Profile 并检查原生路由。
+
+          ## 独立调试模式
+
+          `npm start` 仍可用于独立调试；正式使用以 DSH 原生插件为准。
+          ''')
+
+          write('docs/deployment/report-studio-v0.1.0-local-deployment.md', r'''
+          # Report Studio v0.1.0 安装与部署说明
+
+          当前正式部署方式是 `@architectureworld/report-studio-dsh@0.1.0` DSH 原生插件。测试基线：DSH `0.1.1-rc.2`，Profile `web`。
+
+          ## 获取代码
+
+          ```bash
+          git clone https://github.com/ArchitectureWorld/presentation-tools.git
+          cd presentation-tools
+          git fetch --all --prune
+          git checkout integration/report-studio-mvp-v0.1.0
+          git pull --ff-only
+          test -f packages/studio-dsh-plugin/package.json
+          ```
+
+          如果只看到 `packages/studio-core`，说明仍在旧提交或错误分支。
+
+          ## 安装
+
+          ```bash
+          node --version
+          dsh --version
+          corepack enable
+          dsh plugin --profile web add ./packages/studio-dsh-plugin
+          dsh --profile web --dump-config
+          dsh --profile web --no-open
+          ```
+
+          进入 DSH Session 后，会话视图和会话头部均出现 `Report Studio` 入口。
+
+          ## Agent 工作流
+
+          ```text
+          ReviewSubmission
+          → 当前 DSH Session session.prompt
+          → studio_get_context
+          → studio_apply_commands
+          → Proposal
+          → 用户确认
+          → Revision
+          ```
+
+          正式模式不需要 `REPORT_STUDIO_AGENT_URL`，也不启动第二套 Agent Runtime。
+
+          ## 数据
+
+          ```text
+          $DSH_HOME/report-studio-v0.1.0/sessions/<session-id-sha256>/state.json
+          ```
+
+          ## 验证
+
+          ```bash
+          npm run verify:all
+          npm run smoke:dsh
+          ```
+
+          `smoke:dsh` 使用临时 DSH Home 真实验证本地插件安装、Profile 组合、DSH Web 启动、原生健康检查和正式 UI 资源。
+
+          更完整的逐步说明见仓库根目录 `DSH_INSTALL.md`。
+          ''')
+
+          write('docs/handoff/2026-09-02-report-studio-v0.1.0-runnable-handoff.md', r'''
+          # Report Studio v0.1.0 DSH 原生可运行版 Handoff
+
+          ```text
+          Repository: ArchitectureWorld/presentation-tools
+          Branch: integration/report-studio-mvp-v0.1.0
+          Version: v0.1.0
+          Status: dsh-native-runnable-outline-draft-mvp
+          DSH baseline: 0.1.1-rc.2
+          DSH profile: web
+          Layout: deferred-to-v0.2.0
+          ```
+
+          已实现响应式原型保真工作台、Outline/Draft/Review/Proposal/Revision、Session 项目隔离持久化、DSH Host/Client 原生插件、`conversation.view`、会话头部入口、`session.prompt(..., 'queue')`、`studio_get_context`、`studio_apply_commands`，以及真实 DSH 安装和启动烟测。
+
+          正式安装入口：`DSH_INSTALL.md`。
+
+          ```bash
+          corepack enable
+          dsh plugin --profile web add ./packages/studio-dsh-plugin
+          dsh --profile web --dump-config
+          dsh --profile web --no-open
+          ```
+
+          正式 DSH 模式不依赖 `REPORT_STUDIO_AGENT_URL` 或独立 4173 服务。
+
+          验证：
+
+          ```bash
+          npm run verify:all
+          npm run smoke:dsh
+          ```
+
+          `v0.2.0` 再开发正式排版画布，本轮不改变该边界。
+          ''')
+          PY
+
+      - name: Run full local verification
+        env:
+          CHROMIUM_PATH: google-chrome
+        run: npm run verify:all
+
+      - name: Run real DSH install and boot smoke
+        run: npm run smoke:dsh
+
+      - name: Commit verified native integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            DSH_INSTALL.md \
+            README.md \
+            package.json \
+            apps/studio-local/public/index.html \
+            apps/studio-local/public/dsh-native-runtime.js \
+            apps/studio-local/dsh-native-ui.test.mjs \
+            packages/studio-dsh-plugin \
+            scripts/verify-dsh-plugin.mjs \
+            scripts/smoke-dsh-native.mjs \
+            docs/deployment/report-studio-v0.1.0-local-deployment.md \
+            docs/handoff/2026-09-02-report-studio-v0.1.0-runnable-handoff.md
+          git rm .github/workflows/apply-native-dsh-integration.yml
+          git diff --cached --check
+          git status --short
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'feat: add native DSH Report Studio integration'
+          git push origin HEAD:${{ github.ref_name }}
