@@ -1,0 +1,53 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/asset-manifest.schema.json",
+  "documentType": "AssetManifest",
+  "standardVersion": "0.1.0",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "assets": [
+    {
+      "assetId": "asset_01992a80-0000-7000-8000-000000000221",
+      "displayName": "场地面积摘要",
+      "mediaType": "image",
+      "category": "chart",
+      "semanticRole": "核心指标摘要图",
+      "relativePath": "assets/charts/场地面积摘要.svg",
+      "mimeType": "image/svg+xml",
+      "sizeBytes": 898,
+      "sha256": "fca79c608e68fb518e296c893104324296b5f29e4dadeed9c94a084035666e9f",
+      "metadata": {
+        "widthPx": 1200,
+        "heightPx": 675
+      },
+      "adoptionStatus": "adopted",
+      "origin": {
+        "type": "derived_source_material",
+        "sourceMaterialIds": [
+          "source_material_01992a80-0000-7000-8000-000000000211"
+        ],
+        "parentAssetIds": [],
+        "method": "从原始 CSV 中提取已确认指标并生成静态矢量图",
+        "sourceTool": {
+          "name": "presentation-contracts-example-generator",
+          "version": "1.0.0"
+        }
+      },
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ],
+      "createdAt": "2026-09-02T00:15:00Z",
+      "adoptedAt": "2026-09-02T00:20:00Z",
+      "retiredAt": null
+    }
+  ]
+}

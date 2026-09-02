@@ -1,0 +1,50 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/page-manifest.schema.json",
+  "documentType": "PageManifest",
+  "standardVersion": "0.1.0",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "pages": [
+    {
+      "pageId": "page_01992a80-0000-7000-8000-000000000111",
+      "outlineNodeId": "outline_node_01992a80-0000-7000-8000-000000000110",
+      "order": 0,
+      "titleBlockId": "content_block_01992a80-0000-7000-8000-000000000131",
+      "draftPath": "pages/drafts/page_01992a80-0000-7000-8000-000000000111.json",
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    },
+    {
+      "pageId": "page_01992a80-0000-7000-8000-000000000112",
+      "outlineNodeId": "outline_node_01992a80-0000-7000-8000-000000000110",
+      "order": 1,
+      "titleBlockId": "content_block_01992a80-0000-7000-8000-000000000132",
+      "draftPath": "pages/drafts/page_01992a80-0000-7000-8000-000000000112.json",
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-manifest.schema.json",
+  "documentType": "ProjectManifest",
+  "standardVersion": "0.1.0",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "name": "校园更新汇报示例",
+  "projectSlug": "campus-renewal-brief",
+  "defaultCanvasPreset": "16:9",
+  "projectRulesId": "project_rules_01992a80-0000-7000-8000-000000000102",
+  "createdAt": "2026-09-02T00:00:00Z",
+  "createdBy": {
+    "provider": "pre-design",
+    "sourceProjectId": "project_001",
+    "actorId": null
+  }
+}

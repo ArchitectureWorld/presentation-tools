@@ -1,12 +1,14 @@
 ---
 document_id: report-studio-mvp-baseline
-status: implementation-authority
+status: implementation-baseline-reference
 version: 0.1.0
 updated_at: 2026-09-02
 repository: ArchitectureWorld/presentation-tools
 ---
 
 # Report Studio MVP 基线 v0.1.0
+
+> 本文件保留 MVP 实现范围与验收基线，不是平行架构权威。唯一架构母文件为 `docs/architecture/report-studio-architecture.md`。
 
 ## 0. 版本规则
 

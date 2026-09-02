@@ -1,0 +1,216 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/draft-page-document.schema.json",
+  "documentType": "DraftPageDocument",
+  "standardVersion": "0.1.0",
+  "draftDocumentId": "draft_page_01992a80-0000-7000-8000-000000000121",
+  "projectId": "project_01992a80-0000-7000-8000-000000000101",
+  "pageId": "page_01992a80-0000-7000-8000-000000000111",
+  "contentBlocks": [
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000131",
+      "type": "heading",
+      "role": "page_title",
+      "order": 0,
+      "content": "更新基础已经具备",
+      "sourceRefs": []
+    },
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000133",
+      "type": "text",
+      "role": "key_message",
+      "order": 1,
+      "content": "现有用地指标具备更新基础，第一阶段应优先把有限建设资源集中到公共空间与高频使用区域。",
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ],
+      "contentNature": "professional_judgement"
+    },
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000134",
+      "type": "text",
+      "role": "body",
+      "order": 2,
+      "content": "原始指标显示，项目具备明确的用地规模和可量化的绿地基础，可支撑后续方案比较。",
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    },
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000135",
+      "type": "list",
+      "role": "body",
+      "order": 3,
+      "listStyle": "unordered",
+      "items": [
+        {
+          "listItemId": "list_item_01992a80-0000-7000-8000-000000000141",
+          "content": "优先改善高频公共活动空间",
+          "sourceRefs": [
+            {
+              "provider": "pre-design",
+              "sourceProjectId": "project_001",
+              "sourceRevision": 42,
+              "objectIds": [
+                "DG05"
+              ],
+              "evidenceIds": [
+                "evidence_031"
+              ],
+              "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+            }
+          ],
+          "order": 0,
+          "contentNature": "recommendation"
+        },
+        {
+          "listItemId": "list_item_01992a80-0000-7000-8000-000000000142",
+          "content": "保留可复用的现状资源",
+          "sourceRefs": [],
+          "order": 1,
+          "contentNature": "recommendation"
+        },
+        {
+          "listItemId": "list_item_01992a80-0000-7000-8000-000000000143",
+          "content": "分阶段验证投入与效果",
+          "sourceRefs": [],
+          "order": 2,
+          "contentNature": "recommendation"
+        }
+      ],
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    },
+    {
+      "contentBlockId": "content_block_01992a80-0000-7000-8000-000000000136",
+      "type": "metric_group",
+      "role": "body",
+      "order": 4,
+      "metrics": [
+        {
+          "metricId": "metric_01992a80-0000-7000-8000-000000000151",
+          "label": "规划净用地",
+          "value": "12,800",
+          "unit": "㎡",
+          "note": "原始资料值",
+          "sourceRefs": [
+            {
+              "provider": "pre-design",
+              "sourceProjectId": "project_001",
+              "sourceRevision": 42,
+              "objectIds": [
+                "DG05"
+              ],
+              "evidenceIds": [
+                "evidence_031"
+              ],
+              "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+            }
+          ],
+          "order": 0,
+          "contentNature": "fact"
+        },
+        {
+          "metricId": "metric_01992a80-0000-7000-8000-000000000152",
+          "label": "绿地率",
+          "value": "30",
+          "unit": "%",
+          "note": "原始资料值",
+          "sourceRefs": [
+            {
+              "provider": "pre-design",
+              "sourceProjectId": "project_001",
+              "sourceRevision": 42,
+              "objectIds": [
+                "DG05"
+              ],
+              "evidenceIds": [
+                "evidence_031"
+              ],
+              "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+            }
+          ],
+          "order": 1,
+          "contentNature": "fact"
+        }
+      ],
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ]
+    }
+  ],
+  "scriptBlocks": [
+    {
+      "scriptBlockId": "script_block_01992a80-0000-7000-8000-000000000191",
+      "order": 0,
+      "content": "本页先说明项目具备更新基础，再强调第一阶段资源投入的优先顺序。",
+      "estimatedDurationSeconds": 25,
+      "sourceRefs": [
+        {
+          "provider": "pre-design",
+          "sourceProjectId": "project_001",
+          "sourceRevision": 42,
+          "objectIds": [
+            "DG05"
+          ],
+          "evidenceIds": [
+            "evidence_031"
+          ],
+          "sourceSnapshotSha256": "a987941cf6d31fbf5ccadcd6abc190831bbdfca2b4a85fc04e5dd18fa0e6f175"
+        }
+      ],
+      "referencedContentBlockIds": [
+        "content_block_01992a80-0000-7000-8000-000000000131",
+        "content_block_01992a80-0000-7000-8000-000000000133"
+      ],
+      "referencedAssetIds": [
+        "asset_01992a80-0000-7000-8000-000000000221"
+      ]
+    }
+  ],
+  "pageAssets": []
+}

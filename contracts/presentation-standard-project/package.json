@@ -1,0 +1,44 @@
+{
+  "name": "@architectureworld/presentation-contracts",
+  "version": "0.1.0",
+  "description": "Canonical schemas, ID factory, pure project factory, and validators for the Presentation Standard Project Directory",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    },
+    "./schemas/*": "./schemas/0.1.0/*",
+    "./contract-manifest.json": "./contract-manifest.json",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "presentation-contracts": "./bin/presentation-contracts.mjs"
+  },
+  "files": [
+    "STANDARD_VERSION",
+    "SCHEMASET.sha256",
+    "contract-manifest.json",
+    "schemas/0.1.0/*.schema.json",
+    "src/*.mjs",
+    "src/*.d.ts",
+    "bin/*.mjs",
+    "fixtures",
+    "examples",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "verify": "node scripts/verify-all.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-manifest.schema.json",
+  "documentType": "ProjectManifest",
+  "standardVersion": "0.1.0",
+  "projectId": "project_01992a80-0000-7000-8000-000000000001",
+  "name": "最小合法项目",
+  "projectSlug": "minimal-project",
+  "defaultCanvasPreset": "16:9",
+  "projectRulesId": "project_rules_01992a80-0000-7000-8000-000000000002",
+  "createdAt": "2026-09-02T00:00:00Z",
+  "createdBy": {
+    "provider": "presentation-tools",
+    "sourceProjectId": null,
+    "actorId": null
+  }
+}

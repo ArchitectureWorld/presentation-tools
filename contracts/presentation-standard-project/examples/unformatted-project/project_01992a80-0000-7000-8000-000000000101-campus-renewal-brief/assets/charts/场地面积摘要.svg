@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">场地面积摘要</title>
+  <desc id="desc">由场地指标数据派生的正式采用图表</desc>
+  <rect width="1200" height="675" fill="#ffffff"/>
+  <text x="80" y="110" font-size="48" font-family="sans-serif">场地面积摘要</text>
+  <rect x="80" y="180" width="1040" height="120" rx="20" fill="#e8eef8"/>
+  <text x="120" y="255" font-size="42" font-family="sans-serif">规划净用地 12,800 ㎡</text>
+  <rect x="80" y="335" width="1040" height="120" rx="20" fill="#edf5eb"/>
+  <text x="120" y="410" font-size="42" font-family="sans-serif">建筑面积 26,500 ㎡</text>
+  <rect x="80" y="490" width="1040" height="100" rx="20" fill="#f8f1e8"/>
+  <text x="120" y="555" font-size="38" font-family="sans-serif">绿地率 30%</text>
+</svg>
