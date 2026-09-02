@@ -56,7 +56,7 @@ async function loadClientBundle() {
 
 const plain = value => JSON.parse(JSON.stringify(value))
 
-test('native DSH client registers the Report Studio view and sends prompts through the current session', async () => {
+test('native DSH client registers session-scoped views and sends prompts through the current session', async () => {
   const { exported, window, windowListeners } = await loadClientBundle()
   assert.deepEqual([...exported.inject], ['slots', 'sessions'])
 
@@ -97,10 +97,24 @@ test('native DSH client registers the Report Studio view and sends prompts throu
   const header = registrations.find(row => row.definition.name === 'conversation.session.header.actions')
   assert.equal(view?.definition.id, 'report-studio')
   assert.equal(header?.definition.id, 'report-studio')
+  assert.equal(typeof view.definition.inject, 'function')
+  assert.equal(typeof header.definition.inject, 'function')
+  assert.equal(view.definition.inject('session-native').sessions, sessions)
+  assert.equal(header.definition.inject('session-native').sessions, sessions)
 
-  const iframe = view.component({ sessionId: 'session-native' })
+  const iframe = view.component({
+    sessionId: 'session-native',
+    ...view.definition.inject('session-native'),
+  })
   assert.equal(iframe.type, 'iframe')
   assert.match(iframe.props.src, /^\/report-studio\/\?sessionId=session-native$/)
+
+  const headerButton = header.component({
+    sessionId: 'session-native',
+    ...header.definition.inject('session-native'),
+  })
+  assert.equal(headerButton.type, 'button')
+  assert.equal(headerButton.children[0], 'Report Studio')
 
   const promptResults = []
   const frameWindow = {
