@@ -1,0 +1,6 @@
+generated_file=docs/architecture/report-studio-architecture.md
+source_parts=3
+lines=2519
+bytes=122039
+sha256=b0d6e78632576ffc3983fd9afd33b73f04d15436521fb130b20d8bc073d8caa1
+status=PASS
