@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createStudioDshRuntime } from './runtime.js'
+import { errorPayload } from '../../studio-contracts/index.mjs'
+import { createStandardProjectService } from '../../../apps/studio-local/standard-project.mjs'
 
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt']
@@ -68,15 +70,18 @@ function toolOutput() {
 function registerTools(ctx, runtime) {
   ctx.tools.register({
     name: 'studio_get_context',
-    description: '读取当前 DSH Session 绑定的 Report Studio v0.1.0 大纲、草案、批注轮次、Submission、Proposal 与 Revision 上下文。修改前必须先调用。',
+    description: '按不可变 ReviewSubmission 的 baseRevision 读取 Report Studio v0.1.1 大纲、草案和批注快照。修改前必须先调用。',
     parameters: {
       type: 'object',
-      properties: {},
+      properties: {
+        submissionId: { type: 'string', description: 'ReviewSubmission 提示中提供的稳定 ID。' },
+      },
+      required: ['submissionId'],
       additionalProperties: false,
     },
     output: toolOutput(),
-    async execute(_args, exec) {
-      return outputJson(await runtime.getContext(sessionIdOf(exec)))
+    async execute(args, exec) {
+      return outputJson(await runtime.getContext(sessionIdOf(exec), args.submissionId))
     },
   })
 
@@ -89,6 +94,10 @@ function registerTools(ctx, runtime) {
         submissionId: {
           type: 'string',
           description: 'ReviewSubmission 提示中提供的稳定 ID。',
+        },
+        idempotencyKey: {
+          type: 'string',
+          description: '可选；默认使用 ReviewSubmission 固定的幂等键。',
         },
         message: {
           type: 'string',
@@ -146,16 +155,27 @@ function createRoute(runtime) {
     try {
       if (url.pathname.startsWith('/report-studio/api/')) {
         const sessionId = sessionIdFrom(url)
+        const repository = await runtime.repositoryFor(sessionId)
+        const standardProject = createStandardProjectService(repository)
         if (request.method === 'GET' && url.pathname === '/report-studio/api/health') {
           return sendJson(response, 200, {
             ok: true,
-            version: 'v0.1.0',
+            version: 'v0.1.1',
             agentConfigured: true,
             agentMode: 'dsh-native',
             sessionId,
             dataRoot: runtime.dataRoot,
+            migrationStatus: repository.migrationStatus().status,
           })
         }
+        if (request.method === 'GET' && url.pathname === '/report-studio/api/migration/status') return sendJson(response, 200, repository.migrationStatus())
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/migration/apply') return sendJson(response, 200, await repository.applyMigration())
+        if (request.method === 'GET' && url.pathname === '/report-studio/api/standard/status') return sendJson(response, 200, standardProject.status())
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/standard/import') {
+          const input = await readJson(request)
+          return sendJson(response, 200, await standardProject.importProject(input.projectRoot))
+        }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/standard/export') return sendJson(response, 200, await standardProject.exportProject())
         if (request.method === 'GET' && url.pathname === '/report-studio/api/state') {
           return sendJson(response, 200, await runtime.getState(sessionId))
         }
@@ -165,6 +185,10 @@ function createRoute(runtime) {
         if (request.method === 'POST' && url.pathname === '/report-studio/api/review/submit') {
           return sendJson(response, 200, await runtime.submitReview(sessionId, await readJson(request)))
         }
+        const retryMatch = url.pathname.match(/^\/report-studio\/api\/review\/([^/]+)\/retry$/)
+        if (request.method === 'POST' && retryMatch) return sendJson(response, 200, await runtime.retrySubmission(sessionId, decodeURIComponent(retryMatch[1])))
+        const dispatchMatch = url.pathname.match(/^\/report-studio\/api\/review\/([^/]+)\/dispatch$/)
+        if (request.method === 'POST' && dispatchMatch) return sendJson(response, 200, await runtime.updateDispatch(sessionId, decodeURIComponent(dispatchMatch[1]), await readJson(request)))
         if (request.method === 'POST' && url.pathname === '/report-studio/api/agent/chat') {
           return sendJson(response, 200, await runtime.prepareChat(sessionId, await readJson(request)))
         }
@@ -177,7 +201,7 @@ function createRoute(runtime) {
       if (await serveStatic(request, response, url)) return
       sendJson(response, 404, { error: 'not_found' })
     } catch (error) {
-      sendJson(response, error?.statusCode || 400, { error: error?.message || 'request_failed' })
+      sendJson(response, error?.statusCode || 400, error?.code ? errorPayload(error) : { error: error?.message || 'request_failed' })
     }
   }
 }
@@ -186,11 +210,11 @@ export function apply(ctx, config = {}) {
   const runtime = createStudioDshRuntime({ dataRoot: config.dataDir })
   registerTools(ctx, runtime)
   ctx.systemPrompt.section({
-    name: 'report-studio-v0.1.0',
+    name: 'report-studio-v0.1.1',
     order: 130,
     text: [
-      'Report Studio v0.1.0 is available in this DSH Session.',
-      'For Report Studio review tasks, call studio_get_context before proposing changes.',
+      'Report Studio v0.1.1 is available in this DSH Session.',
+      'For Report Studio review tasks, call studio_get_context with the supplied submissionId before proposing changes.',
       'Use studio_apply_commands only with the ReviewSubmission ID supplied by the user task.',
       'studio_apply_commands creates a Proposal for human confirmation and never directly commits Project State.',
     ].join('\n'),

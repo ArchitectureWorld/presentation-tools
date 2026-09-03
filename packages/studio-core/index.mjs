@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createStudioId } from '../studio-contracts/index.mjs';
+import { ERROR_CODES, StudioError, createStudioId } from '../studio-contracts/index.mjs';
 
 const now = () => new Date().toISOString();
 const ID_KINDS = Object.freeze({
@@ -11,7 +11,7 @@ const clone = value => structuredClone(value);
 
 export function createInitialState() {
   return {
-    schemaVersion: 'report-studio.v0.1.0',
+    schemaVersion: 'report-studio.v0.1.1',
     project: { id: id('project'), title: '未命名汇报项目', currentRevision: 0, createdAt: now(), updatedAt: now() },
     outline: [], pages: [], annotations: [], reviewRounds: [], reviewSubmissions: [], proposals: [], revisions: [],
     ui: { stage: 'outline', activePageId: null },
@@ -176,7 +176,8 @@ export function submitReviewRound(state, input) {
   const candidates = next.annotations.filter(annotation => annotation.scopeKey === scopeKey && annotation.resolution === 'open' && annotation.lifecycle === 'draft' && (annotation.reviewRoundId === null || annotation.reviewRoundId === round.id));
   if (!candidates.length) throw new Error('当前轮次没有待提交批注');
   const previousCount = next.reviewSubmissions.filter(item => item.reviewRoundId === round.id).length;
-  const submission = { id: id('submission'), reviewRoundId: round.id, number: previousCount + 1, baseRevision: next.project.currentRevision, annotations: candidates.map(annotation => ({ id: annotation.id, version: annotation.version, target: clone(annotation.target), instruction: annotation.instruction, contentHash: createHash('sha256').update(`${annotation.id}:${annotation.version}:${annotation.instruction}`).digest('hex') })), status: 'created', createdAt: now(), agentMessage: null };
+  const submissionId = id('submission');
+  const submission = { id: submissionId, reviewRoundId: round.id, number: previousCount + 1, baseRevision: next.project.currentRevision, annotations: candidates.map(annotation => ({ id: annotation.id, version: annotation.version, target: clone(annotation.target), instruction: annotation.instruction, contentHash: createHash('sha256').update(`${annotation.id}:${annotation.version}:${annotation.instruction}`).digest('hex') })), status: 'pending_dispatch', idempotencyKey: `review:${submissionId}`, dispatchAttempts: 0, lastDispatchError: null, createdAt: now(), agentMessage: null };
   for (const annotation of candidates) { annotation.lifecycle = 'submitted'; annotation.reviewRoundId = round.id; }
   next.reviewSubmissions.push(submission); round.updatedAt = now();
   return { state: next, round: clone(round), submission: clone(submission) };
@@ -186,10 +187,38 @@ export function createProposalFromAgent(state, submissionId, result) {
   const next = clone(state);
   const submission = next.reviewSubmissions.find(item => item.id === submissionId);
   if (!submission) throw new Error('未找到 ReviewSubmission');
+  const idempotencyKey = String(result?.idempotencyKey || submission.idempotencyKey || `review:${submission.id}`);
+  const existing = next.proposals.find(item => item.submissionId === submissionId);
+  if (existing) {
+    if (existing.idempotencyKey !== idempotencyKey) throw new StudioError(ERROR_CODES.PROPOSAL_ALREADY_EXISTS, '该 ReviewSubmission 已存在 Proposal。', { proposalId: existing.id }, 409);
+    return { state: next, proposal: clone(existing), reused: true };
+  }
   const commands = Array.isArray(result?.commands) ? clone(result.commands) : [];
-  const proposal = { id: id('proposal'), submissionId, reviewRoundId: submission.reviewRoundId, baseRevision: submission.baseRevision, message: String(result?.message || ''), commands, status: 'pending', createdAt: now() };
-  submission.status = 'result_linked'; submission.agentMessage = proposal.message;
+  const proposal = { id: id('proposal'), submissionId, reviewRoundId: submission.reviewRoundId, baseRevision: submission.baseRevision, idempotencyKey, message: String(result?.message || ''), commands, status: 'pending', createdAt: now() };
+  submission.status = 'proposal_created'; submission.agentMessage = proposal.message; submission.lastDispatchError = null;
   next.proposals.push(proposal); return { state: next, proposal: clone(proposal) };
+}
+
+export function markSubmissionDispatch(state, submissionId, { status, error = null } = {}) {
+  if (!['dispatched', 'dispatch_failed'].includes(status)) throw new Error('无效投递状态');
+  const next = clone(state);
+  const submission = next.reviewSubmissions.find(item => item.id === submissionId);
+  if (!submission) throw new Error('未找到 ReviewSubmission');
+  submission.status = status;
+  submission.dispatchAttempts = Number(submission.dispatchAttempts || 0) + 1;
+  submission.lastDispatchError = status === 'dispatch_failed' ? String(error || '投递失败') : null;
+  submission.lastDispatchAt = now();
+  return { state: next, submission: clone(submission) };
+}
+
+export function retryReviewSubmission(state, submissionId) {
+  const next = clone(state);
+  const submission = next.reviewSubmissions.find(item => item.id === submissionId);
+  if (!submission) throw new Error('未找到 ReviewSubmission');
+  if (submission.status !== 'dispatch_failed') throw new Error('仅投递失败的 ReviewSubmission 可以重投');
+  submission.status = 'pending_dispatch';
+  submission.lastDispatchError = null;
+  return { state: next, submission: clone(submission) };
 }
 
 export function acceptProposal(state, proposalId) {
@@ -202,5 +231,7 @@ export function acceptProposal(state, proposalId) {
   next = commitRevision(next, 'agent', { proposalId, submissionId: proposal.submissionId });
   const stored = next.proposals.find(item => item.id === proposalId);
   stored.status = 'accepted'; stored.acceptedRevision = next.project.currentRevision; stored.acceptedAt = now();
+  const submission = next.reviewSubmissions.find(item => item.id === stored.submissionId);
+  if (submission) submission.status = 'accepted';
   return { state: next, revision: clone(next.revisions.at(-1)) };
 }

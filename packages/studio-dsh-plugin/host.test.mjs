@@ -41,15 +41,14 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     assert.deepEqual(inject, ['tools', 'webServer', 'systemPrompt'])
     assert.deepEqual(tools.map(tool => tool.name), ['studio_get_context', 'studio_apply_commands'])
     assert.equal(tools[0].parameters.type, 'object')
+    assert.deepEqual(tools[0].parameters.required, ['submissionId'])
     assert.deepEqual(tools[0].output.schema, {})
     assert.deepEqual(tools[1].parameters.required, ['submissionId', 'message', 'commands'])
-    assert.equal(promptSections[0].name, 'report-studio-v0.1.0')
+    assert.equal(promptSections[0].name, 'report-studio-v0.1.1')
     assert.equal(route.kind, 'prefix')
     assert.equal(route.path, '/report-studio')
 
-    const context = await tools[0].execute({}, { agent: { id: 'session-host-test' } })
-    assert.equal(context.sessionId, 'session-host-test')
-    assert.equal(context.contractVersion, 'report-studio.v0.1.0')
+    await assert.rejects(tools[0].execute({}, { agent: { id: 'session-host-test' } }), error => error.code === 'invalid_command')
 
     const headers = new Map()
     let body = ''

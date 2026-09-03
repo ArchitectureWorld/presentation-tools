@@ -4,13 +4,14 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRepository } from './repository.mjs';
 import { createAgentBridge } from './agent-bridge.mjs';
-import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent } from '../../packages/studio-core/index.mjs';
-import { errorPayload } from '../../packages/studio-contracts/index.mjs';
+import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent, markSubmissionDispatch, retryReviewSubmission } from '../../packages/studio-core/index.mjs';
+import { ERROR_CODES, StudioError, errorPayload } from '../../packages/studio-contracts/index.mjs';
 import { createStandardProjectService } from './standard-project.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const isContentAction = type => ['project.', 'outline.', 'draft.'].some(prefix => String(type).startsWith(prefix));
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);
@@ -37,6 +38,46 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   let actualPort = port;
   let server;
 
+  async function dispatchSubmission(submissionId) {
+    if (!bridge?.configured) throw new StudioError(ERROR_CODES.DISPATCH_FAILED, 'DSH Bridge 未配置。', { submissionId }, 503);
+    const before = repository.getState();
+    const submission = before.reviewSubmissions.find(item => item.id === submissionId);
+    if (!submission) throw new Error('未找到 ReviewSubmission');
+    const round = before.reviewRounds.find(item => item.id === submission.reviewRoundId);
+    try {
+      const agentResult = await bridge.submit({
+        submission,
+        context: { projectId: before.project.id, projectTitle: before.project.title, scopeKey: round?.scopeKey ?? null },
+      });
+      let proposal = null;
+      await repository.transactOperational(state => {
+        let next = markSubmissionDispatch(state, submissionId, { status: 'dispatched' }).state;
+        if (agentResult.commands.length) {
+          const proposed = createProposalFromAgent(next, submissionId, { ...agentResult, idempotencyKey: submission.idempotencyKey });
+          next = proposed.state;
+          proposal = proposed.proposal;
+        } else {
+          const stored = next.reviewSubmissions.find(item => item.id === submissionId);
+          stored.agentMessage = agentResult.message;
+        }
+        return next;
+      });
+      return {
+        state: repository.getState(),
+        submission: repository.getState().reviewSubmissions.find(item => item.id === submissionId),
+        bridgeResult: { message: agentResult.message, proposalId: proposal?.id ?? null, sessionRef: agentResult.sessionRef ?? null },
+      };
+    } catch (error) {
+      let failed;
+      await repository.transactOperational(state => {
+        const marked = markSubmissionDispatch(state, submissionId, { status: 'dispatch_failed', error: error.message });
+        failed = marked.submission;
+        return marked.state;
+      });
+      throw new StudioError(ERROR_CODES.DISPATCH_FAILED, error.message || 'DSH Bridge 调用失败。', { submissionId, submission: failed }, 502);
+    }
+  }
+
   async function handleApi(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.0', dataPath: repository.statePath, migrationStatus: repository.migrationStatus().status, agentConfigured: Boolean(bridge?.configured) });
     if (req.method === 'GET' && url.pathname === '/api/migration/status') return sendJson(res, 200, repository.migrationStatus());
@@ -50,28 +91,50 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     if (req.method === 'GET' && url.pathname === '/api/state') return sendJson(res, 200, repository.getState());
     if (req.method === 'POST' && url.pathname === '/api/action') {
       const action = await readJson(req);
-      const result = executeAction(repository.getState(), action);
-      await repository.replace(result.state);
-      return sendJson(res, 200, repository.getState());
+      if (isContentAction(action.type)) {
+        if (repository.migrationStatus().status === 'ready' && !Number.isInteger(action.baseRevision)) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '内容操作必须携带 baseRevision。', undefined, 400);
+        const cleanAction = { ...action }; delete cleanAction.baseRevision;
+        const state = await repository.transactContent(
+          { baseRevision: action.baseRevision, source: 'human', detail: { actionType: action.type } },
+          current => executeAction(current, cleanAction).state,
+        );
+        return sendJson(res, 200, state);
+      }
+      const state = await repository.transactOperational(current => executeAction(current, action).state);
+      return sendJson(res, 200, state);
     }
     if (req.method === 'POST' && url.pathname === '/api/review/submit') {
       const input = await readJson(req);
-      const submitted = submitReviewRound(repository.getState(), input);
-      await repository.replace(submitted.state);
-      let bridgeResult = null;
+      let submitted;
+      await repository.transactOperational(state => {
+        submitted = submitReviewRound(state, input);
+        return submitted.state;
+      });
       if (bridge?.configured) {
         try {
-          const agentResult = await bridge.submit({ submission: submitted.submission, context: { projectId: submitted.state.project.id, projectTitle: submitted.state.project.title, scopeKey: submitted.round.scopeKey } });
-          let proposalId = null;
-          if (agentResult.commands.length) {
-            const proposed = createProposalFromAgent(repository.getState(), submitted.submission.id, agentResult);
-            await repository.replace(proposed.state);
-            proposalId = proposed.proposal.id;
-          }
-          bridgeResult = { message: agentResult.message, proposalId, sessionRef: agentResult.sessionRef ?? null };
-        } catch (error) { bridgeResult = { error: error.message || 'DSH Bridge 调用失败' }; }
+          const dispatched = await dispatchSubmission(submitted.submission.id);
+          return sendJson(res, 200, { ...dispatched, round: submitted.round });
+        } catch (error) {
+          return sendJson(res, error.statusCode || 502, {
+            ...errorPayload(error),
+            state: repository.getState(),
+            round: submitted.round,
+            submission: repository.getState().reviewSubmissions.find(item => item.id === submitted.submission.id),
+          });
+        }
       }
-      return sendJson(res, 200, { state: repository.getState(), round: submitted.round, submission: submitted.submission, bridgeResult });
+      return sendJson(res, 200, { state: repository.getState(), round: submitted.round, submission: submitted.submission, bridgeResult: null });
+    }
+    const retryMatch = url.pathname.match(/^\/api\/review\/([^/]+)\/retry$/);
+    if (req.method === 'POST' && retryMatch) {
+      const submissionId = decodeURIComponent(retryMatch[1]);
+      let retried;
+      await repository.transactOperational(state => {
+        retried = retryReviewSubmission(state, submissionId);
+        return retried.state;
+      });
+      try { return sendJson(res, 200, await dispatchSubmission(submissionId)); }
+      catch (error) { return sendJson(res, error.statusCode || 502, { ...errorPayload(error), state: repository.getState(), submission: repository.getState().reviewSubmissions.find(item => item.id === submissionId) }); }
     }
     if (req.method === 'POST' && url.pathname === '/api/agent/chat') {
       const input = await readJson(req);
@@ -82,9 +145,14 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     }
     const proposalMatch = url.pathname.match(/^\/api\/proposal\/([^/]+)\/accept$/);
     if (req.method === 'POST' && proposalMatch) {
-      const result = acceptProposal(repository.getState(), proposalMatch[1]);
-      await repository.replace(result.state);
-      return sendJson(res, 200, { state: repository.getState(), revision: result.revision });
+      const proposalId = proposalMatch[1];
+      const proposal = repository.getState().proposals.find(item => item.id === proposalId);
+      if (!proposal) throw new Error('未找到 Proposal');
+      const state = await repository.transactContent(
+        { baseRevision: proposal.baseRevision, source: 'agent', detail: { proposalId, submissionId: proposal.submissionId } },
+        current => acceptProposal(current, proposalId).state,
+      );
+      return sendJson(res, 200, { state, revision: state.revisions.at(-1) });
     }
     return false;
   }

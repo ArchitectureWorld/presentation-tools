@@ -25,7 +25,7 @@ test('HTTP API exposes health, state and persisted actions', async () => {
     const base = `http://127.0.0.1:${app.port}`;
     const health = await fetch(`${base}/api/health`).then(r => r.json()); assert.equal(health.ok, true); assert.equal(health.version, 'v0.1.0');
     let state = await fetch(`${base}/api/state`).then(r => r.json()); assert.equal(state.outline.length, 0);
-    const response = await fetch(`${base}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'outline.add', parentId: null, title: '第一章' }) });
+    const response = await fetch(`${base}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'outline.add', parentId: null, title: '第一章', baseRevision: state.project.currentRevision }) });
     assert.equal(response.status, 200); state = await response.json(); assert.equal(state.outline[0].title, '第一章');
     await app.stop();
     const reloaded = await createRepository(dir);
@@ -40,13 +40,38 @@ test('review submission through configured bridge creates a persisted proposal',
   const app = await createStudioServer({ dataDir: dir, port: 0, agentBridge: bridge }); await app.start();
   try {
     const base = `http://127.0.0.1:${app.port}`;
-    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'第一章' }) }).then(r=>r.json());
+    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'第一章', baseRevision:0 }) }).then(r=>r.json());
     const nodeId = state.outline[0].id;
     bridge.submit = async ({ submission }) => ({ message:'建议修改标题', commands:[{ type:'outline.rename', nodeId, title:'第一章：目标' }], submissionId:submission.id });
     state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'annotation.add', scopeKey:'outline:root', target:{type:'outline-node',id:nodeId,label:'第一章'}, instruction:'标题更具体' }) }).then(r=>r.json());
     const review = await fetch(`${base}/api/review/submit`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ scopeKey:'outline:root' }) }).then(r=>r.json());
     assert.equal(review.bridgeResult.message, '建议修改标题'); assert.ok(review.bridgeResult.proposalId); assert.equal(review.state.proposals.length, 1); assert.equal(review.state.outline[0].title, '第一章');
+    assert.equal(review.state.reviewSubmissions[0].status, 'proposal_created');
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('configured bridge failure is persisted and the same submission can be retried', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-agent-failure-'));
+  let shouldFail = true;
+  const bridge = { configured:true, async submit() { if (shouldFail) throw new Error('bridge unavailable'); return { message:'恢复成功', commands:[], sessionRef:'bridge-test' }; }, async chat() { return { message:'ok', commands:[] }; } };
+  const app = await createStudioServer({ dataDir: dir, port: 0, agentBridge: bridge }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'annotation.add', scopeKey:'outline:root', instruction:'需要重试' }) }).then(response => response.json());
+    const failed = await fetch(`${base}/api/review/submit`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ scopeKey:'outline:root' }) });
+    assert.equal(failed.status, 502);
+    const failedPayload = await failed.json();
+    assert.equal(failedPayload.error.code, 'dispatch_failed');
+    const submissionId = failedPayload.submission.id;
+    state = await fetch(`${base}/api/state`).then(response => response.json());
+    assert.equal(state.reviewSubmissions[0].status, 'dispatch_failed');
+    shouldFail = false;
+    const retried = await fetch(`${base}/api/review/${submissionId}/retry`, { method:'POST', headers:{'content-type':'application/json'}, body:'{}' });
+    assert.equal(retried.status, 200);
+    const retriedPayload = await retried.json();
+    assert.equal(retriedPayload.submission.id, submissionId);
+    assert.equal(retriedPayload.state.reviewSubmissions[0].status, 'dispatched');
+  } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
 });
 
 test('HTTP API exposes migration status and blocks writes until confirmed', async () => {

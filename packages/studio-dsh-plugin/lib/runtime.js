@@ -6,8 +6,14 @@ import {
   acceptProposal as acceptCoreProposal,
   createProposalFromAgent,
   executeAction as executeCoreAction,
+  markSubmissionDispatch,
+  retryReviewSubmission,
   submitReviewRound,
 } from '../../studio-core/index.mjs'
+import { ERROR_CODES, StudioError } from '../../studio-contracts/index.mjs'
+
+const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
+const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))
 
 function cleanSessionId(value) {
   const sessionId = String(value ?? '').trim()
@@ -86,16 +92,26 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
 
   async function executeAction(sessionId, action) {
     const repository = await repositoryFor(sessionId)
-    const result = executeCoreAction(repository.getState(), action)
-    await repository.replace(result.state)
-    return structuredClone(repository.getState())
+    if (isContentAction(action?.type)) {
+      if (!Number.isInteger(action.baseRevision)) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '内容操作必须携带 baseRevision。', undefined, 400)
+      const cleanAction = { ...structuredClone(action) }
+      delete cleanAction.baseRevision
+      return repository.transactContent(
+        { baseRevision: action.baseRevision, source: 'human', detail: { actionType: action.type } },
+        state => executeCoreAction(state, cleanAction).state,
+      )
+    }
+    return repository.transactOperational(state => executeCoreAction(state, action).state)
   }
 
   async function submitReview(sessionId, input) {
     const id = cleanSessionId(sessionId)
     const repository = await repositoryFor(id)
-    const submitted = submitReviewRound(repository.getState(), input)
-    await repository.replace(submitted.state)
+    let submitted
+    await repository.transactOperational(state => {
+      submitted = submitReviewRound(state, input)
+      return submitted.state
+    })
     return {
       state: structuredClone(repository.getState()),
       round: structuredClone(submitted.round),
@@ -122,27 +138,39 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
 
   async function acceptProposal(sessionId, proposalId) {
     const repository = await repositoryFor(sessionId)
-    const result = acceptCoreProposal(repository.getState(), proposalId)
-    await repository.replace(result.state)
-    return { state: structuredClone(repository.getState()), revision: structuredClone(result.revision) }
+    const proposal = repository.getState().proposals.find(item => item.id === proposalId)
+    if (!proposal) throw new Error('未找到 Proposal')
+    const state = await repository.transactContent(
+      { baseRevision: proposal.baseRevision, source: 'agent', detail: { proposalId, submissionId: proposal.submissionId } },
+      current => acceptCoreProposal(current, proposalId).state,
+    )
+    return { state, revision: structuredClone(state.revisions.at(-1)) }
   }
 
-  async function getContext(sessionId) {
+  async function getContext(sessionId, submissionId) {
     const id = cleanSessionId(sessionId)
-    const state = await getState(id)
-    const latestSubmission = state.reviewSubmissions.at(-1) ?? null
+    const repository = await repositoryFor(id)
+    const state = repository.getState()
+    const cleanSubmissionId = String(submissionId ?? '').trim()
+    if (!cleanSubmissionId) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'submissionId 必填。', undefined, 400)
+    const submission = state.reviewSubmissions.find(item => item.id === cleanSubmissionId)
+    if (!submission) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, `ReviewSubmission '${cleanSubmissionId}' 不存在。`, undefined, 404)
+    if (state.project.currentRevision !== submission.baseRevision) {
+      throw new StudioError(ERROR_CODES.STALE_REVIEW_SUBMISSION, 'ReviewSubmission 的基线已经过期，请重新提交批注。', {
+        submissionId: cleanSubmissionId,
+        baseRevision: submission.baseRevision,
+        currentRevision: state.project.currentRevision,
+      }, 409)
+    }
+    const snapshot = await repository.getSnapshotAt(submission.baseRevision)
     return {
-      contractVersion: 'report-studio.v0.1.0',
+      contractVersion: 'report-studio.v0.1.1',
       sessionId: id,
-      project: state.project,
-      ui: state.ui,
-      outline: state.outline,
-      pages: state.pages,
-      annotations: state.annotations,
-      reviewRounds: state.reviewRounds,
-      reviewSubmissions: state.reviewSubmissions,
-      proposals: state.proposals,
-      latestSubmissionId: latestSubmission?.id ?? null,
+      project: snapshot.project,
+      outline: snapshot.outline,
+      pages: snapshot.pages,
+      submission: structuredClone(submission),
+      annotations: structuredClone(submission.annotations),
       writableCommands: [
         'project.rename',
         'outline.add',
@@ -158,20 +186,29 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
   async function applyCommands(sessionId, input) {
     const id = cleanSessionId(sessionId)
     const repository = await repositoryFor(id)
-    const state = repository.getState()
     const submissionId = String(input?.submissionId ?? '').trim()
     if (!submissionId) throw new Error('submissionId 必填；请使用 ReviewSubmission 提示中的稳定 ID。')
-    const submission = state.reviewSubmissions.find(item => item.id === submissionId)
-    if (!submission) throw new Error(`ReviewSubmission '${submissionId}' 不存在于当前 DSH Session。`)
     const message = String(input?.message ?? '').trim()
     if (!message) throw new Error('message 必填。')
     if (!Array.isArray(input?.commands) || input.commands.length === 0) throw new Error('commands 必须至少包含一条结构化修改命令。')
-    const proposed = createProposalFromAgent(state, submissionId, {
-      message,
-      commands: structuredClone(input.commands),
-      sessionRef: id,
+    let proposed
+    let submission
+    await repository.transactOperational(state => {
+      submission = state.reviewSubmissions.find(item => item.id === submissionId)
+      if (!submission) throw new Error(`ReviewSubmission '${submissionId}' 不存在于当前 DSH Session。`)
+      if (state.project.currentRevision !== submission.baseRevision) {
+        throw new StudioError(ERROR_CODES.STALE_REVIEW_SUBMISSION, 'ReviewSubmission 的基线已经过期，请重新提交批注。', {
+          submissionId, baseRevision: submission.baseRevision, currentRevision: state.project.currentRevision,
+        }, 409)
+      }
+      proposed = createProposalFromAgent(state, submissionId, {
+        message,
+        commands: structuredClone(input.commands),
+        sessionRef: id,
+        idempotencyKey: input.idempotencyKey ?? submission.idempotencyKey,
+      })
+      return proposed.state
     })
-    await repository.replace(proposed.state)
     return {
       proposalId: proposed.proposal.id,
       submissionId,
@@ -179,6 +216,32 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
       baseRevision: submission.baseRevision,
       status: proposed.proposal.status,
       currentRevision: repository.getState().project.currentRevision,
+    }
+  }
+
+  async function updateDispatch(sessionId, submissionId, input) {
+    const repository = await repositoryFor(sessionId)
+    let result
+    await repository.transactOperational(state => {
+      result = markSubmissionDispatch(state, submissionId, input)
+      return result.state
+    })
+    return result.submission
+  }
+
+  async function retrySubmission(sessionId, submissionId) {
+    const repository = await repositoryFor(sessionId)
+    let result
+    await repository.transactOperational(state => {
+      result = retryReviewSubmission(state, submissionId)
+      return result.state
+    })
+    const current = repository.getState()
+    const round = current.reviewRounds.find(item => item.id === result.submission.reviewRoundId)
+    return {
+      state: current,
+      submission: result.submission,
+      dshPrompt: { kind: 'report_studio.review_submission', sessionId: cleanSessionId(sessionId), text: reviewPrompt(cleanSessionId(sessionId), current, round, result.submission) },
     }
   }
 
@@ -192,5 +255,7 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     acceptProposal,
     getContext,
     applyCommands,
+    updateDispatch,
+    retrySubmission,
   })
 }

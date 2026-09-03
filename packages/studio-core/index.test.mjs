@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInitialState, executeAction, submitReviewRound, createProposalFromAgent, acceptProposal } from './index.mjs';
+import { createInitialState, executeAction, submitReviewRound, createProposalFromAgent, acceptProposal, markSubmissionDispatch, retryReviewSubmission } from './index.mjs';
 
 test('outline nodes receive stable ids and draft page keeps source outline id', () => {
   let state = createInitialState();
@@ -61,4 +61,28 @@ test('deleting an outline parent removes descendant pages and repairs active pag
   assert.equal(state.outline.length, 0)
   assert.equal(state.pages.length, 0)
   assert.equal(state.ui.activePageId, null)
+})
+
+test('ReviewSubmission delivery failure can retry the same immutable submission', () => {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '重试意见' }))
+  const submitted = submitReviewRound(state, { scopeKey: 'outline:root' })
+  assert.equal(submitted.submission.status, 'pending_dispatch')
+  const failed = markSubmissionDispatch(submitted.state, submitted.submission.id, { status: 'dispatch_failed', error: 'network down' })
+  assert.equal(failed.state.reviewSubmissions[0].status, 'dispatch_failed')
+  const retried = retryReviewSubmission(failed.state, submitted.submission.id)
+  assert.equal(retried.submission.id, submitted.submission.id)
+  assert.equal(retried.submission.idempotencyKey, submitted.submission.idempotencyKey)
+  assert.equal(retried.submission.status, 'pending_dispatch')
+})
+
+test('repeating Agent commands for one submission returns the existing Proposal', () => {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '幂等意见' }))
+  const submitted = submitReviewRound(state, { scopeKey: 'outline:root' })
+  const input = { message: '同一结果', commands: [{ type: 'project.rename', title: '幂等项目' }], idempotencyKey: submitted.submission.idempotencyKey }
+  const first = createProposalFromAgent(submitted.state, submitted.submission.id, input)
+  const repeated = createProposalFromAgent(first.state, submitted.submission.id, input)
+  assert.equal(repeated.proposal.id, first.proposal.id)
+  assert.equal(repeated.state.proposals.length, 1)
 })
