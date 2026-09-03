@@ -4,6 +4,7 @@ let selectedTarget = null;
 let selectedRoundId = null;
 let commentFilter = 'all';
 let toastTimer = null;
+let migration = null;
 
 const query = selector => document.querySelector(selector);
 const queryAll = selector => [...document.querySelectorAll(selector)];
@@ -14,7 +15,15 @@ async function api(path, options = {}) {
     ...options,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const details = data.error && typeof data.error === 'object' ? data.error : null;
+    const error = new Error(details?.message || data.error || `HTTP ${response.status}`);
+    error.code = details?.code || 'request_failed';
+    error.details = details?.details;
+    error.status = response.status;
+    error.payload = data;
+    throw error;
+  }
   return data;
 }
 
@@ -38,14 +47,33 @@ function toast(message, error = false) {
 async function action(payload) {
   setSaveStatus('保存中…', true);
   try {
-    state = await api('/api/action', { method: 'POST', body: JSON.stringify(payload) });
+    const contentAction = ['project.', 'outline.', 'draft.'].some(prefix => String(payload.type).startsWith(prefix));
+    const request = contentAction ? { ...payload, baseRevision: state.project.currentRevision } : payload;
+    state = await api('/api/action', { method: 'POST', body: JSON.stringify(request) });
     render();
     setSaveStatus('已保存');
     return state;
   } catch (error) {
+    if (error.code === 'stale_revision') {
+      state = await api('/api/state');
+      render();
+      setSaveStatus('发生冲突');
+      toast('项目已被更新，已刷新到最新 Revision；请重新执行刚才的操作。', true);
+      return state;
+    }
     setSaveStatus('保存失败');
     throw error;
   }
+}
+
+function createBrowserUuidV7() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let timestamp = BigInt(Date.now());
+  for (let index = 5; index >= 0; index -= 1) { bytes[index] = Number(timestamp & 255n); timestamp >>= 8n; }
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function escapeHtml(value = '') {
@@ -310,22 +338,33 @@ function annotationHtml(annotation) {
 }
 
 function submissionHtml(submission) {
+  const labels = {
+    pending_dispatch: '等待投递', dispatched: '已投递', dispatch_failed: '投递失败',
+    proposal_created: 'Proposal 已返回', accepted: '已接受', stale: '已过期',
+  };
   return `
     <div class="submission-card">
       <span class="submission-number">${submission.number}</span>
-      <div><strong>第 ${submission.number} 次提交</strong><span>baseRevision ${submission.baseRevision} · ${escapeHtml(submission.status)}</span></div>
+      <div>
+        <strong>第 ${submission.number} 次提交</strong>
+        <span>baseRevision ${submission.baseRevision} · ${escapeHtml(labels[submission.status] || submission.status)}</span>
+        ${submission.lastDispatchError ? `<small class="submission-error">${escapeHtml(submission.lastDispatchError)}</small>` : ''}
+        ${submission.status === 'dispatch_failed' ? `<button class="small-button" data-retry-submission="${escapeAttr(submission.id)}" type="button">重新投递</button>` : ''}
+      </div>
     </div>
   `;
 }
 
 function proposalHtml(proposal) {
+  const stale = proposal.status === 'pending' && proposal.baseRevision !== state.project.currentRevision;
   return `
     <article class="proposal-card">
       <header><strong>Agent Proposal</strong><span class="batch-status batch-status-review">${escapeHtml(proposal.status)}</span></header>
       <p>${escapeHtml(proposal.message || 'Agent 已返回结构化修改建议。')}</p>
       <details><summary>查看 Command</summary><pre>${escapeHtml(JSON.stringify(proposal.commands, null, 2))}</pre></details>
+      <small class="proposal-revision">基于 Revision ${proposal.baseRevision}${stale ? ' · 当前项目已前进，不能应用' : ''}</small>
       ${proposal.status === 'pending'
-        ? `<div class="proposal-actions"><button class="primary-button batch-submit" data-accept-proposal="${escapeAttr(proposal.id)}" type="button">确认应用</button></div>`
+        ? `<div class="proposal-actions"><button class="primary-button batch-submit" data-accept-proposal="${escapeAttr(proposal.id)}" type="button" ${stale ? 'disabled' : ''}>${stale ? 'Proposal 已过期' : '确认应用'}</button></div>`
         : ''}
     </article>
   `;
@@ -486,8 +525,10 @@ async function submitReview(reviewRoundId = selectedRoundId) {
     setSaveStatus('已保存');
     render();
   } catch (error) {
+    if (error.code === 'dispatch_failed') state = error.payload?.state ?? await api('/api/state');
     setSaveStatus('提交失败');
     toast(error.message, true);
+    render();
   }
 }
 
@@ -551,7 +592,7 @@ document.addEventListener('click', async event => {
   }
 
   const deleteNode = event.target.closest('[data-delete-node]');
-  if (deleteNode && window.confirm('删除该章节及其直接关联草案页？')) {
+  if (deleteNode && window.confirm('删除该章节、全部子章节及其关联草案页？此操作会生成新的 Revision。')) {
     await action({ type: 'outline.delete', nodeId: deleteNode.dataset.deleteNode });
     return;
   }
@@ -637,6 +678,79 @@ document.addEventListener('click', async event => {
       render();
     } catch (error) {
       setSaveStatus('应用失败');
+      toast(error.message, true);
+    }
+    return;
+  }
+
+  const retrySubmission = event.target.closest('[data-retry-submission]');
+  if (retrySubmission) {
+    try {
+      setSaveStatus('重新投递中…', true);
+      const result = await api(`/api/review/${retrySubmission.dataset.retrySubmission}/retry`, { method: 'POST', body: '{}' });
+      state = result.state ?? await api('/api/state');
+      setSaveStatus('已保存');
+      toast(result.bridgeResult?.message || '已重新投递');
+      render();
+    } catch (error) {
+      state = error.payload?.state ?? await api('/api/state');
+      setSaveStatus('投递失败');
+      toast(error.message, true);
+      render();
+    }
+    return;
+  }
+
+  if (event.target.id === 'standard-project-open') {
+    query('#standard-project-modal').hidden = false;
+    return;
+  }
+
+  if (event.target.closest('[data-close-standard-modal]')) {
+    query('#standard-project-modal').hidden = true;
+    return;
+  }
+
+  if (event.target.id === 'standard-import') {
+    const projectRoot = query('#standard-import-path').value.trim();
+    if (!projectRoot) return toast('请输入标准项目绝对路径。', true);
+    try {
+      const result = await api('/api/standard/import', { method: 'POST', body: JSON.stringify({ projectRoot }) });
+      state = result.state;
+      query('#standard-project-result').textContent = `导入完成 · Revision ${state.project.currentRevision} · Contract 校验通过`;
+      toast('标准项目已导入');
+      render();
+    } catch (error) {
+      query('#standard-project-result').textContent = `导入失败：${error.message}`;
+      toast(error.message, true);
+    }
+    return;
+  }
+
+  if (event.target.id === 'standard-export') {
+    try {
+      const result = await api('/api/standard/export', { method: 'POST', body: '{}' });
+      query('#standard-project-result').textContent = `导出完成 · Revision ${result.revision} · ${result.projectRoot}`;
+      toast('标准项目已导出并通过 Contract 校验');
+    } catch (error) {
+      query('#standard-project-result').textContent = `导出失败：${error.message}`;
+      toast(error.message, true);
+    }
+    return;
+  }
+
+  if (event.target.id === 'migration-apply') {
+    const button = event.target;
+    button.disabled = true;
+    query('#migration-detail').textContent = '正在备份、迁移并校验…';
+    try {
+      const result = await api('/api/migration/apply', { method: 'POST', body: '{}' });
+      query('#migration-detail').textContent = `升级完成 · 备份：${result.backupPath}`;
+      await load();
+      toast('旧项目已安全升级');
+    } catch (error) {
+      button.disabled = false;
+      query('#migration-detail').textContent = `升级失败：${error.message}`;
       toast(error.message, true);
     }
     return;
@@ -736,7 +850,7 @@ document.addEventListener('change', async event => {
     reader.onload = async () => {
       const assets = [
         ...(page.assets || []),
-        { id: `asset_${Date.now()}`, name: file.name, type: file.type, dataUrl: reader.result },
+        { id: `asset_${createBrowserUuidV7()}`, name: file.name, type: file.type, dataUrl: reader.result },
       ];
       await action({ type: 'draft.update', pageId: page.id, patch: { assets } });
       toast('素材已加入本页');
@@ -760,10 +874,15 @@ document.addEventListener('keydown', async event => {
 });
 
 async function load() {
-  [health, state] = await Promise.all([api('/api/health'), api('/api/state')]);
-  if (state.ui.stage === 'layout') state.ui.stage = 'outline';
+  [health, migration, state] = await Promise.all([api('/api/health'), api('/api/migration/status'), api('/api/state')]);
+  const migrationGate = query('#migration-gate');
+  migrationGate.hidden = migration.status !== 'migration_required';
+  if (!migrationGate.hidden) {
+    query('#migration-detail').textContent = `来源：${migration.sourcePath} · 原数据保持只读`;
+    query('#migration-apply').disabled = false;
+  }
   render();
-  setSaveStatus('已保存');
+  setSaveStatus(migration.status === 'migration_required' ? '等待升级' : '已保存');
 }
 
 load().catch(error => toast(`启动失败：${error.message}`, true));

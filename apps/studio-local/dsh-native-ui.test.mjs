@@ -21,6 +21,8 @@ test('native browser bridge binds API and prompts to the current DSH Session', a
     'window.parent !== window ? window.parent : window.opener',
     'DSH 原生 Session 已连接',
     "apiPath('/api/state')",
+    '/dispatch',
+    "reportDispatch(payload.submission?.id, 'dispatch_failed'",
   ]) assert.ok(runtime.includes(token), `missing ${token}`)
 })
 

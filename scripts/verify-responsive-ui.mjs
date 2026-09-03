@@ -35,7 +35,21 @@ async function getFreePort() {
 
 function findBrowser() {
   const configured = process.env.CHROMIUM_PATH;
-  const candidates = [configured, 'google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser'].filter(Boolean);
+  const windowsCandidates = process.platform === 'win32'
+    ? [
+        process.env.ProgramFiles && join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      ]
+    : [];
+  const candidates = [
+    configured,
+    ...windowsCandidates,
+    'google-chrome-stable',
+    'google-chrome',
+    'chromium',
+    'chromium-browser',
+  ].filter(Boolean);
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
     const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
@@ -131,17 +145,19 @@ async function waitFor(cdp, expression, description, timeoutMs = 7000) {
 }
 
 async function seed(baseUrl) {
+  let latest = await fetch(`${baseUrl}/api/state`).then(response => response.json());
   const post = async body => fetch(`${baseUrl}/api/action`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, baseRevision: latest.project.currentRevision }),
   }).then(async response => {
     const value = await response.json();
-    if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
-    return value;
+    if (!response.ok) throw new Error(value.error?.message || value.error || `HTTP ${response.status}`);
+    latest = value;
+    return latest;
   });
 
-  let state = await post({ type: 'project.rename', title: 'Report Studio v0.1.0 响应式验收' });
+  let state = await post({ type: 'project.rename', title: 'Report Studio v0.1.1 响应式验收' });
   state = await post({ type: 'outline.add', parentId: null, title: '项目背景与目标' });
   const rootId = state.outline[0].id;
   state = await post({ type: 'outline.add', parentId: rootId, title: '建设背景与现状' });

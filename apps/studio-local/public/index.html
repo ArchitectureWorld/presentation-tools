@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0d1018">
-  <title>Report Studio v0.1.0</title>
+  <title>Report Studio v0.1.1</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -29,7 +29,8 @@
 
       <div class="top-actions">
         <span id="save-status" class="save-status">已保存</span>
-        <span class="version-chip">v0.1.0</span>
+        <button id="standard-project-open" class="small-button" type="button">标准项目</button>
+        <span class="version-chip">v0.1.1</span>
         <span class="revision-pill">Revision <b id="revision-number">0</b></span>
       </div>
     </header>
@@ -77,6 +78,35 @@
         </footer>
       </aside>
     </main>
+  </div>
+
+  <div id="migration-gate" class="modal migration-modal" hidden>
+    <div class="modal-backdrop" aria-hidden="true"></div>
+    <section class="modal-card migration-card" role="dialog" aria-modal="true" aria-labelledby="migration-title">
+      <span class="stage-eyebrow">SAFE UPGRADE · A1.1</span>
+      <h2 id="migration-title">检测到 v0.1.0 项目数据</h2>
+      <p>升级前会逐字节备份原始 state.json，再迁移稳定 ID、建立不可变 Revision 并完成完整性校验。失败时不会切换正式数据。</p>
+      <div id="migration-detail" class="operation-result">等待确认</div>
+      <button id="migration-apply" class="primary-button" type="button">备份并升级</button>
+    </section>
+  </div>
+
+  <div id="standard-project-modal" class="modal" hidden>
+    <button class="modal-backdrop" data-close-standard-modal type="button" aria-label="关闭标准项目面板"></button>
+    <section class="modal-card standard-project-card" role="dialog" aria-modal="true" aria-labelledby="standard-project-title">
+      <header class="standard-project-header">
+        <div><span class="stage-eyebrow">CONTRACT 0.1.0</span><h2 id="standard-project-title">Presentation 标准项目</h2></div>
+        <button class="icon-button" data-close-standard-modal type="button" aria-label="关闭">×</button>
+      </header>
+      <p>导入只读源目录；导出固定写入当前数据目录的 exports 文件夹，并在完成后重新执行 Contract 校验。</p>
+      <label class="standard-path-label" for="standard-import-path">标准项目绝对路径</label>
+      <input id="standard-import-path" class="draft-input" placeholder="C:\\projects\\project_xxx-name">
+      <div class="standard-project-actions">
+        <button id="standard-import" class="secondary-button" type="button">验证并导入</button>
+        <button id="standard-export" class="primary-button" type="button">导出当前 Revision</button>
+      </div>
+      <div id="standard-project-result" class="operation-result">Contract 0.1.0 · 等待操作</div>
+    </section>
   </div>
 
   <button id="agent-fab" class="agent-fab" type="button" aria-label="打开项目 Agent" title="项目 Agent">

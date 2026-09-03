@@ -71,6 +71,17 @@
     })
   }
 
+  async function reportDispatch(submissionId, status, error = null) {
+    if (!submissionId) return null
+    const response = await nativeFetch(apiPath(`/api/review/${encodeURIComponent(submissionId)}/dispatch`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status, error }),
+    })
+    if (!response.ok) throw new Error('无法保存 DSH 投递状态。')
+    return response.json()
+  }
+
   window.addEventListener('message', event => {
     if (event.origin !== window.location.origin) return
     const message = event.data
@@ -91,13 +102,25 @@
     const originalPath = typeof input === 'string' ? input : null
     const resolvedInput = originalPath?.startsWith('/api/') ? apiPath(originalPath) : input
     const response = await nativeFetch(resolvedInput, init)
-    if (!response.ok || !originalPath || !['/api/review/submit', '/api/agent/chat'].includes(originalPath)) return response
+    const isReviewRequest = originalPath === '/api/review/submit' || /^\/api\/review\/[^/]+\/retry$/.test(originalPath || '')
+    if (!response.ok || !originalPath || !(isReviewRequest || originalPath === '/api/agent/chat')) return response
     const payload = await response.clone().json().catch(() => null)
     if (!payload?.dshPrompt) return response
-    await requestPrompt(payload.dshPrompt, payload.state?.proposals?.length ?? 0)
-    const adapted = originalPath === '/api/review/submit'
+    try {
+      await requestPrompt(payload.dshPrompt, payload.state?.proposals?.length ?? 0)
+      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatched')
+    } catch (error) {
+      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatch_failed', error.message).catch(() => undefined)
+      throw error
+    }
+    const currentState = isReviewRequest
+      ? await nativeFetch(apiPath('/api/state'), { headers: { accept: 'application/json' } }).then(result => result.json())
+      : payload.state
+    const adapted = isReviewRequest
       ? {
           ...payload,
+          state: currentState,
+          submission: currentState.reviewSubmissions.find(item => item.id === payload.submission?.id) ?? payload.submission,
           bridgeResult: { message: '已提交到当前 DSH Session', proposalId: null, sessionRef: sessionId },
         }
       : { ...payload, message: '已发送到当前 DSH Session', sessionRef: sessionId }
