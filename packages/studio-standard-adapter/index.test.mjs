@@ -293,3 +293,25 @@ test('standard export rejects a Blob whose streamed bytes no longer equal its Ob
     await rm(target, { recursive: true, force: true })
   }
 })
+
+test('standard export rejects a detectable source MIME that disagrees with ObjectRef metadata', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-mime-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot, blobOptions)
+    const png = Buffer.alloc(24)
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    png.writeUInt32BE(1, 16)
+    png.writeUInt32BE(1, 20)
+    const sha256 = createHash('sha256').update(png).digest('hex')
+    const file = imported.snapshot.project.extensionPayload.standardArchive.files.find(item => item.relativePath === 'source-materials/data/场地指标.csv')
+    file.objectRef = { ...file.objectRef, sha256, sizeBytes: png.length, mimeType: 'image/jpeg' }
+    testBlobs.set(sha256, png)
+
+    await assert.rejects(
+      writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob }),
+      error => error.code === 'standard_export_failed' && error.details?.actualMimeType === 'image/png',
+    )
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})

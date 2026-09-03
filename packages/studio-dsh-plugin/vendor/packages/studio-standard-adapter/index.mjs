@@ -303,6 +303,15 @@ function imageDimensions(bytes, mimeType) {
   return null
 }
 
+function sniffKnownMime(bytes) {
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes.length >= 6 && (bytes.subarray(0, 6).toString('ascii') === 'GIF87a' || bytes.subarray(0, 6).toString('ascii') === 'GIF89a')) return 'image/gif'
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  if (/^\s*(?:<\?xml\b[^>]*>\s*)?<svg\b/iu.test(bytes.toString('utf8'))) return 'image/svg+xml'
+  return null
+}
+
 async function blobHeader(openBlob, objectRef, limit = 256 * 1024) {
   const stream = await openBlob(objectRef)
   const header = Buffer.allocUnsafe(limit)
@@ -347,6 +356,14 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
       }
       const relativePath = preserved?.relativePath ?? `assets/images/${asset.assetId}${extension}`
       const written = await writeStreamWithin(projectRoot, relativePath, await openBlob(asset.objectRef), asset.objectRef)
+      if (written.mimeType && written.mimeType !== mimeType) {
+        throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '页面素材的流式实际 MIME 与 Canonical 声明不一致。', {
+          assetId: asset.assetId,
+          relativePath,
+          declaredMimeType: mimeType,
+          actualMimeType: written.mimeType,
+        }, 500)
+      }
       const createdAt = asset.createdAt ?? preserved?.createdAt ?? snapshot.project.createdAt
       records.set(asset.assetId, {
         ...clone(preserved ?? {}),
@@ -356,7 +373,7 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
         category: preserved?.category ?? 'image',
         semanticRole: preserved?.semanticRole ?? '页面素材',
         relativePath,
-        mimeType,
+        mimeType: written.mimeType ?? mimeType,
         sizeBytes: written.sizeBytes,
         sha256: written.sha256,
         metadata: { ...clone(preserved?.metadata ?? {}), ...dimensions },
@@ -400,22 +417,36 @@ async function writeStreamWithin(projectRoot, relativePath, stream, expectedObje
   if (target !== projectRoot && !target.startsWith(`${projectRoot}${sep}`)) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目文件路径越界。', { relativePath })
   await mkdir(resolve(target, '..'), { recursive: true })
   const hash = createHash('sha256')
+  const header = Buffer.allocUnsafe(256 * 1024)
+  let headerSize = 0
   let sizeBytes = 0
   const digest = new Transform({
     transform(chunk, encoding, callback) {
       const bytes = Buffer.from(chunk)
       sizeBytes += bytes.length
       hash.update(bytes)
+      const copied = Math.min(bytes.length, header.length - headerSize)
+      if (copied) {
+        bytes.copy(header, headerSize, 0, copied)
+        headerSize += copied
+      }
       callback(null, bytes)
     },
   })
   await pipeline(stream, digest, createWriteStream(target, { flags: 'w' }))
-  const metadata = { sizeBytes, sha256: hash.digest('hex') }
+  const metadata = { sizeBytes, sha256: hash.digest('hex'), mimeType: sniffKnownMime(header.subarray(0, headerSize)) }
   if (expectedObjectRef && (metadata.sizeBytes !== expectedObjectRef.sizeBytes || metadata.sha256 !== expectedObjectRef.sha256)) {
     throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, 'Blob 流式恢复后的字节与 ObjectRef 不一致。', {
       relativePath,
       expected: { sizeBytes: expectedObjectRef.sizeBytes, sha256: expectedObjectRef.sha256 },
       actual: metadata,
+    }, 500)
+  }
+  if (expectedObjectRef?.mimeType && metadata.mimeType && metadata.mimeType !== expectedObjectRef.mimeType) {
+    throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, 'Blob 流式实际 MIME 与 ObjectRef 不一致。', {
+      relativePath,
+      expectedMimeType: expectedObjectRef.mimeType,
+      actualMimeType: metadata.mimeType,
     }, 500)
   }
   return metadata
@@ -443,7 +474,7 @@ async function writeStandardProjectImpl({ snapshot, exportRoot, openBlob } = {})
     if (JSON_DOCUMENTS.includes(file.relativePath) || file.relativePath.startsWith('pages/drafts/')) continue
     if (typeof openBlob !== 'function' || !file.objectRef) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复标准项目文件需要 Blob 读取器。', { relativePath: file.relativePath })
     const written = await writeStreamWithin(projectRoot, file.relativePath, await openBlob(file.objectRef), file.objectRef)
-    updateManifestFileMetadata(documents, file.relativePath, written, file.objectRef.mimeType)
+    updateManifestFileMetadata(documents, file.relativePath, written, written.mimeType ?? file.objectRef.mimeType)
   }
 
   documents['project.json'].projectId = snapshot.project.id

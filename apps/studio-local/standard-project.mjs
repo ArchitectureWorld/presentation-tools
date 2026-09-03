@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { isAbsolute, join, relative, resolve } from 'node:path'
-import { lstat, mkdir, rename, rm } from 'node:fs/promises'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { lstat, mkdir, open, rename, rm } from 'node:fs/promises'
 import { ERROR_CODES, StudioError } from '../../packages/studio-contracts/index.mjs'
 import { readStandardProject, writeStandardProject } from '../../packages/studio-standard-adapter/index.mjs'
 
@@ -12,10 +12,11 @@ function exportError(error, details) {
   }, 500)
 }
 
-export function createStandardProjectService(repository, {
-  exportDirectoryName = () => `${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}`,
-  fileSystem = { mkdir, lstat, rename, rm },
-} = {}) {
+export function createStandardProjectService(repository, options = {}) {
+  const clock = options.clock ?? (() => new Date())
+  const uuid = options.randomUUID ?? randomUUID
+  const exportDirectoryName = options.exportDirectoryName ?? (() => `${clock().toISOString().replaceAll(':', '-')}-${uuid()}`)
+  const fileSystem = options.fileSystem ?? { mkdir, lstat, open, rename, rm }
   return Object.freeze({
     status() {
       const state = repository.getState()
@@ -44,14 +45,25 @@ export function createStandardProjectService(repository, {
       const exportsRoot = join(repository.root, 'exports')
       const stagingRoot = join(exportsRoot, '.staging')
       const directoryName = exportDirectoryName()
+      if (basename(directoryName) !== directoryName) {
+        throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '标准项目导出目录名无效。', { directoryName }, 400)
+      }
       const stage = join(stagingRoot, directoryName)
       const finalRoot = join(exportsRoot, directoryName)
+      const claimPath = join(exportsRoot, `.${directoryName}.claim`)
       let staged = false
+      let claimed = false
       try {
         await fileSystem.mkdir(stagingRoot, { recursive: true })
         await fileSystem.mkdir(stage)
         staged = true
         const exported = await writeStandardProject({ snapshot, exportRoot: stage, openBlob: repository.openBlob })
+        // Node has no cross-platform no-replace directory rename. Every Report Studio
+        // publisher therefore claims this same-directory sidecar before publish; this
+        // is a local-single-writer protocol, not protection from non-participating processes.
+        const claim = await fileSystem.open(claimPath, 'wx')
+        claimed = true
+        await claim.close()
         try {
           await fileSystem.lstat(finalRoot)
           throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '标准项目导出目标已存在，未覆盖既有导出。', { finalRoot }, 409)
@@ -76,6 +88,8 @@ export function createStandardProjectService(repository, {
           }
         }
         throw exportError(error, { stage, finalRoot })
+      } finally {
+        if (claimed) await fileSystem.rm(claimPath, { force: true })
       }
     },
   })

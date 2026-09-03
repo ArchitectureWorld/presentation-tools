@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRepository } from './repository.mjs'
@@ -140,7 +140,7 @@ test('standard export cleans staging and returns a Studio error when final renam
     const exportsRoot = join(dir, 'exports')
     const service = createStandardProjectService(repository, {
       exportDirectoryName: () => 'rename-failure',
-      fileSystem: { mkdir, lstat, rm, rename: async () => { throw new Error('injected rename failure') } },
+      fileSystem: { mkdir, lstat, open, rm, rename: async () => { throw new Error('injected rename failure') } },
     })
 
     await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.cause?.message === 'injected rename failure')
@@ -176,5 +176,60 @@ test('standard export removes staging when the frozen Contract validator rejects
     await assert.rejects(service.exportProject(), error => error.code === 'standard_contract_invalid')
     assert.deepEqual(await readdir(join(dir, 'exports', '.staging')), [])
     assert.deepEqual(await readdir(join(dir, 'exports')), ['.staging'])
+  })
+})
+
+test('standard exports retain UUID uniqueness when the clock is fixed to one millisecond', async () => {
+  await withService(async ({ dir, repository }) => {
+    const ids = ['uuid-a', 'uuid-b']
+    const service = createStandardProjectService(repository, {
+      clock: () => new Date('2026-09-03T08:00:00.000Z'),
+      randomUUID: () => ids.shift(),
+    })
+    const [left, right] = await Promise.all([service.exportProject(), service.exportProject()])
+    assert.match(left.projectRoot, new RegExp(`${dir.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]exports[\\\\/]2026-09-03T08-00-00.000Z-uuid-a`))
+    assert.match(right.projectRoot, new RegExp(`${dir.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]exports[\\\\/]2026-09-03T08-00-00.000Z-uuid-b`))
+  })
+})
+
+test('standard export claim prevents a target created between claim and publish from being overwritten', async () => {
+  await withService(async ({ dir, repository }) => {
+    const targetName = 'claim-race-target'
+    const exportsRoot = join(dir, 'exports')
+    const target = join(exportsRoot, targetName)
+    let claimed = false
+    const service = createStandardProjectService(repository, {
+      exportDirectoryName: () => targetName,
+      fileSystem: {
+        mkdir,
+        lstat,
+        rename,
+        rm,
+        async open(path, flags) {
+          const handle = await open(path, flags)
+          claimed = true
+          await mkdir(target, { recursive: true })
+          await writeFile(join(target, 'sentinel.txt'), 'created-after-claim')
+          return handle
+        },
+      },
+    })
+
+    await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.finalRoot === target)
+    assert.equal(claimed, true)
+    assert.equal(await readFile(join(target, 'sentinel.txt'), 'utf8'), 'created-after-claim')
+    assert.deepEqual(await readdir(join(exportsRoot, '.staging')), [])
+  })
+})
+
+test('standard export claim lets concurrent publishers with one final name produce at most one result', async () => {
+  await withService(async ({ dir, repository }) => {
+    const exportsRoot = join(dir, 'exports')
+    const service = createStandardProjectService(repository, { exportDirectoryName: () => 'shared-final-name' })
+    const results = await Promise.allSettled([service.exportProject(), service.exportProject()])
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+    assert.equal(results.filter(result => result.status === 'rejected' && result.reason.code === 'standard_export_failed').length, 1)
+    assert.deepEqual(await readdir(join(exportsRoot, '.staging')), [])
+    assert.deepEqual((await readdir(exportsRoot)).sort(), ['.staging', 'shared-final-name'])
   })
 })
