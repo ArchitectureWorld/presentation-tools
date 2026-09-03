@@ -8,9 +8,11 @@ on:
       - 'packages/studio-layout-contracts/**'
       - 'packages/studio-layout-core/**'
       - 'packages/studio-layout-adapter/**'
+      - 'packages/studio-layout-integration/**'
       - 'tools/layout-spike/**'
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
+      - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-layout-foundation-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
@@ -19,9 +21,11 @@ on:
       - 'packages/studio-layout-contracts/**'
       - 'packages/studio-layout-core/**'
       - 'packages/studio-layout-adapter/**'
+      - 'packages/studio-layout-integration/**'
       - 'tools/layout-spike/**'
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
+      - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-layout-foundation-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
@@ -38,8 +42,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Run layout foundation and spike model tests
-        run: node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs tools/layout-spike/*.test.mjs
+      - name: Run layout foundation, adapter, integration and spike model tests
+        run: node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs tools/layout-spike/*.test.mjs
       - name: Run deterministic layout verification
         run: node scripts/verify-layout-v0.2.0.mjs
       - name: Run isolated layout spike browser smoke
