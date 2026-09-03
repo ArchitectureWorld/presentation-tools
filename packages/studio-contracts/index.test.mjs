@@ -43,6 +43,7 @@ test('canonical projection excludes operational and view records', () => {
   const snapshot = canonicalFromState(state)
   assert.deepEqual(Object.keys(snapshot).sort(), ['outline', 'pages', 'project'])
   assert.equal(snapshot.project.currentRevision, undefined)
+  assert.equal(snapshot.pages.length, 0)
   const restored = projectStateFromParts({ snapshot, currentRevision: 3, operational: state, ui: state.ui })
   assert.equal(restored.annotations[0].id, 'annotation_private')
   assert.equal(restored.project.currentRevision, 3)
