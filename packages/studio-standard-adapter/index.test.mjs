@@ -259,3 +259,37 @@ test('imported multi-script and duplicate-page-asset identities survive repeated
     await rm(parent, { recursive: true, force: true })
   }
 })
+
+test('standard export recomputes source-material manifest hashes and byte counts from streamed Blobs', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-streamed-source-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot, blobOptions)
+    const sourceManifest = imported.snapshot.project.extensionPayload.standardArchive.documents['source-materials/manifest.json']
+    sourceManifest.materials[0].sizeBytes = 1
+    sourceManifest.materials[0].sha256 = '0'.repeat(64)
+
+    const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
+    const actual = await readFile(join(exported.projectRoot, 'source-materials', 'data', '场地指标.csv'))
+    const material = JSON.parse(await readFile(join(exported.projectRoot, 'source-materials', 'manifest.json'), 'utf8')).materials[0]
+    assert.equal(material.sizeBytes, actual.length)
+    assert.equal(material.sha256, createHash('sha256').update(actual).digest('hex'))
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('standard export rejects a Blob whose streamed bytes no longer equal its ObjectRef', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-corrupt-stream-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot, blobOptions)
+    const archiveFile = imported.snapshot.project.extensionPayload.standardArchive.files.find(file => file.relativePath === 'source-materials/data/场地指标.csv')
+    testBlobs.set(archiveFile.objectRef.sha256, Buffer.from('corrupted streamed source bytes'))
+
+    await assert.rejects(
+      writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob }),
+      error => error.code === 'standard_export_failed' && error.details?.relativePath === archiveFile.relativePath,
+    )
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})

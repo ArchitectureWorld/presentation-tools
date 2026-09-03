@@ -3,6 +3,7 @@ import { basename, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import {
   REQUIRED_DIRECTORIES,
@@ -303,15 +304,21 @@ function imageDimensions(bytes, mimeType) {
 }
 
 async function blobHeader(openBlob, objectRef, limit = 256 * 1024) {
-  const chunks = []
+  const stream = await openBlob(objectRef)
+  const header = Buffer.allocUnsafe(limit)
   let size = 0
-  for await (const chunk of await openBlob(objectRef)) {
-    const bytes = Buffer.from(chunk)
-    chunks.push(bytes.subarray(0, Math.max(0, limit - size)))
-    size += bytes.length
-    if (size >= limit) break
+  try {
+    for await (const chunk of stream) {
+      const bytes = Buffer.from(chunk)
+      const copied = Math.min(bytes.length, limit - size)
+      bytes.copy(header, size, 0, copied)
+      size += copied
+      if (size === limit) break
+    }
+  } finally {
+    if (size === limit) stream.destroy?.()
   }
-  return Buffer.concat(chunks)
+  return header.subarray(0, size)
 }
 
 async function materializePageAssets({ snapshot, documents, projectRoot, openBlob }) {
@@ -339,7 +346,7 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
         throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '无法读取图片尺寸，不能生成可信的标准素材记录。', { assetId: asset.assetId, mimeType })
       }
       const relativePath = preserved?.relativePath ?? `assets/images/${asset.assetId}${extension}`
-      await writeStreamWithin(projectRoot, relativePath, await openBlob(asset.objectRef))
+      const written = await writeStreamWithin(projectRoot, relativePath, await openBlob(asset.objectRef), asset.objectRef)
       const createdAt = asset.createdAt ?? preserved?.createdAt ?? snapshot.project.createdAt
       records.set(asset.assetId, {
         ...clone(preserved ?? {}),
@@ -350,8 +357,8 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
         semanticRole: preserved?.semanticRole ?? '页面素材',
         relativePath,
         mimeType,
-        sizeBytes: asset.sizeBytes ?? asset.objectRef.sizeBytes,
-        sha256: asset.sha256 ?? asset.objectRef.sha256,
+        sizeBytes: written.sizeBytes,
+        sha256: written.sha256,
         metadata: { ...clone(preserved?.metadata ?? {}), ...dimensions },
         adoptionStatus: preserved?.adoptionStatus ?? 'adopted',
         origin: clone(preserved?.origin ?? {
@@ -371,6 +378,16 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
   manifest.assets = [...records.values()]
 }
 
+function updateManifestFileMetadata(documents, relativePath, metadata, mimeType = undefined) {
+  for (const [documentPath, property] of [['source-materials/manifest.json', 'materials'], ['assets/manifest.json', 'assets']]) {
+    const record = documents[documentPath]?.[property]?.find(entry => entry.relativePath === relativePath)
+    if (!record) continue
+    record.sizeBytes = metadata.sizeBytes
+    record.sha256 = metadata.sha256
+    if (mimeType) record.mimeType = mimeType
+  }
+}
+
 async function writeBytesWithin(projectRoot, relativePath, bytes) {
   const target = resolve(projectRoot, ...relativePath.split('/'))
   if (target !== projectRoot && !target.startsWith(`${projectRoot}${sep}`)) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目文件路径越界。', { relativePath })
@@ -378,14 +395,33 @@ async function writeBytesWithin(projectRoot, relativePath, bytes) {
   await writeFile(target, bytes)
 }
 
-async function writeStreamWithin(projectRoot, relativePath, stream) {
+async function writeStreamWithin(projectRoot, relativePath, stream, expectedObjectRef = null) {
   const target = resolve(projectRoot, ...relativePath.split('/'))
   if (target !== projectRoot && !target.startsWith(`${projectRoot}${sep}`)) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目文件路径越界。', { relativePath })
   await mkdir(resolve(target, '..'), { recursive: true })
-  await pipeline(stream, createWriteStream(target, { flags: 'w' }))
+  const hash = createHash('sha256')
+  let sizeBytes = 0
+  const digest = new Transform({
+    transform(chunk, encoding, callback) {
+      const bytes = Buffer.from(chunk)
+      sizeBytes += bytes.length
+      hash.update(bytes)
+      callback(null, bytes)
+    },
+  })
+  await pipeline(stream, digest, createWriteStream(target, { flags: 'w' }))
+  const metadata = { sizeBytes, sha256: hash.digest('hex') }
+  if (expectedObjectRef && (metadata.sizeBytes !== expectedObjectRef.sizeBytes || metadata.sha256 !== expectedObjectRef.sha256)) {
+    throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, 'Blob 流式恢复后的字节与 ObjectRef 不一致。', {
+      relativePath,
+      expected: { sizeBytes: expectedObjectRef.sizeBytes, sha256: expectedObjectRef.sha256 },
+      actual: metadata,
+    }, 500)
+  }
+  return metadata
 }
 
-export async function writeStandardProject({ snapshot, exportRoot, openBlob } = {}) {
+async function writeStandardProjectImpl({ snapshot, exportRoot, openBlob } = {}) {
   assertCanonicalSnapshot(snapshot)
   const root = resolve(exportRoot)
   const archived = snapshot.project.extensionPayload?.standardArchive
@@ -406,7 +442,8 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
   for (const file of archived?.files ?? []) {
     if (JSON_DOCUMENTS.includes(file.relativePath) || file.relativePath.startsWith('pages/drafts/')) continue
     if (typeof openBlob !== 'function' || !file.objectRef) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复标准项目文件需要 Blob 读取器。', { relativePath: file.relativePath })
-    await writeStreamWithin(projectRoot, file.relativePath, await openBlob(file.objectRef))
+    const written = await writeStreamWithin(projectRoot, file.relativePath, await openBlob(file.objectRef), file.objectRef)
+    updateManifestFileMetadata(documents, file.relativePath, written, file.objectRef.mimeType)
   }
 
   documents['project.json'].projectId = snapshot.project.id
@@ -447,4 +484,16 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
   const validation = await validateProjectDirectoryWithAjv(projectRoot, { allowGitKeep: true })
   if (!validation.valid) throw new StudioError(ERROR_CODES.STANDARD_CONTRACT_INVALID, '导出的标准项目未通过 Contract 校验。', { errors: validation.errors }, 500)
   return { projectRoot, validation }
+}
+
+export async function writeStandardProject(options = {}) {
+  try {
+    return await writeStandardProjectImpl(options)
+  } catch (error) {
+    if (error instanceof StudioError) throw error
+    throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '标准项目导出失败。', {
+      exportRoot: options.exportRoot ? rootPath(options.exportRoot) : null,
+      cause: { name: error?.name ?? 'Error', message: error?.message ?? String(error) },
+    }, 500)
+  }
 }

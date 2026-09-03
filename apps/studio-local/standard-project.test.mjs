@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRepository } from './repository.mjs'
@@ -88,5 +88,93 @@ test('standard import into an unused Workspace adopts the source project as revi
     assert.equal(result.state.project.currentRevision, 0)
     assert.equal(result.state.revisions.length, 1)
     assert.equal(result.state.revisions[0].parentRevision, null)
+  })
+})
+
+test('standard export publishes a Contract-valid project from a private staging directory', async () => {
+  await withService(async ({ dir, service }) => {
+    const result = await service.exportProject()
+    assert.match(result.projectRoot, new RegExp(`^${dir.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]exports[\\\\/]`))
+    assert.equal(result.validation.valid, true)
+    assert.deepEqual(await readdir(join(dir, 'exports', '.staging')), [])
+  })
+})
+
+test('standard exports started together publish distinct final directories', async () => {
+  await withService(async ({ service }) => {
+    const [left, right] = await Promise.all([service.exportProject(), service.exportProject()])
+    assert.notEqual(left.projectRoot, right.projectRoot)
+    assert.equal(left.validation.valid, true)
+    assert.equal(right.validation.valid, true)
+  })
+})
+
+test('standard export cleans its staging directory when Blob restoration fails', async () => {
+  await withService(async ({ dir, repository, service }) => {
+    await service.importProject(resolve('contracts/presentation-standard-project/examples/unformatted-project/project_01992a80-0000-7000-8000-000000000101-campus-renewal-brief'))
+    repository.openBlob = async () => { throw new Error('injected blob read failure') }
+
+    await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.statusCode === 500)
+    assert.deepEqual(await readdir(join(dir, 'exports', '.staging')), [])
+    assert.deepEqual(await readdir(join(dir, 'exports')), ['.staging'])
+  })
+})
+
+test('standard export never overwrites an existing final directory', async () => {
+  await withService(async ({ dir, repository }) => {
+    const targetName = 'forced-export-target'
+    const exportsRoot = join(dir, 'exports')
+    const target = join(exportsRoot, targetName)
+    await mkdir(target, { recursive: true })
+    await writeFile(join(target, 'sentinel.txt'), 'unchanged')
+    const service = createStandardProjectService(repository, { exportDirectoryName: () => targetName })
+
+    await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.finalRoot === target)
+    assert.equal(await readFile(join(target, 'sentinel.txt'), 'utf8'), 'unchanged')
+    assert.deepEqual(await readdir(join(exportsRoot, '.staging')), [])
+  })
+})
+
+test('standard export cleans staging and returns a Studio error when final rename fails', async () => {
+  await withService(async ({ dir, repository }) => {
+    const exportsRoot = join(dir, 'exports')
+    const service = createStandardProjectService(repository, {
+      exportDirectoryName: () => 'rename-failure',
+      fileSystem: { mkdir, lstat, rm, rename: async () => { throw new Error('injected rename failure') } },
+    })
+
+    await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.cause?.message === 'injected rename failure')
+    assert.deepEqual(await readdir(join(exportsRoot, '.staging')), [])
+    assert.deepEqual(await readdir(exportsRoot), ['.staging'])
+  })
+})
+
+test('standard export removes staging when the frozen Contract validator rejects generated documents', async () => {
+  await withService(async ({ dir, repository, service }) => {
+    await service.importProject(resolve('contracts/presentation-standard-project/examples/unformatted-project/project_01992a80-0000-7000-8000-000000000101-campus-renewal-brief'))
+    const baseRevision = repository.getState().project.currentRevision
+    await repository.transactContent(
+      { baseRevision, source: 'human', detail: { actionType: 'test.corrupt-standard-document' } },
+      state => ({
+        ...state,
+        project: {
+          ...state.project,
+          extensionPayload: {
+            ...state.project.extensionPayload,
+            standardArchive: {
+              ...state.project.extensionPayload.standardArchive,
+              documents: {
+                ...state.project.extensionPayload.standardArchive.documents,
+                'rules.json': {},
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await assert.rejects(service.exportProject(), error => error.code === 'standard_contract_invalid')
+    assert.deepEqual(await readdir(join(dir, 'exports', '.staging')), [])
+    assert.deepEqual(await readdir(join(dir, 'exports')), ['.staging'])
   })
 })
