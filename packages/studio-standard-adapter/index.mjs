@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { basename, extname, join, relative, resolve, sep } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import {
@@ -8,7 +8,6 @@ import {
   STANDARD_VERSION,
   createMinimalProjectDocuments,
   createStableId,
-  isStableId,
   validateProjectDirectoryWithAjv,
 } from '../../contracts/presentation-standard-project/src/index.mjs'
 import { ERROR_CODES, StudioError, assertCanonicalSnapshot } from '../studio-contracts/index.mjs'
@@ -96,6 +95,9 @@ export async function readStandardProject(projectRoot) {
         name: asset.displayName,
         type: asset.mimeType,
         dataUrl: findAssetData(archive, asset),
+        widthPx: asset.metadata?.widthPx,
+        heightPx: asset.metadata?.heightPx,
+        extensionPayload: { standard: clone(asset) },
       }))
       return {
         id: page.pageId,
@@ -204,7 +206,128 @@ function updateDraft(page, projectId) {
     script.content = page.script
   } else if (script) draft.scriptBlocks = draft.scriptBlocks.filter(block => block !== script)
   draft.scriptBlocks = draft.scriptBlocks.map((block, index) => ({ ...block, order: index }))
+
+  const preservedPageAssets = new Map((draft.pageAssets ?? []).map(item => [item.assetId, item]))
+  draft.pageAssets = (page.assets ?? []).map((asset, index) => ({
+    ...clone(preservedPageAssets.get(asset.id) ?? {}),
+    pageAssetId: preservedPageAssets.get(asset.id)?.pageAssetId ?? createStableId('pageAsset'),
+    assetId: asset.id,
+    role: preservedPageAssets.get(asset.id)?.role ?? 'supporting',
+    order: index,
+    caption: preservedPageAssets.get(asset.id)?.caption ?? '',
+    sourceRefs: clone(preservedPageAssets.get(asset.id)?.sourceRefs ?? []),
+  }))
   return { draft, titleBlockId: heading.contentBlockId }
+}
+
+const EXTENSION_BY_MIME = Object.freeze({
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+})
+
+function decodeDataUrl(dataUrl) {
+  const match = /^data:([^;,]+);base64,([a-z0-9+/=\s]+)$/iu.exec(String(dataUrl ?? ''))
+  if (!match) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '素材必须使用带 MIME 类型的 base64 data URL。')
+  return { mimeType: match[1].toLowerCase(), bytes: Buffer.from(match[2].replace(/\s/gu, ''), 'base64') }
+}
+
+function jpegDimensions(bytes) {
+  let offset = 2
+  while (offset + 8 < bytes.length) {
+    if (bytes[offset] !== 0xff) { offset += 1; continue }
+    const marker = bytes[offset + 1]
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      return { widthPx: bytes.readUInt16BE(offset + 7), heightPx: bytes.readUInt16BE(offset + 5) }
+    }
+    if (marker === 0xd8 || marker === 0xd9) { offset += 2; continue }
+    const length = bytes.readUInt16BE(offset + 2)
+    if (length < 2) break
+    offset += length + 2
+  }
+  return null
+}
+
+function imageDimensions(bytes, mimeType) {
+  if (mimeType === 'image/png' && bytes.length >= 24) {
+    return { widthPx: bytes.readUInt32BE(16), heightPx: bytes.readUInt32BE(20) }
+  }
+  if (mimeType === 'image/gif' && bytes.length >= 10) {
+    return { widthPx: bytes.readUInt16LE(6), heightPx: bytes.readUInt16LE(8) }
+  }
+  if (mimeType === 'image/jpeg') return jpegDimensions(bytes)
+  if (mimeType === 'image/webp' && bytes.length >= 30 && bytes.subarray(12, 16).toString('ascii') === 'VP8X') {
+    return {
+      widthPx: 1 + bytes.readUIntLE(24, 3),
+      heightPx: 1 + bytes.readUIntLE(27, 3),
+    }
+  }
+  if (mimeType === 'image/svg+xml') {
+    const source = bytes.toString('utf8')
+    const svg = /<svg\b[^>]*>/iu.exec(source)?.[0] ?? ''
+    const width = /\bwidth=["']([0-9]+(?:\.[0-9]+)?)/iu.exec(svg)?.[1]
+    const height = /\bheight=["']([0-9]+(?:\.[0-9]+)?)/iu.exec(svg)?.[1]
+    if (width && height) return { widthPx: Math.max(1, Math.round(Number(width))), heightPx: Math.max(1, Math.round(Number(height))) }
+    const viewBox = /\bviewBox=["'][^"']*?([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)\s*["']/iu.exec(svg)
+    if (viewBox) return { widthPx: Math.max(1, Math.round(Number(viewBox[1]))), heightPx: Math.max(1, Math.round(Number(viewBox[2]))) }
+  }
+  return null
+}
+
+async function materializePageAssets({ snapshot, documents, projectRoot }) {
+  const manifest = documents['assets/manifest.json']
+  const records = new Map((manifest.assets ?? []).map(asset => [asset.assetId, asset]))
+  for (const page of snapshot.pages) {
+    for (const asset of page.assets ?? []) {
+      const preserved = records.get(asset.id) ?? asset.extensionPayload?.standard ?? null
+      if (!asset.dataUrl) {
+        if (!preserved) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '页面素材缺少可导出的文件内容。', { assetId: asset.id })
+        continue
+      }
+      const { mimeType, bytes } = decodeDataUrl(asset.dataUrl)
+      const extension = EXTENSION_BY_MIME[mimeType]
+      if (!extension) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '当前版本不支持导出该素材格式。', { assetId: asset.id, mimeType })
+      const dimensions = {
+        widthPx: asset.widthPx ?? preserved?.metadata?.widthPx,
+        heightPx: asset.heightPx ?? preserved?.metadata?.heightPx,
+        ...imageDimensions(bytes, mimeType),
+      }
+      if (!dimensions.widthPx || !dimensions.heightPx) {
+        throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '无法读取图片尺寸，不能生成可信的标准素材记录。', { assetId: asset.id, mimeType })
+      }
+      const relativePath = preserved?.relativePath ?? `assets/images/${asset.id}${extension}`
+      await writeBytesWithin(projectRoot, relativePath, bytes)
+      const createdAt = asset.createdAt ?? preserved?.createdAt ?? snapshot.project.createdAt
+      records.set(asset.id, {
+        ...clone(preserved ?? {}),
+        assetId: asset.id,
+        displayName: asset.name || preserved?.displayName || asset.id,
+        mediaType: 'image',
+        category: preserved?.category ?? 'image',
+        semanticRole: preserved?.semanticRole ?? '页面素材',
+        relativePath,
+        mimeType,
+        sizeBytes: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        metadata: { ...clone(preserved?.metadata ?? {}), ...dimensions },
+        adoptionStatus: preserved?.adoptionStatus ?? 'adopted',
+        origin: clone(preserved?.origin ?? {
+          type: 'human_added',
+          sourceMaterialIds: [],
+          parentAssetIds: [],
+          method: 'Report Studio 页面上传',
+          sourceTool: { name: 'report-studio', version: '0.1.1' },
+        }),
+        sourceRefs: clone(preserved?.sourceRefs ?? []),
+        createdAt,
+        adoptedAt: preserved?.adoptedAt ?? createdAt,
+        retiredAt: preserved?.retiredAt ?? null,
+      })
+    }
+  }
+  manifest.assets = [...records.values()]
 }
 
 async function writeBytesWithin(projectRoot, relativePath, bytes) {
@@ -226,10 +349,12 @@ export async function writeStandardProject({ snapshot, exportRoot }) {
     name: snapshot.project.title,
     createdAt: snapshot.project.createdAt,
   })
-  const pageDocuments = clone(archived?.pageDocuments ?? {})
   await mkdir(projectRoot, { recursive: true })
   for (const directory of REQUIRED_DIRECTORIES) await mkdir(join(projectRoot, ...directory.split('/')), { recursive: true })
-  for (const file of archived?.files ?? []) await writeBytesWithin(projectRoot, file.relativePath, Buffer.from(file.dataBase64, 'base64'))
+  for (const file of archived?.files ?? []) {
+    if (JSON_DOCUMENTS.includes(file.relativePath) || file.relativePath.startsWith('pages/drafts/')) continue
+    await writeBytesWithin(projectRoot, file.relativePath, Buffer.from(file.dataBase64, 'base64'))
+  }
 
   documents['project.json'].projectId = snapshot.project.id
   documents['project.json'].name = snapshot.project.title
@@ -238,6 +363,7 @@ export async function writeStandardProject({ snapshot, exportRoot }) {
   documents['pages/manifest.json'].projectId = snapshot.project.id
   documents['source-materials/manifest.json'].projectId = snapshot.project.id
   documents['assets/manifest.json'].projectId = snapshot.project.id
+  await materializePageAssets({ snapshot, documents, projectRoot })
   const preservedOutline = new Map((documents['outline.json'].nodes ?? []).map(node => [node.outlineNodeId, node]))
   documents['outline.json'].nodes = flattenOutline(snapshot.outline, preservedOutline)
 

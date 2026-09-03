@@ -36,3 +36,87 @@ test('standard round trip preserves unsupported blocks and managed source bytes'
     await rm(target, { recursive: true, force: true })
   }
 })
+
+test('new Studio data-url assets are materialized and declared by both manifests', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-asset-export-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot)
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"></svg>')
+    const assetId = 'asset_01993e40-0000-7000-8000-000000000001'
+    imported.snapshot.pages[0].assets.push({
+      id: assetId,
+      name: '新增示意图.svg',
+      type: 'image/svg+xml',
+      dataUrl: `data:image/svg+xml;base64,${svg.toString('base64')}`,
+    })
+
+    const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target })
+    const validation = await validateProjectDirectoryWithAjv(exported.projectRoot, { allowGitKeep: true })
+    assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2))
+
+    const manifest = JSON.parse(await readFile(join(exported.projectRoot, 'assets', 'manifest.json'), 'utf8'))
+    const record = manifest.assets.find(asset => asset.assetId === assetId)
+    assert.ok(record)
+    assert.equal(record.mimeType, 'image/svg+xml')
+    assert.equal(record.metadata.widthPx, 10)
+    assert.equal(record.metadata.heightPx, 20)
+    assert.deepEqual(await readFile(join(exported.projectRoot, ...record.relativePath.split('/'))), svg)
+
+    const draft = JSON.parse(await readFile(join(exported.projectRoot, 'pages', 'drafts', `${imported.snapshot.pages[0].id}.json`), 'utf8'))
+    assert.ok(draft.pageAssets.some(link => link.assetId === assetId))
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('export omits archived draft files for pages removed in Studio', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-deleted-page-export-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot)
+    const removedPageId = imported.snapshot.pages[1].id
+    imported.snapshot.pages = imported.snapshot.pages.slice(0, 1)
+
+    const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target })
+    const validation = await validateProjectDirectoryWithAjv(exported.projectRoot, { allowGitKeep: true })
+    assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2))
+    await assert.rejects(
+      readFile(join(exported.projectRoot, 'pages', 'drafts', `${removedPageId}.json`)),
+      error => error.code === 'ENOENT',
+    )
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('a fresh Studio project exports as a Contract-valid standard directory', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-fresh-export-'))
+  try {
+    const snapshot = {
+      project: {
+        id: 'project_01993e40-0000-7000-8000-000000000010',
+        title: '全新策划汇报',
+        createdAt: '2026-09-03T08:00:00.000Z',
+      },
+      outline: [{
+        id: 'outline_node_01993e40-0000-7000-8000-000000000011',
+        title: '项目总览',
+        children: [],
+      }],
+      pages: [{
+        id: 'page_01993e40-0000-7000-8000-000000000012',
+        outlineNodeId: 'outline_node_01993e40-0000-7000-8000-000000000011',
+        heading: '项目总览',
+        body: '这是全新 Studio 项目的首个草案页面。',
+        bullets: ['边界明确'],
+        script: '说明项目边界。',
+        assets: [],
+      }],
+    }
+
+    const exported = await writeStandardProject({ snapshot, exportRoot: target })
+    const validation = await validateProjectDirectoryWithAjv(exported.projectRoot, { allowGitKeep: true })
+    assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2))
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
