@@ -303,22 +303,55 @@ function imageDimensions(bytes, mimeType) {
   return null
 }
 
-function sniffMime(bytes) {
+function sniffMagicMime(bytes) {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return 'image/png'
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
   if (bytes.length >= 6 && (bytes.subarray(0, 6).toString('ascii') === 'GIF87a' || bytes.subarray(0, 6).toString('ascii') === 'GIF89a')) return 'image/gif'
   if (bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
   if (bytes.length >= 5 && bytes.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf'
-  let text
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/u, '') } catch { return 'application/octet-stream' }
-  const trimmed = text.trimStart()
-  if (/^(?:<\?xml\b[^>]*>\s*)?<svg\b/iu.test(trimmed)) return 'image/svg+xml'
-  if (/^(?:<\?xml\b[^>]*>\s*)?</iu.test(trimmed)) return 'application/xml'
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'application/json'
-  const lines = text.split(/\r?\n/u).filter(line => line.length)
-  if (lines.length >= 2 && lines.some(line => /[,;\t]/u.test(line))) return 'text/csv'
-  if (/^[\p{L}\p{N}\p{P}\p{Z}\p{S}\r\n\t]*$/u.test(text)) return 'text/plain'
-  return 'application/octet-stream'
+  return null
+}
+
+function createMimeInspector() {
+  const header = Buffer.allocUnsafe(16)
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  let headerSize = 0
+  let textPrefix = ''
+  let textValid = true
+  let textSafe = true
+  let hasNewline = false
+  let hasDelimiter = false
+  const inspectText = text => {
+    if (textPrefix.length < 8192) textPrefix += text.slice(0, 8192 - textPrefix.length)
+    hasNewline ||= /\r|\n/u.test(text)
+    hasDelimiter ||= /[,;\t]/u.test(text)
+    if (!/^[\p{L}\p{N}\p{P}\p{Z}\p{S}\r\n\t]*$/u.test(text)) textSafe = false
+  }
+  return {
+    inspect(bytes) {
+      const copied = Math.min(bytes.length, header.length - headerSize)
+      if (copied) {
+        bytes.copy(header, headerSize, 0, copied)
+        headerSize += copied
+      }
+      if (!textValid) return
+      try { inspectText(decoder.decode(bytes, { stream: true })) } catch { textValid = false }
+    },
+    mimeType() {
+      const magic = sniffMagicMime(header.subarray(0, headerSize))
+      if (magic) return magic
+      if (textValid) {
+        try { inspectText(decoder.decode()) } catch { textValid = false }
+      }
+      if (!textValid || !textSafe) return 'application/octet-stream'
+      const trimmed = textPrefix.replace(/^\uFEFF/u, '').trimStart()
+      if (/^(?:<\?xml\b[^>]*>\s*)?<svg\b/iu.test(trimmed)) return 'image/svg+xml'
+      if (/^(?:<\?xml\b[^>]*>\s*)?</iu.test(trimmed)) return 'application/xml'
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'application/json'
+      if (hasNewline && hasDelimiter) return 'text/csv'
+      return 'text/plain'
+    },
+  }
 }
 
 async function blobHeader(openBlob, objectRef, limit = 256 * 1024) {
@@ -426,24 +459,19 @@ async function writeStreamWithin(projectRoot, relativePath, stream, expectedObje
   if (target !== projectRoot && !target.startsWith(`${projectRoot}${sep}`)) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目文件路径越界。', { relativePath })
   await mkdir(resolve(target, '..'), { recursive: true })
   const hash = createHash('sha256')
-  const header = Buffer.allocUnsafe(256 * 1024)
-  let headerSize = 0
+  const mimeInspector = createMimeInspector()
   let sizeBytes = 0
   const digest = new Transform({
     transform(chunk, encoding, callback) {
       const bytes = Buffer.from(chunk)
       sizeBytes += bytes.length
       hash.update(bytes)
-      const copied = Math.min(bytes.length, header.length - headerSize)
-      if (copied) {
-        bytes.copy(header, headerSize, 0, copied)
-        headerSize += copied
-      }
+      mimeInspector.inspect(bytes)
       callback(null, bytes)
     },
   })
   await pipeline(stream, digest, createWriteStream(target, { flags: 'w' }))
-  const metadata = { sizeBytes, sha256: hash.digest('hex'), mimeType: sniffMime(header.subarray(0, headerSize)) }
+  const metadata = { sizeBytes, sha256: hash.digest('hex'), mimeType: mimeInspector.mimeType() }
   if (expectedObjectRef && (metadata.sizeBytes !== expectedObjectRef.sizeBytes || metadata.sha256 !== expectedObjectRef.sha256)) {
     throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, 'Blob 流式恢复后的字节与 ObjectRef 不一致。', {
       relativePath,

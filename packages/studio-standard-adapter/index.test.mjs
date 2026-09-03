@@ -353,3 +353,25 @@ test('standard export classifies unknown streamed bytes as application/octet-str
     await rm(target, { recursive: true, force: true })
   }
 })
+
+test('standard export treats binary bytes after a 256 KiB text prefix as application/octet-stream', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-late-binary-mime-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot, blobOptions)
+    const bytes = Buffer.concat([Buffer.from('a'.repeat(256 * 1024), 'utf8'), Buffer.from([0x00])])
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const relativePath = 'source-materials/other/late-binary.bin'
+    const file = imported.snapshot.project.extensionPayload.standardArchive.files.find(item => item.relativePath === 'source-materials/data/场地指标.csv')
+    file.relativePath = relativePath
+    file.objectRef = { ...file.objectRef, sha256, sizeBytes: bytes.length, mimeType: 'text/plain', originalFileName: 'late-binary.bin' }
+    const material = imported.snapshot.project.extensionPayload.standardArchive.documents['source-materials/manifest.json'].materials[0]
+    Object.assign(material, { category: 'other', originalFileName: 'late-binary.bin', relativePath, mimeType: 'text/plain', sha256, sizeBytes: bytes.length })
+    testBlobs.set(sha256, bytes)
+
+    const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
+    const written = JSON.parse(await readFile(join(exported.projectRoot, 'source-materials', 'manifest.json'), 'utf8')).materials[0]
+    assert.equal(written.mimeType, 'application/octet-stream')
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})

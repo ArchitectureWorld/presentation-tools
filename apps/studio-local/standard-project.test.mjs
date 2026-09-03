@@ -4,7 +4,7 @@ import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, rmdir, writ
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRepository } from './repository.mjs'
-import { createStandardProjectService } from './standard-project.mjs'
+import { createStandardProjectService, publishDirectoryNoReplace } from './standard-project.mjs'
 import { executeAction } from '../../packages/studio-core/index.mjs'
 
 const fixtureRoot = resolve('contracts/presentation-standard-project/fixtures/minimal/project_01992a80-0000-7000-8000-000000000001-minimal-project')
@@ -140,7 +140,7 @@ test('standard export cleans staging and returns a Studio error when final renam
     const exportsRoot = join(dir, 'exports')
     const service = createStandardProjectService(repository, {
       exportDirectoryName: () => 'rename-failure',
-      fileSystem: { mkdir, lstat, open, rm, rmdir, rename: async () => { throw new Error('injected rename failure') } },
+      async publishDirectoryNoReplace() { throw new Error('injected rename failure') },
     })
 
     await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.cause?.message === 'injected rename failure')
@@ -244,7 +244,7 @@ test('standard export batch claim lets concurrent publishers with one final name
 
 test('standard export stays successful when post-publication staging cleanup fails', async () => {
   await withService(async ({ dir, repository }) => {
-    let cleanupAttempted = false
+    let cleanupAttempts = 0
     const service = createStandardProjectService(repository, {
       exportDirectoryName: () => 'cleanup-failure',
       fileSystem: {
@@ -255,16 +255,45 @@ test('standard export stays successful when post-publication staging cleanup fai
         rmdir,
         async rm(path, options) {
           if (path.includes(`${join('exports', '.staging')}`)) {
-            cleanupAttempted = true
-            throw new Error('injected staging cleanup failure')
+            cleanupAttempts += 1
+            if (cleanupAttempts === 1) throw new Error('injected staging cleanup failure')
           }
           return rm(path, options)
         },
       },
+      cleanupRetryDelayMs: 0,
     })
     const result = await service.exportProject()
-    assert.equal(cleanupAttempted, true)
+    assert.equal(cleanupAttempts, 1)
     assert.equal(result.validation.valid, true)
+    assert.equal(result.cleanup?.status, 'pending')
     assert.ok(await readFile(join(result.projectRoot, 'project.json')))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.equal(cleanupAttempts, 2)
+    assert.deepEqual(await service.retryPendingStagingCleanup(), [])
+  })
+})
+
+test('standard export refuses a final project directory that appears at the no-clobber publish call', async () => {
+  await withService(async ({ dir, repository }) => {
+    const targetName = 'publish-race'
+    const finalBatch = join(dir, 'exports', targetName)
+    let publishAttempted = false
+    let destinationSeen = null
+    const service = createStandardProjectService(repository, {
+      exportDirectoryName: () => targetName,
+      async publishDirectoryNoReplace(source, destination) {
+        publishAttempted = true
+        destinationSeen = destination
+        await mkdir(destination)
+        await writeFile(join(destination, 'sentinel.txt'), 'appeared-at-publish')
+        return publishDirectoryNoReplace(source, destination)
+      },
+    })
+
+    await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed')
+    assert.equal(publishAttempted, true)
+    assert.match(destinationSeen, new RegExp(`${finalBatch.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]`))
+    assert.equal(await readFile(join(destinationSeen, 'sentinel.txt'), 'utf8'), 'appeared-at-publish')
   })
 })
