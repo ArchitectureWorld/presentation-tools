@@ -83,6 +83,7 @@ export async function verifyReleaseConfiguration(root) {
     'scripts/verify-responsive-ui.mjs',
     'scripts/verify-dsh-plugin.mjs',
     'scripts/build-dsh-plugin-vendor.mjs',
+    'scripts/dsh-plugin-vendor-manifest.mjs',
     'scripts/smoke-dsh-native.mjs',
     'package.json',
     'package-lock.json',
@@ -92,7 +93,21 @@ export async function verifyReleaseConfiguration(root) {
   ]
   assertCondition(/^name:\s*Report Studio v0\.1\.1 CI\s*$/m.test(workflow), 'workflow name must be Report Studio v0.1.1 CI')
   assertCondition(/^\s*push:\s*$/m.test(workflow) && /^\s*pull_request:\s*$/m.test(workflow), 'workflow must run for pushes and pull requests')
-  for (const path of requiredPaths) assertCondition(workflow.includes(`'${path}'`), `workflow path filter missing ${path}`)
+  const workflowLines = workflow.split(/\r?\n/)
+  for (const trigger of ['push', 'pull_request']) {
+    const triggerIndex = workflowLines.indexOf(`  ${trigger}:`)
+    const pathsIndex = triggerIndex + 1
+    assertCondition(triggerIndex >= 0 && workflowLines[pathsIndex] === '    paths:', `workflow ${trigger} paths block is missing`)
+    const triggerPaths = new Set()
+    for (let index = pathsIndex + 1; index < workflowLines.length; index += 1) {
+      const match = workflowLines[index].match(/^      - '([^']+)'$/)
+      if (!match) break
+      triggerPaths.add(match[1])
+    }
+    for (const path of requiredPaths) {
+      assertCondition(triggerPaths.has(path), `workflow ${trigger} path filter missing ${path}`)
+    }
+  }
   for (const command of [
     'npm ci',
     'npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund',

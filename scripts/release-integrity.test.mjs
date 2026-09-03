@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -29,6 +29,31 @@ if (integrity) {
     const result = await integrity.verifyReleaseConfiguration(root)
     assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
     assert.equal(result.platforms.sort().join(','), 'ubuntu-latest,windows-latest')
+  })
+
+  test('release configuration requires the vendor manifest to trigger both push and pull request verification', async t => {
+    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-release-configuration-test-'))
+    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+    const [packageJson, packageLock, workflow] = await Promise.all([
+      readFile(join(root, 'package.json'), 'utf8'),
+      readFile(join(root, 'package-lock.json'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
+    ])
+    const manifestPathLine = "      - 'scripts/dsh-plugin-vendor-manifest.mjs'"
+    const workflowMissingPushPath = workflow.replace(`${manifestPathLine}\n`, '')
+    assert.notEqual(workflowMissingPushPath, workflow, 'fixture must remove the push path filter')
+    assert.ok(workflowMissingPushPath.includes(manifestPathLine), 'fixture must retain the pull_request path filter')
+    await Promise.all([
+      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), workflowMissingPushPath, 'utf8'),
+    ])
+
+    await assert.rejects(
+      integrity.verifyReleaseConfiguration(configurationRoot),
+      /push path filter missing scripts\/dsh-plugin-vendor-manifest\.mjs/,
+    )
   })
 
   test('smoke package resolution refuses implicit dist or source fallbacks', async () => {
@@ -77,7 +102,6 @@ if (integrity) {
       sourceCommit: head,
       dshVersion: '0.1.1-rc.2',
       buildCommand: 'npm pack ./packages/studio-dsh-plugin',
-      allowDirtySource: true,
     })
 
     assert.equal(artifact.sourceCommit, head)
