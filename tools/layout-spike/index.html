@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0d14">
+  <title>Report Studio v0.2.0 · Layout Spike</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="spike-shell">
+    <header class="topbar">
+      <div class="brand-group">
+        <span class="brand-mark">排</span>
+        <div>
+          <strong>Report Studio Layout</strong>
+          <small>v0.2.0-alpha.1 · independent spike</small>
+        </div>
+      </div>
+      <div class="boundary-note">固定 Fixture · 不读取或写入生产项目</div>
+      <div class="toolbar-actions">
+        <button id="reset-layout" type="button">重置样机</button>
+        <button id="copy-frame-changes" class="primary" type="button">复制框架变更</button>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <aside class="page-rail">
+        <div class="rail-heading"><span>PAGES</span><b>01</b></div>
+        <button class="page-card active" type="button">
+          <span>01</span>
+          <div class="page-preview" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </div>
+          <strong>排版基础验证</strong>
+        </button>
+        <div class="rail-footnote">本样机只验证 Adapter、选择、拖动、缩放和 Frame 序列化。</div>
+      </aside>
+
+      <section class="canvas-column">
+        <div class="canvas-toolbar">
+          <div>
+            <strong>1600 × 900</strong>
+            <span>studio_unit · 16:9</span>
+          </div>
+          <div class="canvas-toolbar-meta">
+            <span id="scale-label">适配窗口</span>
+            <span id="change-count">0 项框架变更</span>
+          </div>
+        </div>
+        <div id="canvas-viewport" class="canvas-viewport" aria-label="独立排版画布"></div>
+      </section>
+
+      <aside class="inspector">
+        <section>
+          <span class="eyebrow">SELECTION</span>
+          <h2 id="selection-name">未选择元素</h2>
+          <div id="selection-badges" class="badge-row"></div>
+        </section>
+
+        <section class="frame-panel">
+          <span class="eyebrow">FRAME</span>
+          <dl>
+            <div><dt>X</dt><dd id="frame-x">—</dd></div>
+            <div><dt>Y</dt><dd id="frame-y">—</dd></div>
+            <div><dt>W</dt><dd id="frame-width">—</dd></div>
+            <div><dt>H</dt><dd id="frame-height">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="interaction-help">
+          <span class="eyebrow">INTERACTION</span>
+          <p>拖动元素改变位置；拖动右下角控制点改变尺寸。修改只保存在当前浏览器内存，刷新页面会恢复固定 Fixture。</p>
+        </section>
+
+        <section class="serialization-panel">
+          <div class="section-heading">
+            <span class="eyebrow">FRAME CHANGESET</span>
+            <span id="copy-status"></span>
+          </div>
+          <pre id="frame-changes">{}</pre>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
