@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRepository } from './repository.mjs'
@@ -140,7 +140,7 @@ test('standard export cleans staging and returns a Studio error when final renam
     const exportsRoot = join(dir, 'exports')
     const service = createStandardProjectService(repository, {
       exportDirectoryName: () => 'rename-failure',
-      fileSystem: { mkdir, lstat, open, rm, rename: async () => { throw new Error('injected rename failure') } },
+      fileSystem: { mkdir, lstat, open, rm, rmdir, rename: async () => { throw new Error('injected rename failure') } },
     })
 
     await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.cause?.message === 'injected rename failure')
@@ -192,37 +192,45 @@ test('standard exports retain UUID uniqueness when the clock is fixed to one mil
   })
 })
 
-test('standard export claim prevents a target created between claim and publish from being overwritten', async () => {
+test('standard export atomically claims its final batch parent before any project folder is published', async () => {
   await withService(async ({ dir, repository }) => {
-    const targetName = 'claim-race-target'
+    const targetName = 'batch-claim-target'
     const exportsRoot = join(dir, 'exports')
     const target = join(exportsRoot, targetName)
     let claimed = false
+    let competingClaimError = null
     const service = createStandardProjectService(repository, {
       exportDirectoryName: () => targetName,
       fileSystem: {
-        mkdir,
+        async mkdir(path, options) {
+          const result = await mkdir(path, options)
+          if (path === target) {
+            claimed = true
+            await assert.rejects(mkdir(target), error => {
+              competingClaimError = error
+              return error.code === 'EEXIST'
+            })
+          }
+          return result
+        },
         lstat,
+        open,
         rename,
         rm,
-        async open(path, flags) {
-          const handle = await open(path, flags)
-          claimed = true
-          await mkdir(target, { recursive: true })
-          await writeFile(join(target, 'sentinel.txt'), 'created-after-claim')
-          return handle
-        },
+        rmdir,
       },
     })
 
-    await assert.rejects(service.exportProject(), error => error.code === 'standard_export_failed' && error.details?.finalRoot === target)
+    const result = await service.exportProject()
     assert.equal(claimed, true)
-    assert.equal(await readFile(join(target, 'sentinel.txt'), 'utf8'), 'created-after-claim')
+    assert.equal(competingClaimError?.code, 'EEXIST')
+    assert.equal(result.validation.valid, true)
+    assert.match(result.projectRoot, new RegExp(`${target.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]`))
     assert.deepEqual(await readdir(join(exportsRoot, '.staging')), [])
   })
 })
 
-test('standard export claim lets concurrent publishers with one final name produce at most one result', async () => {
+test('standard export batch claim lets concurrent publishers with one final name produce at most one result', async () => {
   await withService(async ({ dir, repository }) => {
     const exportsRoot = join(dir, 'exports')
     const service = createStandardProjectService(repository, { exportDirectoryName: () => 'shared-final-name' })
@@ -231,5 +239,32 @@ test('standard export claim lets concurrent publishers with one final name produ
     assert.equal(results.filter(result => result.status === 'rejected' && result.reason.code === 'standard_export_failed').length, 1)
     assert.deepEqual(await readdir(join(exportsRoot, '.staging')), [])
     assert.deepEqual((await readdir(exportsRoot)).sort(), ['.staging', 'shared-final-name'])
+  })
+})
+
+test('standard export stays successful when post-publication staging cleanup fails', async () => {
+  await withService(async ({ dir, repository }) => {
+    let cleanupAttempted = false
+    const service = createStandardProjectService(repository, {
+      exportDirectoryName: () => 'cleanup-failure',
+      fileSystem: {
+        mkdir,
+        lstat,
+        open,
+        rename,
+        rmdir,
+        async rm(path, options) {
+          if (path.includes(`${join('exports', '.staging')}`)) {
+            cleanupAttempted = true
+            throw new Error('injected staging cleanup failure')
+          }
+          return rm(path, options)
+        },
+      },
+    })
+    const result = await service.exportProject()
+    assert.equal(cleanupAttempted, true)
+    assert.equal(result.validation.valid, true)
+    assert.ok(await readFile(join(result.projectRoot, 'project.json')))
   })
 })

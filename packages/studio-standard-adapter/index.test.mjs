@@ -294,7 +294,7 @@ test('standard export rejects a Blob whose streamed bytes no longer equal its Ob
   }
 })
 
-test('standard export rejects a detectable source MIME that disagrees with ObjectRef metadata', async () => {
+test('standard export rejects bytes whose actual MIME is incompatible with the managed path', async () => {
   const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-mime-'))
   try {
     const imported = await readStandardProject(fixtureRoot, blobOptions)
@@ -309,8 +309,46 @@ test('standard export rejects a detectable source MIME that disagrees with Objec
 
     await assert.rejects(
       writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob }),
-      error => error.code === 'standard_export_failed' && error.details?.actualMimeType === 'image/png',
+      error => error.code === 'standard_contract_invalid' && error.details?.errors?.some(issue => issue.code === 'PRES_FILE_EXTENSION_MISMATCH'),
     )
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('standard export classifies streamed CSV bytes without trusting an ObjectRef MIME', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-csv-mime-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot, blobOptions)
+    const file = imported.snapshot.project.extensionPayload.standardArchive.files.find(item => item.relativePath === 'source-materials/data/场地指标.csv')
+    file.objectRef = { ...file.objectRef, mimeType: 'application/json' }
+    imported.snapshot.project.extensionPayload.standardArchive.documents['source-materials/manifest.json'].materials[0].mimeType = 'application/json'
+
+    const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
+    const material = JSON.parse(await readFile(join(exported.projectRoot, 'source-materials', 'manifest.json'), 'utf8')).materials[0]
+    assert.equal(material.mimeType, 'text/csv')
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('standard export classifies unknown streamed bytes as application/octet-stream', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-unknown-mime-'))
+  try {
+    const imported = await readStandardProject(fixtureRoot, blobOptions)
+    const bytes = Buffer.from([0x00, 0xff, 0x4a, 0x10])
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    const relativePath = 'source-materials/other/unknown.bin'
+    const file = imported.snapshot.project.extensionPayload.standardArchive.files.find(item => item.relativePath === 'source-materials/data/场地指标.csv')
+    file.relativePath = relativePath
+    file.objectRef = { ...file.objectRef, sha256, sizeBytes: bytes.length, mimeType: 'text/plain', originalFileName: 'unknown.bin' }
+    const material = imported.snapshot.project.extensionPayload.standardArchive.documents['source-materials/manifest.json'].materials[0]
+    Object.assign(material, { category: 'other', originalFileName: 'unknown.bin', relativePath, mimeType: 'text/plain', sha256, sizeBytes: bytes.length })
+    testBlobs.set(sha256, bytes)
+
+    const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
+    const written = JSON.parse(await readFile(join(exported.projectRoot, 'source-materials', 'manifest.json'), 'utf8')).materials[0]
+    assert.equal(written.mimeType, 'application/octet-stream')
   } finally {
     await rm(target, { recursive: true, force: true })
   }

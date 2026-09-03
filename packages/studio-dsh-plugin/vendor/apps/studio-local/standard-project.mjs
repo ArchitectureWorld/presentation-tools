@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
-import { lstat, mkdir, open, rename, rm } from 'node:fs/promises'
+import { mkdir, rename, rm, rmdir } from 'node:fs/promises'
 import { ERROR_CODES, StudioError } from '../../packages/studio-contracts/index.mjs'
 import { readStandardProject, writeStandardProject } from '../../packages/studio-standard-adapter/index.mjs'
 
@@ -16,7 +16,7 @@ export function createStandardProjectService(repository, options = {}) {
   const clock = options.clock ?? (() => new Date())
   const uuid = options.randomUUID ?? randomUUID
   const exportDirectoryName = options.exportDirectoryName ?? (() => `${clock().toISOString().replaceAll(':', '-')}-${uuid()}`)
-  const fileSystem = options.fileSystem ?? { mkdir, lstat, open, rename, rm }
+  const fileSystem = { mkdir, rename, rm, rmdir, ...(options.fileSystem ?? {}) }
   return Object.freeze({
     status() {
       const state = repository.getState()
@@ -50,46 +50,44 @@ export function createStandardProjectService(repository, options = {}) {
       }
       const stage = join(stagingRoot, directoryName)
       const finalRoot = join(exportsRoot, directoryName)
-      const claimPath = join(exportsRoot, `.${directoryName}.claim`)
       let staged = false
-      let claimed = false
+      let finalBatchClaimed = false
       try {
         await fileSystem.mkdir(stagingRoot, { recursive: true })
         await fileSystem.mkdir(stage)
         staged = true
         const exported = await writeStandardProject({ snapshot, exportRoot: stage, openBlob: repository.openBlob })
-        // Node has no cross-platform no-replace directory rename. Every Report Studio
-        // publisher therefore claims this same-directory sidecar before publish; this
-        // is a local-single-writer protocol, not protection from non-participating processes.
-        const claim = await fileSystem.open(claimPath, 'wx')
-        claimed = true
-        await claim.close()
-        try {
-          await fileSystem.lstat(finalRoot)
-          throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '标准项目导出目标已存在，未覆盖既有导出。', { finalRoot }, 409)
-        } catch (error) {
-          if (error?.code !== 'ENOENT') throw error
+        await fileSystem.mkdir(finalRoot)
+        finalBatchClaimed = true
+        const projectDirectoryName = relative(stage, exported.projectRoot)
+        if (basename(projectDirectoryName) !== projectDirectoryName) {
+          throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, 'staging 项目目录无效。', { stage, projectRoot: exported.projectRoot }, 500)
         }
-        await fileSystem.rename(stage, finalRoot)
-        staged = false
-        const projectRoot = join(finalRoot, relative(stage, exported.projectRoot))
+        const projectRoot = join(finalRoot, projectDirectoryName)
+        await fileSystem.rename(exported.projectRoot, projectRoot)
+        try {
+          await fileSystem.rm(stage, { recursive: true, force: true })
+        } catch {
+          // Publication is already complete. A stale private staging directory is recoverable.
+        }
         return { ...exported, projectRoot, revision: state.project.currentRevision }
       } catch (error) {
+        const cleanupFailures = []
         if (staged) {
-          try {
-            await fileSystem.rm(stage, { recursive: true, force: true })
-          } catch (cleanupError) {
-            throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '标准项目导出失败，且 staging 目录清理失败。', {
-              stage,
-              finalRoot,
-              cause: { name: error?.name ?? 'Error', message: error?.message ?? String(error) },
-              cleanupCause: { name: cleanupError?.name ?? 'Error', message: cleanupError?.message ?? String(cleanupError) },
-            }, 500)
-          }
+          try { await fileSystem.rm(stage, { recursive: true, force: true }) } catch (cleanupError) { cleanupFailures.push(cleanupError) }
+        }
+        if (finalBatchClaimed) {
+          try { await fileSystem.rmdir(finalRoot) } catch (cleanupError) { cleanupFailures.push(cleanupError) }
+        }
+        if (cleanupFailures.length) {
+          throw new StudioError(ERROR_CODES.STANDARD_EXPORT_FAILED, '标准项目导出失败，且候选目录清理失败。', {
+            stage,
+            finalRoot,
+            cause: { name: error?.name ?? 'Error', message: error?.message ?? String(error) },
+            cleanupCauses: cleanupFailures.map(cleanupError => ({ name: cleanupError?.name ?? 'Error', message: cleanupError?.message ?? String(cleanupError) })),
+          }, 500)
         }
         throw exportError(error, { stage, finalRoot })
-      } finally {
-        if (claimed) await fileSystem.rm(claimPath, { force: true })
       }
     },
   })
