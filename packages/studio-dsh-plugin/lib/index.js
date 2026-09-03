@@ -2,13 +2,13 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createStudioDshRuntime } from './runtime.js'
-import { errorPayload } from '../../studio-contracts/index.mjs'
-import { createStandardProjectService } from '../../../apps/studio-local/standard-project.mjs'
+import { errorPayload } from '../vendor/packages/studio-contracts/index.mjs'
+import { createStandardProjectService } from '../vendor/apps/studio-local/standard-project.mjs'
 
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt']
 
-const publicDir = fileURLToPath(new URL('../../../apps/studio-local/public/', import.meta.url))
+const publicDir = fileURLToPath(new URL('../vendor/apps/studio-local/public/', import.meta.url))
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',

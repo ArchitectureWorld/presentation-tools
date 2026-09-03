@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/outline-document.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "OutlineDocument",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/outline-document.schema.json"
+    },
+    "documentType": {
+      "const": "OutlineDocument"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "outlineDocumentId": {
+      "$ref": "common.schema.json#/$defs/outlineDocumentId"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outlineNodeId": {
+            "$ref": "common.schema.json#/$defs/outlineNodeId"
+          },
+          "parentOutlineNodeId": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/outlineNodeId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "chapter",
+              "section"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sourceRefs": {
+            "$ref": "common.schema.json#/$defs/sourceRefs"
+          }
+        },
+        "required": [
+          "outlineNodeId",
+          "parentOutlineNodeId",
+          "kind",
+          "title",
+          "summary",
+          "order"
+        ]
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "outlineDocumentId",
+    "projectId",
+    "nodes"
+  ]
+}

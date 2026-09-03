@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/page-manifest.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "PageManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/page-manifest.schema.json"
+    },
+    "documentType": {
+      "const": "PageManifest"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pageId": {
+            "$ref": "common.schema.json#/$defs/pageId"
+          },
+          "outlineNodeId": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/outlineNodeId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "titleBlockId": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/contentBlockId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draftPath": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/relativePath"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceRefs": {
+            "$ref": "common.schema.json#/$defs/sourceRefs"
+          }
+        },
+        "required": [
+          "pageId",
+          "outlineNodeId",
+          "order",
+          "titleBlockId",
+          "draftPath"
+        ]
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "projectId",
+    "pages"
+  ]
+}

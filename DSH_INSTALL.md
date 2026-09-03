@@ -63,12 +63,13 @@ Get-ChildItem -LiteralPath $backup -Recurse -File | Get-FileHash -Algorithm SHA2
 
 ```bash
 dsh plugin --profile web remove @architectureworld/report-studio-dsh
-dsh plugin --profile web add ./packages/studio-dsh-plugin
+npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
+dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
 
-首次安装时，`remove` 提示插件不存在可以继续。`dump-config` 必须包含 `@architectureworld/report-studio-dsh`，并继续保留用户原有插件。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。
+首次安装时，`remove` 提示插件不存在可以继续。发布 tarball 已包含 Studio Runtime、UI 和标准 Adapter，并显式安装 AJV 运行依赖。`dump-config` 必须包含 `@architectureworld/report-studio-dsh`，并继续保留用户原有插件。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。
 
 DSH Web 默认地址为 `http://127.0.0.1:3080/`。进入任一 Session 后，应在会话标签和会话头部看到 `Report Studio`。
 

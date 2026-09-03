@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { createRepository } from '../../../apps/studio-local/repository.mjs'
+import { createRepository } from '../vendor/apps/studio-local/repository.mjs'
 import {
   acceptProposal as acceptCoreProposal,
   createProposalFromAgent,
@@ -9,8 +9,8 @@ import {
   markSubmissionDispatch,
   retryReviewSubmission,
   submitReviewRound,
-} from '../../studio-core/index.mjs'
-import { ERROR_CODES, StudioError } from '../../studio-contracts/index.mjs'
+} from '../vendor/packages/studio-core/index.mjs'
+import { ERROR_CODES, StudioError } from '../vendor/packages/studio-contracts/index.mjs'
 
 const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
 const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))

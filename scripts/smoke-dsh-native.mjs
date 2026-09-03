@@ -9,7 +9,23 @@ import net from 'node:net'
 const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || '@deepseek-ai/dsh@0.1.1-rc.2'
 const DSH_BIN = process.env.REPORT_STUDIO_DSH_BIN?.trim() || ''
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const plugin = join(root, 'packages', 'studio-dsh-plugin')
+const sourcePlugin = join(root, 'packages', 'studio-dsh-plugin')
+const packagedPlugin = join(root, 'dist', 'architectureworld-report-studio-dsh-0.1.1.tgz')
+
+async function resolvePluginPackage() {
+  const configured = process.env.REPORT_STUDIO_PLUGIN_PACKAGE?.trim()
+  if (configured) {
+    const target = resolve(configured)
+    await access(target, constants.R_OK)
+    return target
+  }
+  try {
+    await access(packagedPlugin, constants.R_OK)
+    return packagedPlugin
+  } catch {
+    return sourcePlugin
+  }
+}
 
 async function resolveDshCommand() {
   if (DSH_BIN) {
@@ -120,6 +136,7 @@ async function waitForHealth(url, child, logs, timeoutMs = 120000) {
 const home = await mkdtemp(join(tmpdir(), 'report-studio-dsh-home-'))
 const env = { ...process.env, DSH_HOME: home, CI: '1', NO_COLOR: '1' }
 const dsh = await resolveDshCommand()
+const plugin = await resolvePluginPackage()
 const invoke = args => [dsh.command, [...dsh.prefix, ...args]]
 let child
 try {
@@ -131,7 +148,7 @@ try {
     timeoutMs: dsh.packageResolution ? 600000 : 30000,
   })
 
-  console.log('DSH smoke 2/5: install Report Studio bundle into an isolated web profile')
+  console.log(`DSH smoke 2/5: install Report Studio bundle into an isolated web profile (${plugin})`)
   const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', plugin])
   await run(addCommand, addArgs, { cwd: root, env, timeoutMs: 600000 })
 
@@ -165,7 +182,7 @@ try {
   const logs = () => `${stdout}\n${stderr}`
   const healthUrl = `http://127.0.0.1:${port}/report-studio/api/health?sessionId=smoke-session`
   const health = await waitForHealth(healthUrl, child, logs)
-  if (health.agentMode !== 'dsh-native' || health.agentConfigured !== true) {
+  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true) {
     throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
   }
 

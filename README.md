@@ -32,7 +32,8 @@ git checkout main
 git pull --ff-only
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
-dsh plugin --profile web add ./packages/studio-dsh-plugin
+npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
+dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
@@ -69,7 +70,7 @@ npm run verify:all
 npm run smoke:dsh
 ```
 
-`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 使用隔离的 DSH Home 安装插件、启动 Web Profile 并检查正式路由。真实模型生成质量仍需在实际 DSH 账号/模型环境中验收。
+`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 使用隔离的 DSH Home 安装 `dist` 中的发布 tarball、启动 Web Profile 并检查正式路由。真实模型生成质量仍需在实际 DSH 账号/模型环境中验收。
 
 ## 独立调试
 

@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/asset-manifest.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "AssetManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/asset-manifest.schema.json"
+    },
+    "documentType": {
+      "const": "AssetManifest"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "$ref": "common.schema.json#/$defs/assetId"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mediaType": {
+            "enum": [
+              "image",
+              "video",
+              "audio",
+              "document",
+              "data",
+              "model",
+              "other"
+            ]
+          },
+          "category": {
+            "enum": [
+              "image",
+              "video",
+              "chart",
+              "diagram",
+              "audio",
+              "other"
+            ]
+          },
+          "semanticRole": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "relativePath": {
+            "$ref": "common.schema.json#/$defs/relativePath"
+          },
+          "mimeType": {
+            "$ref": "common.schema.json#/$defs/mimeType"
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "widthPx": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "heightPx": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "durationMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pageCount": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "rowCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "columnCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [],
+            "minProperties": 0
+          },
+          "adoptionStatus": {
+            "enum": [
+              "adopted",
+              "retired"
+            ]
+          },
+          "origin": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "enum": [
+                  "source_material",
+                  "derived_source_material",
+                  "generated_by_plugin",
+                  "generated_by_tool",
+                  "human_added"
+                ]
+              },
+              "sourceMaterialIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/sourceMaterialId"
+                },
+                "uniqueItems": true
+              },
+              "parentAssetIds": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/assetId"
+                },
+                "uniqueItems": true
+              },
+              "method": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceTool": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "version": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "sourceMaterialIds",
+              "parentAssetIds",
+              "method",
+              "sourceTool"
+            ]
+          },
+          "sourceRefs": {
+            "$ref": "common.schema.json#/$defs/sourceRefs"
+          },
+          "createdAt": {
+            "$ref": "common.schema.json#/$defs/dateTime"
+          },
+          "adoptedAt": {
+            "$ref": "common.schema.json#/$defs/dateTime"
+          },
+          "retiredAt": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/dateTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "assetId",
+          "displayName",
+          "mediaType",
+          "category",
+          "semanticRole",
+          "relativePath",
+          "mimeType",
+          "sizeBytes",
+          "sha256",
+          "metadata",
+          "adoptionStatus",
+          "origin",
+          "createdAt",
+          "adoptedAt",
+          "retiredAt"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mediaType": {
+                  "const": "image"
+                }
+              },
+              "type": "object"
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "widthPx": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "heightPx": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "widthPx",
+                    "heightPx"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mediaType": {
+                  "enum": [
+                    "video",
+                    "audio"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "durationMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "durationMs"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "origin": {
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "source_material",
+                        "derived_source_material"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "then": {
+              "properties": {
+                "origin": {
+                  "properties": {
+                    "sourceMaterialIds": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "$ref": "common.schema.json#/$defs/sourceMaterialId"
+                      },
+                      "uniqueItems": true
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "projectId",
+    "assets"
+  ]
+}

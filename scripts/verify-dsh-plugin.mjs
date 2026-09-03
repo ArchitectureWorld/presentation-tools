@@ -12,7 +12,7 @@ assert.deepEqual(packageJson.dsh?.client?.inject, [
   '@deepseek-ai/dsh-client-ui-conversation',
 ])
 assert.equal(packageJson.exports?.['./client'], './lib/client.js')
-assert.equal(packageJson.dependencies, undefined)
+assert.deepEqual(packageJson.dependencies, { ajv: '8.17.1', 'ajv-formats': '3.0.1' })
 assert.equal(packageJson.peerDependencies, undefined)
 
 const patch = await read('packages/studio-dsh-plugin/cordis.patch.yml')
@@ -29,6 +29,10 @@ for (const token of [
   "schema: {}",
 ]) assert.ok(host.includes(token), `missing host integration token: ${token}`)
 assert.ok(!host.includes("from '@deepseek-ai/dsh-tools'"), 'native host must not require an uninstalled linked-package dependency')
+assert.match(host, /\.\.\/vendor\/apps\/studio-local\/standard-project\.mjs/)
+
+const runtime = await read('packages/studio-dsh-plugin/lib/runtime.js')
+assert.match(runtime, /\.\.\/vendor\/apps\/studio-local\/repository\.mjs/)
 
 const client = await read('packages/studio-dsh-plugin/lib/client.js')
 for (const token of [
@@ -47,6 +51,10 @@ for (const token of [
   'report-studio.prompt-result',
   "apiPath('/api/state')",
 ]) assert.ok(browser.includes(token), `missing browser native bridge token: ${token}`)
+
+const smoke = await read('scripts/smoke-dsh-native.mjs')
+assert.match(smoke, /REPORT_STUDIO_PLUGIN_PACKAGE/)
+assert.match(smoke, /architectureworld-report-studio-dsh-0\.1\.1\.tgz/)
 
 const html = await read('apps/studio-local/public/index.html')
 assert.match(html, /href="\.\/styles\.css"/)

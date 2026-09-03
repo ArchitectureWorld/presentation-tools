@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-manifest.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "ProjectManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-manifest.schema.json"
+    },
+    "documentType": {
+      "const": "ProjectManifest"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "projectSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 80
+    },
+    "defaultCanvasPreset": {
+      "type": "string",
+      "enum": [
+        "16:9",
+        "4:3",
+        "A4-landscape",
+        "A4-portrait"
+      ]
+    },
+    "projectRulesId": {
+      "$ref": "common.schema.json#/$defs/projectRulesId"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/dateTime"
+    },
+    "createdBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "sourceProjectId": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/sourceProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "sourceProjectId",
+        "actorId"
+      ]
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "projectId",
+    "name",
+    "projectSlug",
+    "defaultCanvasPreset",
+    "projectRulesId",
+    "createdAt",
+    "createdBy"
+  ]
+}

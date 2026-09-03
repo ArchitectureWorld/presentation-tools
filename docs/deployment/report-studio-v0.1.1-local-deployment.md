@@ -19,7 +19,8 @@ npm run verify:all
 
 ```bash
 dsh plugin --profile web remove @architectureworld/report-studio-dsh
-dsh plugin --profile web add ./packages/studio-dsh-plugin
+npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
+dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```

@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/common.schema.json",
+  "title": "Presentation Standard Project Directory 0.1.0 common definitions",
+  "$defs": {
+    "standardVersion": {
+      "const": "0.1.0"
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "mimeType": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z][A-Za-z0-9+.-]*:)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "fileName": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}$)[^/\\\\\\u0000-\\u001f\\u007f]+$"
+    },
+    "languageTag": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*|und)$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "projectRulesId": {
+      "type": "string",
+      "pattern": "^project_rules_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "outlineDocumentId": {
+      "type": "string",
+      "pattern": "^outline_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "outlineNodeId": {
+      "type": "string",
+      "pattern": "^outline_node_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "pageId": {
+      "type": "string",
+      "pattern": "^page_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "draftDocumentId": {
+      "type": "string",
+      "pattern": "^draft_page_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "contentBlockId": {
+      "type": "string",
+      "pattern": "^content_block_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "listItemId": {
+      "type": "string",
+      "pattern": "^list_item_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "metricId": {
+      "type": "string",
+      "pattern": "^metric_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "tableRowId": {
+      "type": "string",
+      "pattern": "^table_row_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "tableColumnId": {
+      "type": "string",
+      "pattern": "^table_column_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "tableCellId": {
+      "type": "string",
+      "pattern": "^table_cell_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "scriptBlockId": {
+      "type": "string",
+      "pattern": "^script_block_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "pageAssetId": {
+      "type": "string",
+      "pattern": "^page_asset_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "sourceMaterialId": {
+      "type": "string",
+      "pattern": "^source_material_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "assetId": {
+      "type": "string",
+      "pattern": "^asset_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "sourceProjectId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^:\\u0000-\\u001f\\u007f]+$"
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "sourceProjectId": {
+          "$ref": "common.schema.json#/$defs/sourceProjectId"
+        },
+        "sourceRevision": {
+          "$ref": "common.schema.json#/$defs/sourceRevision"
+        },
+        "objectIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "sourceSnapshotSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      },
+      "required": [
+        "provider",
+        "sourceProjectId",
+        "sourceRevision",
+        "objectIds",
+        "evidenceIds"
+      ]
+    },
+    "sourceRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/sourceRef"
+      },
+      "uniqueItems": true
+    },
+    "sourceRevision": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      ]
+    },
+    "contentNature": {
+      "type": "string",
+      "enum": [
+        "fact",
+        "user_statement",
+        "professional_judgement",
+        "assumption",
+        "recommendation",
+        "decision",
+        "missing"
+      ]
+    },
+    "semanticScalar": {
+      "type": [
+        "string",
+        "number",
+        "integer",
+        "boolean",
+        "null"
+      ]
+    }
+  }
+}

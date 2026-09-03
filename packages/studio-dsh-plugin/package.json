@@ -12,10 +12,15 @@
   },
   "files": [
     "lib/**",
+    "vendor/**",
     "compatibility/**",
     "cordis.patch.yml",
     "README.md"
   ],
+  "scripts": {
+    "sync:vendor": "node ../../scripts/build-dsh-plugin-vendor.mjs",
+    "prepack": "npm run sync:vendor"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -30,6 +35,10 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1"
   },
   "license": "MIT"
 }
