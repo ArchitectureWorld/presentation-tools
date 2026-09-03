@@ -1,4 +1,4 @@
-# `@architectureworld/report-studio-dsh` v0.1.0
+# `@architectureworld/report-studio-dsh` v0.1.1
 
 Report Studio 的 DSH 原生组合包。它在 DSH Web Profile 中注册：
 

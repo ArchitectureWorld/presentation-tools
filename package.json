@@ -1,6 +1,6 @@
 {
   "name": "@architectureworld/report-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,10 +9,12 @@
   "scripts": {
     "start": "node apps/studio-local/server.mjs",
     "dev": "node --watch apps/studio-local/server.mjs",
-    "test": "node --test packages/studio-core/*.test.mjs packages/studio-dsh-plugin/*.test.mjs apps/studio-local/*.test.mjs",
-    "verify": "node scripts/verify-v0.1.0.mjs",
+    "test": "node --test packages/studio-contracts/*.test.mjs packages/studio-core/*.test.mjs packages/studio-standard-adapter/*.test.mjs packages/studio-dsh-plugin/*.test.mjs apps/studio-local/*.test.mjs",
+    "verify": "node scripts/verify-v0.1.1.mjs",
+    "verify:contracts": "npm --prefix contracts/presentation-standard-project run verify",
+    "verify:e2e": "node scripts/verify-e2e-v0.1.1.mjs",
     "verify:ui": "node scripts/verify-responsive-ui.mjs",
-    "verify:all": "npm test && npm run verify && npm run verify:ui && npm run verify:dsh",
+    "verify:all": "npm test && npm run verify && npm run verify:contracts && npm run verify:e2e && npm run verify:ui && npm run verify:dsh",
     "verify:dsh": "node scripts/verify-dsh-plugin.mjs",
     "smoke:dsh": "node scripts/smoke-dsh-native.mjs"
   }

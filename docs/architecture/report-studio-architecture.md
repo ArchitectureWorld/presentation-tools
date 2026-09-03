@@ -1,12 +1,12 @@
 ---
 document_id: report-studio-architecture
 name: 通用汇报工作台架构开发文档
-status: development-baseline-frozen
-version: 1.0.0
-review_status: multi-pass-self-review-passed
+status: production-baseline
+version: 1.1.0
+review_status: implementation-verified
 review_method: user-approved-adversarial-self-review
-approved_for: mvp-development
-updated_at: 2026-09-02
+approved_for: report-studio-v0.1.1-deployment
+updated_at: 2026-09-03
 language: zh-CN
 owners:
   - product
@@ -36,6 +36,7 @@ scope:
   - content-block-model
   - engine-neutral-layout
   - asset-ingestion
+  - presentation-standard-project-adapter
   - mvp-baseline
 ---
 
@@ -43,7 +44,7 @@ scope:
 
 > 本文件是本项目唯一的架构母文件。后续确认的架构、数据、交互和技术决策持续更新到本文件，不另建平行的“v2 / v3 架构文件”。文档头记录当前版本，末尾保留变更记录。
 
-> **开发前最终冻结版：`1.0.0`。** 用户已明确同意在独立 Agent 不可用时改用严格自检。本版本完成产品语义、DSH 职责、Agent 读写、存储原子性、崩溃恢复、Schema 演进、MVP 删减和全文机械一致性六轮审查，可作为 MVP 开发唯一架构基线。后续改变已稳定规则必须新增 ADR 并提升文档版本。
+> **当前生产基线：`1.1.0`，对应 Report Studio `v0.1.1`。** `1.0.0` 是开发前冻结版；`1.1.0` 记录已经实现并验证的 A1.1 迁移、Revision CAS、冻结评审上下文、标准项目 Adapter 和部署边界。后续改变已稳定规则必须新增 ADR 并提升文档版本。
 
 ## 0. 文档使用规则
 
@@ -2377,6 +2378,10 @@ DshHarnessIntegration
 
 ## 17. 变更记录
 
+### 1.1.0 — 2026-09-03
+
+将架构母文件提升为 Report Studio v0.1.1 生产基线；记录 A1.1 无损迁移、内容寻址 Repository、Revision CAS、冻结评审上下文、标准项目 Adapter、标准素材落盘和当前部署边界。
+
 ### 1.0.0 — 2026-09-02
 
 形成 MVP 开发前最终冻结基线：
@@ -2590,6 +2595,14 @@ npm 包 `@architectureworld/presentation-contracts@0.1.0` 提供 Schema、TypeSc
 
 权威最小 Fixture 和完整未排版示例位于 Contract 根目录。最终验证必须同时覆盖七类 Schema、空项目、两页示例、稳定 ID、跨文件引用、讲解稿引用、路径可移植性、MIME、`sizeBytes`、SHA-256、npm 打包和全新 consumer 安装；本标准支线不得修改 Report Studio UI、交互、批注、悬浮 Agent、排版或导出实现。
 
+### Report Studio v0.1.1 接入映射【已实现并验证】
+
+`packages/studio-standard-adapter` 是标准目录与 Studio Canonical Snapshot 之间的唯一转换边界。导入保留标准稳定 ID、未知内容块和原始受管文件；导出只读取冻结 Revision，生成 Contract-valid 目录，并把 Studio 新增 data-URL 素材落盘后写入 Asset Manifest。已删除页面的历史 Draft 不得进入新导出。
+
+Canonical 内容只包括项目、大纲、页面草案和页面素材。Annotation、ReviewSubmission、Proposal、DSH Session、Workspace View、Project Head 与 Revision/CAS 属于 Studio Operational/Control 层，不写入标准目录。UI 内容写入、DSH Proposal 接受和标准导出全部经过同一 Repository 事务与 Revision 边界；不存在 UI 私有状态或 Agent 旁路直接修改标准文件的第二事实源。
+
+当前 `v0.1.1` 只开放大纲和草案。Contract 中合法但 UI 尚未编辑的指标组、表格等内容以 opaque extension 保留；`layouts/` 可以存在并往返，但正式排版、分页和 PPTX/PDF/HTML 成品导出在 `v0.2.0` 实现。因此，“结构完全适配”指当前产品范围内无损导入、受控编辑和有效导出，不表示排版阶段已经交付。
+
 ### 决策记录
 
 | 编号 | 决策 | 状态 |
@@ -2601,3 +2614,4 @@ npm 包 `@architectureworld/presentation-contracts@0.1.0` 提供 Schema、TypeSc
 | ADR-067 | `sourceRefs` 只做 provider-neutral 来源追溯 | 已稳定 |
 | ADR-068 | Source Material 与正式 Asset 分离，文件以相对路径、`sizeBytes` 和 SHA-256 校验 | 已稳定 |
 | ADR-069 | 跨仓唯一消费单元为精确版本 npm Contract 包及 Schema Set Hash | 已稳定 |
+| ADR-070 | Report Studio 通过独立 Adapter 消费标准目录；Canonical、Operational、Control 三层不混写 | 已实现并验证 |

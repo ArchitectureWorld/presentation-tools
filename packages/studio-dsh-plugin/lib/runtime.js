@@ -32,7 +32,7 @@ export function defaultDshDataRoot() {
 
 function reviewPrompt(sessionId, state, round, submission) {
   return [
-    '[Report Studio v0.1.0 · DSH Native Review]',
+    '[Report Studio v0.1.1 · DSH Native Review]',
     `DSH Session ID: ${sessionId}`,
     `Project ID: ${state.project.id}`,
     `Project title: ${state.project.title}`,
@@ -57,7 +57,7 @@ function chatPrompt(sessionId, state, input) {
   const text = String(input?.text ?? '').trim()
   if (!text) throw Object.assign(new Error('消息不能为空'), { statusCode: 400 })
   return [
-    '[Report Studio v0.1.0 · DSH Native Chat]',
+    '[Report Studio v0.1.1 · DSH Native Chat]',
     `DSH Session ID: ${sessionId}`,
     `Project ID: ${state.project.id}`,
     `Project title: ${state.project.title}`,

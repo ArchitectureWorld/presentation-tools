@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const packageJson = JSON.parse(await read('packages/studio-dsh-plugin/package.json'))
 assert.equal(packageJson.name, '@architectureworld/report-studio-dsh')
-assert.equal(packageJson.version, '0.1.0')
+assert.equal(packageJson.version, '0.1.1')
 assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
 assert.equal(packageJson.dsh?.client?.platform, 'web')
 assert.deepEqual(packageJson.dsh?.client?.inject, [
@@ -55,7 +55,7 @@ assert.match(html, /src="\.\/app\.js"/)
 assert.ok(html.indexOf('./dsh-native-runtime.js') < html.indexOf('./app.js'))
 
 console.log('Report Studio native DSH plugin verification PASS')
-console.log('plugin=@architectureworld/report-studio-dsh@0.1.0')
+console.log('plugin=@architectureworld/report-studio-dsh@0.1.1')
 console.log('baseline=@deepseek-ai/dsh@0.1.1-rc.2')
 console.log('route=/report-studio')
 console.log('tools=studio_get_context,studio_apply_commands')

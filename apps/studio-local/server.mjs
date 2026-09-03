@@ -79,7 +79,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   }
 
   async function handleApi(req, res, url) {
-    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.0', dataPath: repository.statePath, migrationStatus: repository.migrationStatus().status, agentConfigured: Boolean(bridge?.configured) });
+    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.1', dataPath: repository.statePath, migrationStatus: repository.migrationStatus().status, agentConfigured: Boolean(bridge?.configured) });
     if (req.method === 'GET' && url.pathname === '/api/migration/status') return sendJson(res, 200, repository.migrationStatus());
     if (req.method === 'POST' && url.pathname === '/api/migration/apply') return sendJson(res, 200, await repository.applyMigration());
     if (req.method === 'GET' && url.pathname === '/api/standard/status') return sendJson(res, 200, standardProject.status());
@@ -204,6 +204,6 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const app = await createStudioServer(); await app.start();
-  console.log(`Report Studio v0.1.0 running at http://${process.env.HOST || '127.0.0.1'}:${app.port}`);
+  console.log(`Report Studio v0.1.1 running at http://${process.env.HOST || '127.0.0.1'}:${app.port}`);
   console.log(`Data: ${app.repository.statePath}`);
 }

@@ -23,7 +23,7 @@ test('HTTP API exposes health, state and persisted actions', async () => {
   const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
   try {
     const base = `http://127.0.0.1:${app.port}`;
-    const health = await fetch(`${base}/api/health`).then(r => r.json()); assert.equal(health.ok, true); assert.equal(health.version, 'v0.1.0');
+    const health = await fetch(`${base}/api/health`).then(r => r.json()); assert.equal(health.ok, true); assert.equal(health.version, 'v0.1.1');
     let state = await fetch(`${base}/api/state`).then(r => r.json()); assert.equal(state.outline.length, 0);
     const response = await fetch(`${base}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'outline.add', parentId: null, title: '第一章', baseRevision: state.project.currentRevision }) });
     assert.equal(response.status, 200); state = await response.json(); assert.equal(state.outline[0].title, '第一章');
