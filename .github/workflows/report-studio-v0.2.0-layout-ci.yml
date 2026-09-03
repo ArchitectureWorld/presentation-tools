@@ -1,4 +1,4 @@
-name: Report Studio v0.2.0 Layout Foundation CI
+name: Report Studio v0.2.0 Layout CI
 
 on:
   push:
@@ -20,6 +20,8 @@ on:
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-openpencil-adapter-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-openpencil-adapter.md'
+      - 'docs/acceptance/report-studio-v0.2.0-openpencil-adapter-verification.md'
+      - 'docs/handoff/2026-09-03-report-studio-v0.2.0-openpencil-adapter-handoff.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
   pull_request:
     paths:
@@ -38,13 +40,15 @@ on:
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-openpencil-adapter-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-openpencil-adapter.md'
+      - 'docs/acceptance/report-studio-v0.2.0-openpencil-adapter-verification.md'
+      - 'docs/handoff/2026-09-03-report-studio-v0.2.0-openpencil-adapter-handoff.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
 
 permissions:
   contents: read
 
 jobs:
-  layout-foundation:
+  layout:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
