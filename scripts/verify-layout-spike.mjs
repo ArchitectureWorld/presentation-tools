@@ -210,16 +210,25 @@ try {
     await dragElement(cdp, first.layoutElementId)
     await waitFor(cdp, `window.__layoutSpike.getSerialized().changes.length === 1`, 'drag frame serialization')
     const moved = await cdp.evaluate(`window.__layoutSpike.getState()`)
-    const movedFirst = moved.renderPlan.elements.find(element => element.layoutElementId === '${first.layoutElementId}')
+    const serialized = await cdp.evaluate(`window.__layoutSpike.getSerialized()`)
+    const movedIds = moved.renderPlan.elements.map(element => element.layoutElementId)
+    const changedIds = serialized.changes.map(change => change.layoutElementId)
+    assert.equal(
+      serialized.changes[0].layoutElementId,
+      first.layoutElementId,
+      `drag changed the wrong element; initial=${first.layoutElementId} changed=${JSON.stringify(changedIds)} present=${JSON.stringify(movedIds)}`,
+    )
+    const movedFirst = moved.renderPlan.elements.find(element => element.layoutElementId === first.layoutElementId)
+    assert.ok(movedFirst, `dragged element disappeared; expected=${first.layoutElementId} present=${JSON.stringify(movedIds)}`)
     assert.notEqual(movedFirst.frame.x, first.frame.x)
     assert.notEqual(movedFirst.frame.y, first.frame.y)
-    const serialized = await cdp.evaluate(`window.__layoutSpike.getSerialized()`)
     assert.deepEqual(Object.keys(serialized.changes[0]).sort(), ['frame', 'layoutElementId'])
 
     await cdp.send('Page.reload', { ignoreCache: true })
     await waitFor(cdp, `document.readyState === 'complete' && window.__layoutSpikeReady === true`, 'layout spike reload')
     const reset = await cdp.evaluate(`window.__layoutSpike.getState()`)
-    const resetFirst = reset.renderPlan.elements.find(element => element.layoutElementId === '${first.layoutElementId}')
+    const resetFirst = reset.renderPlan.elements.find(element => element.layoutElementId === first.layoutElementId)
+    assert.ok(resetFirst, `reloaded fixture lost element ${first.layoutElementId}`)
     assert.deepEqual(resetFirst.frame, first.frame)
     assert.deepEqual((await cdp.evaluate(`window.__layoutSpike.getSerialized()`)).changes, [])
 
