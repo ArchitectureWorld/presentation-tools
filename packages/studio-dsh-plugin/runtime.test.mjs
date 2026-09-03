@@ -13,7 +13,7 @@ test('native DSH runtime binds isolated Report Studio projects to session ids an
     const nodeId = state.outline[0].id
     state = await runtime.executeAction('session-a', { type: 'draft.ensurePage', outlineNodeId: nodeId, baseRevision: state.project.currentRevision })
     await (await runtime.repositoryFor('session-a')).transactContent({ baseRevision: state.project.currentRevision, source: 'human' }, current => {
-      current.project.extensionPayload = { standardArchive: { files: [{ dataBase64: 'never expose this' }] } }
+      current.project.extensionPayload = { standardArchive: { files: [{ objectRef: { sha256: 'a'.repeat(64), sizeBytes: 1, mimeType: 'image/png' }, sentinel: 'never expose this archive' }] } }
       return current
     })
     state = await runtime.executeAction('session-a', { type: 'annotation.add', scopeKey: 'outline:root', reviewRoundId: null, target: { type: 'outline-node', id: nodeId, label: 'DSH 原生接入' }, instruction: '将标题改为原生 DSH 工作台' })
