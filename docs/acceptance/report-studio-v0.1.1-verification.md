@@ -1,10 +1,15 @@
 # Report Studio v0.1.1 发布验收记录
 
-验收日期：2026-09-03（Asia/Shanghai）  
-仓库：`ArchitectureWorld/presentation-tools`  
-起始基线：`main@804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`  
-验收候选：`c8b87ac886c3e8e5ffad42d4833d7c1e5cee9d32`  
-产品版本：`Report Studio 0.1.1`  
+验收日期：2026-09-03（Asia/Shanghai）
+
+仓库：`ArchitectureWorld/presentation-tools`
+
+起始基线：`main@804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`
+
+验收候选：`c8b87ac886c3e8e5ffad42d4833d7c1e5cee9d32`
+
+产品版本：`Report Studio 0.1.1`
+
 标准版本：`Presentation Standard Project Directory 0.1.0`
 
 ## 结论
