@@ -5,27 +5,11 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
+import { resolveRequiredPluginPackage } from './release-integrity.mjs'
 
 const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || '@deepseek-ai/dsh@0.1.1-rc.2'
 const DSH_BIN = process.env.REPORT_STUDIO_DSH_BIN?.trim() || ''
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const sourcePlugin = join(root, 'packages', 'studio-dsh-plugin')
-const packagedPlugin = join(root, 'dist', 'architectureworld-report-studio-dsh-0.1.1.tgz')
-
-async function resolvePluginPackage() {
-  const configured = process.env.REPORT_STUDIO_PLUGIN_PACKAGE?.trim()
-  if (configured) {
-    const target = resolve(configured)
-    await access(target, constants.R_OK)
-    return target
-  }
-  try {
-    await access(packagedPlugin, constants.R_OK)
-    return packagedPlugin
-  } catch {
-    return sourcePlugin
-  }
-}
 
 async function resolveDshCommand() {
   if (DSH_BIN) {
@@ -135,8 +119,8 @@ async function waitForHealth(url, child, logs, timeoutMs = 120000) {
 
 const home = await mkdtemp(join(tmpdir(), 'report-studio-dsh-home-'))
 const env = { ...process.env, DSH_HOME: home, CI: '1', NO_COLOR: '1' }
+const plugin = await resolveRequiredPluginPackage(process.env.REPORT_STUDIO_PLUGIN_PACKAGE, root)
 const dsh = await resolveDshCommand()
-const plugin = await resolvePluginPackage()
 const invoke = args => [dsh.command, [...dsh.prefix, ...args]]
 let child
 try {

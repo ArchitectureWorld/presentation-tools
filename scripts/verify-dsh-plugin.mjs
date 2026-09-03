@@ -58,7 +58,8 @@ for (const token of [
 
 const smoke = await read('scripts/smoke-dsh-native.mjs')
 assert.match(smoke, /REPORT_STUDIO_PLUGIN_PACKAGE/)
-assert.match(smoke, /architectureworld-report-studio-dsh-0\.1\.1\.tgz/)
+assert.match(smoke, /resolveRequiredPluginPackage/)
+assert.doesNotMatch(smoke, /dist.+architectureworld-report-studio-dsh-0\.1\.1\.tgz/s)
 
 const html = await read('apps/studio-local/public/index.html')
 assert.match(html, /href="\.\/styles\.css"/)

@@ -1,0 +1,12 @@
+export const DSH_PLUGIN_VENDOR_ENTRIES = Object.freeze([
+  'apps/studio-local/repository.mjs',
+  'apps/studio-local/migration.mjs',
+  'apps/studio-local/standard-project.mjs',
+  'apps/studio-local/public',
+  'packages/studio-core/index.mjs',
+  'packages/studio-contracts/index.mjs',
+  'packages/studio-standard-adapter/index.mjs',
+  'contracts/presentation-standard-project/src',
+  'contracts/presentation-standard-project/schemas/0.1.0',
+  'contracts/presentation-standard-project/SCHEMASET.sha256',
+])
