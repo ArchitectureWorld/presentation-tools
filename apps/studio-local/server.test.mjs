@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRepository } from './repository.mjs';
@@ -46,5 +46,22 @@ test('review submission through configured bridge creates a persisted proposal',
     state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'annotation.add', scopeKey:'outline:root', target:{type:'outline-node',id:nodeId,label:'第一章'}, instruction:'标题更具体' }) }).then(r=>r.json());
     const review = await fetch(`${base}/api/review/submit`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ scopeKey:'outline:root' }) }).then(r=>r.json());
     assert.equal(review.bridgeResult.message, '建议修改标题'); assert.ok(review.bridgeResult.proposalId); assert.equal(review.state.proposals.length, 1); assert.equal(review.state.outline[0].title, '第一章');
+  } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('HTTP API exposes migration status and blocks writes until confirmed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-migration-api-'));
+  await writeFile(join(dir, 'state.json'), `${JSON.stringify({ schemaVersion:'report-studio.v0.1.0', project:{ id:'project_old', title:'旧数据', currentRevision:0, createdAt:'2026-09-01T00:00:00.000Z', updatedAt:'2026-09-01T00:00:00.000Z' }, outline:[], pages:[], annotations:[], reviewRounds:[], reviewSubmissions:[], proposals:[], revisions:[], ui:{ stage:'outline', activePageId:null } }, null, 2)}\n`);
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    const status = await fetch(`${base}/api/migration/status`).then(response => response.json());
+    assert.equal(status.status, 'migration_required');
+    const blocked = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'project.rename', title:'不应写入' }) });
+    assert.equal(blocked.status, 428);
+    assert.equal((await blocked.json()).error.code, 'migration_required');
+    const migrated = await fetch(`${base}/api/migration/apply`, { method:'POST', headers:{'content-type':'application/json'}, body:'{}' });
+    assert.equal(migrated.status, 200);
+    assert.equal((await migrated.json()).status, 'ready');
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
 });

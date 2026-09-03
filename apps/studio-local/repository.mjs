@@ -12,6 +12,7 @@ import {
   createStudioId,
   projectStateFromParts,
 } from '../../packages/studio-contracts/index.mjs'
+import { inspectLegacyState, prepareLegacyMigration } from './migration.mjs'
 
 const clone = value => structuredClone(value)
 
@@ -110,6 +111,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
   let closed = false
   let state
   let control
+  let migrationInfo = null
   let queue = Promise.resolve()
 
   async function releaseLock() {
@@ -206,12 +208,19 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
   }
 
   try {
-    if (!(await pathExists(controlPath))) control = await createNewControl()
-    else control = JSON.parse(await readFile(controlPath, 'utf8'))
-    if (control.schemaVersion !== CONTROL_SCHEMA_VERSION) {
-      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '不支持的 ControlStore 版本。', { schemaVersion: control.schemaVersion }, 500)
+    if (!(await pathExists(controlPath))) {
+      const legacy = await inspectLegacyState(root)
+      if (legacy.exists) {
+        migrationInfo = { status: 'migration_required', sourcePath: legacy.path, sourceSchemaVersion: legacy.state.schemaVersion }
+        state = clone(legacy.state)
+      } else control = await createNewControl()
+    } else control = JSON.parse(await readFile(controlPath, 'utf8'))
+    if (control) {
+      if (control.schemaVersion !== CONTROL_SCHEMA_VERSION) {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '不支持的 ControlStore 版本。', { schemaVersion: control.schemaVersion }, 500)
+      }
+      state = await loadState(control)
     }
-    state = await loadState(control)
   } catch (error) {
     await releaseLock().catch(() => undefined)
     throw error
@@ -223,6 +232,12 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     return fresh
   }
 
+  function assertReady() {
+    if (migrationInfo?.status === 'migration_required') {
+      throw new StudioError(ERROR_CODES.MIGRATION_REQUIRED, '旧项目需要先备份并升级。', clone(migrationInfo), 428)
+    }
+  }
+
   async function publish(nextControl) {
     await atomicWriteJson(controlPath, nextControl)
     control = nextControl
@@ -231,6 +246,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
   }
 
   async function transactContent(input, mutator) {
+    assertReady()
     return enqueue(async () => {
       const fresh = await readControlFresh()
       const currentRevision = fresh.projectHead.currentRevision
@@ -272,6 +288,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
   }
 
   async function transactOperational(mutator) {
+    assertReady()
     return enqueue(async () => {
       const fresh = await readControlFresh()
       const current = await loadState(fresh)
@@ -289,6 +306,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
   }
 
   async function getSnapshotAt(revisionNumber) {
+    assertReady()
     const summary = control.operational.revisions.find(item => item.number === revisionNumber)
     if (!summary?.revisionRef) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '未找到指定 Revision。', { revisionNumber }, 404)
     const revision = await getObject(summary.revisionRef)
@@ -297,6 +315,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
   }
 
   async function replace(next) {
+    assertReady()
     const contentChanged = canonicalJson(canonicalFromState(state)) !== canonicalJson(canonicalFromState(next))
     if (contentChanged) {
       const baseRevision = state.project.currentRevision
@@ -305,12 +324,69 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     return transactOperational(() => next)
   }
 
+  async function applyMigration() {
+    if (!migrationInfo) {
+      return { status: 'ready', backupPath: control?.migration?.backupPath ?? null, state: clone(state) }
+    }
+    return enqueue(async () => {
+      const prepared = await prepareLegacyMigration(root)
+      const snapshot = canonicalFromState(prepared.state)
+      const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
+      const legacyStateRef = await putObject({ kind: 'LegacyState', value: prepared.legacyState, source: prepared.sourceSchemaVersion })
+      const revisionNumber = Math.max(0, Number(prepared.state.project.currentRevision) || 0)
+      const revision = {
+        kind: 'RevisionRecord',
+        revisionId: createStudioId('revision'),
+        revisionNumber,
+        parentRevision: null,
+        parentRevisionRef: null,
+        snapshotRef,
+        source: 'migration',
+        detail: { actionType: 'project.migrate', migratedFromSchemaVersion: prepared.sourceSchemaVersion },
+        idempotencyKey: `migration:${prepared.migrationMap.sourceSchemaVersion}`,
+        createdAt: new Date().toISOString(),
+      }
+      const revisionRef = await putObject(revision)
+      const nextControl = {
+        schemaVersion: CONTROL_SCHEMA_VERSION,
+        projectHead: { projectId: snapshot.project.id, currentRevision: revisionNumber, currentRevisionRef: revisionRef },
+        operational: operationalFromState(prepared.state, [revisionSummary(revision, revisionRef)]),
+        ui: clone(prepared.state.ui),
+        migration: {
+          status: 'completed',
+          migratedFromSchemaVersion: prepared.migrationMap.sourceSchemaVersion,
+          backupPath: prepared.backupPath,
+          mapPath: prepared.mapPath,
+          legacyStateRef,
+          legacyRevisions: clone(prepared.legacyState.revisions ?? []),
+          completedAt: new Date().toISOString(),
+        },
+      }
+      await loadState(nextControl)
+      await faultInjector('before_migration_publish', { nextControl })
+      await atomicWriteJson(controlPath, nextControl)
+      control = nextControl
+      state = await loadState(control)
+      migrationInfo = null
+      return { status: 'ready', backupPath: prepared.backupPath, mapPath: prepared.mapPath, state: clone(state) }
+    })
+  }
+
   return {
     root,
     controlPath,
     statePath: controlPath,
     legacyStatePath,
     getState() { return clone(state) },
+    migrationStatus() {
+      if (migrationInfo) return clone(migrationInfo)
+      return {
+        status: 'ready',
+        migratedFromSchemaVersion: control?.migration?.migratedFromSchemaVersion ?? null,
+        backupPath: control?.migration?.backupPath ?? null,
+      }
+    },
+    applyMigration,
     getSnapshotAt,
     transactContent,
     transactOperational,

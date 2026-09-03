@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createRepository } from './repository.mjs';
 import { createAgentBridge } from './agent-bridge.mjs';
 import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent } from '../../packages/studio-core/index.mjs';
+import { errorPayload } from '../../packages/studio-contracts/index.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
@@ -35,7 +36,9 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   let server;
 
   async function handleApi(req, res, url) {
-    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.0', dataPath: repository.statePath, agentConfigured: Boolean(bridge?.configured) });
+    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.0', dataPath: repository.statePath, migrationStatus: repository.migrationStatus().status, agentConfigured: Boolean(bridge?.configured) });
+    if (req.method === 'GET' && url.pathname === '/api/migration/status') return sendJson(res, 200, repository.migrationStatus());
+    if (req.method === 'POST' && url.pathname === '/api/migration/apply') return sendJson(res, 200, await repository.applyMigration());
     if (req.method === 'GET' && url.pathname === '/api/state') return sendJson(res, 200, repository.getState());
     if (req.method === 'POST' && url.pathname === '/api/action') {
       const action = await readJson(req);
@@ -103,7 +106,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
       if (apiHandled !== false) return;
       if (await serveStatic(req, res, url)) return;
       sendJson(res, 404, { error: 'not_found' });
-    } catch (error) { sendJson(res, error.statusCode || 400, { error: error.message || 'request_failed' }); }
+    } catch (error) { sendJson(res, error.statusCode || 400, error?.code ? errorPayload(error) : { error: error.message || 'request_failed' }); }
   });
 
   return {
