@@ -212,16 +212,17 @@ function updateDraft(page, projectId) {
   let heading = draft.contentBlocks.find(block => block.contentBlockId === page.titleBlockId || block.contentBlockId === refs.headingBlockId)
     ?? draft.contentBlocks.find(block => block.type === 'heading' && block.role === 'page_title')
   if (!heading) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少 titleBlockId 所指向的 ContentBlock。', { pageId: page.id, titleBlockId: page.titleBlockId })
-  if (Object.hasOwn(page, 'heading')) heading.content = page.heading
+  const hasCanonicalBlocks = Array.isArray(page.contentBlocks)
+  if (!hasCanonicalBlocks && Object.hasOwn(page, 'heading')) heading.content = page.heading
   let body = draft.contentBlocks.find(block => block.contentBlockId === refs.bodyBlockId)
     ?? draft.contentBlocks.find(block => block.type === 'text' && block.role === 'body')
-  if (Object.hasOwn(page, 'body')) {
+  if (!hasCanonicalBlocks && Object.hasOwn(page, 'body')) {
     if (!body) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少正文 ContentBlock。', { pageId: page.id })
     body.content = page.body
   }
   let list = draft.contentBlocks.find(block => block.contentBlockId === refs.listBlockId)
   const bullets = (page.bullets ?? []).map(value => String(value))
-  if (Object.hasOwn(page, 'bullets') && (list || bullets.length)) {
+  if (!hasCanonicalBlocks && Object.hasOwn(page, 'bullets') && (list || bullets.length)) {
     if (!list) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少列表 ContentBlock。', { pageId: page.id })
     list.items = bullets.map((content, index) => ({
       ...(list.items?.[index] ?? {}),
@@ -235,7 +236,7 @@ function updateDraft(page, projectId) {
 
   let script = draft.scriptBlocks.find(block => block.scriptBlockId === refs.scriptBlockId) ?? draft.scriptBlocks[0]
   const canonicalScriptText = draft.scriptBlocks.slice().sort((a, b) => a.order - b.order).map(block => block.content).join('\n\n')
-  if (Object.hasOwn(page, 'script') && (script || page.script)) {
+  if (!hasCanonicalBlocks && Object.hasOwn(page, 'script') && (script || page.script)) {
     if (!script) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少讲解稿 ScriptBlock。', { pageId: page.id })
     if (page.script !== canonicalScriptText) script.content = page.script
   }
@@ -322,17 +323,17 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
   const manifest = documents['assets/manifest.json']
   const records = new Map((manifest.assets ?? []).map(asset => [asset.assetId, asset]))
   for (const page of snapshot.pages) {
-    for (const asset of page.assets ?? []) {
-      const preserved = records.get(asset.id) ?? asset.extensionPayload?.standard ?? null
+    for (const asset of page.pageAssets ?? []) {
+      const preserved = records.get(asset.assetId) ?? asset.extensionPayload?.standard ?? null
       if (!asset.objectRef) {
-        if (asset.dataUrl || asset.dataBase64) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '旧版内联素材必须先迁移为 ObjectRef 后才能导出。', { assetId: asset.id })
-        if (!preserved) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '页面素材缺少可导出的文件内容。', { assetId: asset.id })
+        if (asset.dataUrl || asset.dataBase64) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '旧版内联素材必须先迁移为 ObjectRef 后才能导出。', { assetId: asset.assetId })
+        if (!preserved) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '页面素材缺少可导出的文件内容。', { assetId: asset.assetId })
         continue
       }
-      if (typeof openBlob !== 'function') throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复页面素材需要 Blob 读取器。', { assetId: asset.id })
+      if (typeof openBlob !== 'function') throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复页面素材需要 Blob 读取器。', { assetId: asset.assetId })
       const mimeType = asset.mimeType ?? asset.type
       const extension = EXTENSION_BY_MIME[mimeType]
-      if (!extension) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '当前版本不支持导出该素材格式。', { assetId: asset.id, mimeType })
+      if (!extension) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '当前版本不支持导出该素材格式。', { assetId: asset.assetId, mimeType })
       const header = await blobHeader(openBlob, asset.objectRef)
       const dimensions = {
         widthPx: asset.widthPx ?? preserved?.metadata?.widthPx,
@@ -340,15 +341,15 @@ async function materializePageAssets({ snapshot, documents, projectRoot, openBlo
         ...imageDimensions(header, mimeType),
       }
       if (!dimensions.widthPx || !dimensions.heightPx) {
-        throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '无法读取图片尺寸，不能生成可信的标准素材记录。', { assetId: asset.id, mimeType })
+        throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '无法读取图片尺寸，不能生成可信的标准素材记录。', { assetId: asset.assetId, mimeType })
       }
-      const relativePath = preserved?.relativePath ?? `assets/images/${asset.id}${extension}`
+      const relativePath = preserved?.relativePath ?? `assets/images/${asset.assetId}${extension}`
       await writeStreamWithin(projectRoot, relativePath, await openBlob(asset.objectRef))
       const createdAt = asset.createdAt ?? preserved?.createdAt ?? snapshot.project.createdAt
-      records.set(asset.id, {
+      records.set(asset.assetId, {
         ...clone(preserved ?? {}),
-        assetId: asset.id,
-        displayName: asset.name || preserved?.displayName || asset.id,
+        assetId: asset.assetId,
+        displayName: asset.name || preserved?.displayName || asset.assetId,
         mediaType: 'image',
         category: preserved?.category ?? 'image',
         semanticRole: preserved?.semanticRole ?? '页面素材',

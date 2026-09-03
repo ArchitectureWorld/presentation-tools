@@ -560,7 +560,7 @@ async function saveDraft() {
   const page = activePage();
   if (!page) return;
   const list = page.contentBlocks?.find(block => block.type === 'list');
-  const listItems = list ? queryAll('[data-list-item-id]').map((input, index) => {
+  const listItems = list ? queryAll('[data-list-item-id]').filter(input => input.dataset.listItemId).map((input, index) => {
     const current = list.items.find(item => item.listItemId === input.dataset.listItemId);
     return { ...current, content: input.value, order: index };
   }) : null;

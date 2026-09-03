@@ -43,7 +43,7 @@ test('standard round trip preserves unsupported blocks and managed source bytes'
   const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-export-'))
   try {
     const imported = await readStandardProject(fixtureRoot, blobOptions)
-    imported.snapshot.pages[0].body = '这是在 Report Studio 中修改后的正文。'
+    imported.snapshot.pages[0].contentBlocks.find(block => block.type === 'text' && block.role === 'body').content = '这是在 Report Studio 中修改后的正文。'
     const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
     const validation = await validateProjectDirectoryWithAjv(exported.projectRoot, { allowGitKeep: true })
     assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2))
@@ -77,7 +77,8 @@ test('new Studio ObjectRef assets are materialized and declared by both manifest
     })
     imported.snapshot.pages[0].pageAssets.push({
       pageAssetId: createStableId('pageAsset'), assetId, role: 'supporting', caption: '',
-      order: imported.snapshot.pages[0].pageAssets.length, sourceRefs: [],
+      order: imported.snapshot.pages[0].pageAssets.length, sourceRefs: [], name: '新增示意图.svg', mimeType: 'image/svg+xml',
+      objectRef: { sha256, sizeBytes: svg.length, mimeType: 'image/svg+xml', originalFileName: '新增示意图.svg' },
     })
 
     const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
