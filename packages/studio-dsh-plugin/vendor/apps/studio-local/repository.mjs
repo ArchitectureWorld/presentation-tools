@@ -256,13 +256,34 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     await appendFile(orphanLogPath, `${JSON.stringify({ recordedAt: new Date().toISOString(), objectRef: clone(reference), detail: clone(detail) })}\n`, 'utf8')
   }
 
-  function assertNoNewInlineAssetData(baseState, candidate) {
-    const existing = new Map((baseState.pages ?? []).flatMap(page => (page.assets ?? []).map(asset => [asset.id, { dataUrl: asset.dataUrl, dataBase64: asset.dataBase64 }])))
-    for (const page of candidate.pages ?? []) for (const asset of page.assets ?? []) {
-      for (const field of ['dataUrl', 'dataBase64']) if (Object.hasOwn(asset, field) && asset[field] != null) {
-        const prior = existing.get(asset.id)
-        if (!prior || prior[field] !== asset[field]) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL 或 Base64 页面素材；请使用受控上传或显式迁移。', { assetId: asset.id, field }, 400)
+  function assertNoNewInlineBinary(baseValue, candidateValue, path = '$') {
+    const same = canonicalJson(baseValue) === canonicalJson(candidateValue)
+    const reject = kind => {
+      if (!same) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL、Base64 或内联二进制载荷；请使用受控上传或显式迁移。', { path, kind }, 400)
+    }
+    if (candidateValue == null) return
+    if (typeof candidateValue === 'string') {
+      if (/^data:/iu.test(candidateValue)) reject('data_url')
+      return
+    }
+    if (Buffer.isBuffer(candidateValue) || ArrayBuffer.isView(candidateValue) || candidateValue instanceof ArrayBuffer) {
+      reject('binary_value')
+      return
+    }
+    if (Array.isArray(candidateValue)) {
+      for (let index = 0; index < candidateValue.length; index += 1) assertNoNewInlineBinary(baseValue?.[index], candidateValue[index], `${path}[${index}]`)
+      return
+    }
+    if (typeof candidateValue !== 'object') return
+    if (candidateValue.type === 'Buffer' && Array.isArray(candidateValue.data)) reject('buffer_object')
+    for (const [key, value] of Object.entries(candidateValue)) {
+      const lower = key.toLowerCase()
+      const baseChild = baseValue && typeof baseValue === 'object' ? baseValue[key] : undefined
+      const inlineField = lower === 'dataurl' || lower === 'data_base64' || lower.endsWith('base64') || ['binary', 'bytes', 'rawdata', 'inline'].includes(lower)
+      if (inlineField && value != null && canonicalJson(baseChild) !== canonicalJson(value)) {
+        throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL、Base64 或内联二进制载荷；请使用受控上传或显式迁移。', { path: `${path}.${key}`, kind: 'inline_field' }, 400)
       }
+      assertNoNewInlineBinary(baseChild, value, `${path}.${key}`)
     }
   }
 
@@ -384,7 +405,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       const baseState = await loadState(fresh)
       const candidate = await mutator(clone(baseState))
       if (!candidate || typeof candidate !== 'object') throw new StudioError(ERROR_CODES.INVALID_COMMAND, '内容事务必须返回完整项目状态。')
-      if (!input.allowLegacyDataUrl) assertNoNewInlineAssetData(baseState, candidate)
+      assertNoNewInlineBinary(baseState, candidate)
       const snapshot = canonicalFromState(candidate)
       const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
       const revisionNumber = currentRevision + 1
@@ -450,7 +471,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
 
       const snapshot = clone(importedSnapshot)
       assertCanonicalSnapshot(snapshot)
-      assertNoNewInlineAssetData({ pages: [] }, snapshot)
+      assertNoNewInlineBinary({}, snapshot)
       const createdAt = new Date().toISOString()
       const candidate = projectStateFromParts({
         snapshot,

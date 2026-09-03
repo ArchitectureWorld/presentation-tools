@@ -22,7 +22,8 @@ async function withRepository(run, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-repository-'))
   let repository
   try {
-    repository = await createRepository(dir, options)
+    await options.beforeCreate?.(dir)
+    repository = await createRepository(dir, options.repositoryOptions ?? options)
     await run({ dir, repository })
   } finally {
     await repository?.close?.()
@@ -77,6 +78,11 @@ test('content-addressed blobs stream multi-chunk 20 MiB once across revisions wi
     const snapshots = await Promise.all([repository.getSnapshotAt(1), repository.getSnapshotAt(2)])
     assert.ok(snapshots.every(snapshot => Buffer.byteLength(JSON.stringify(snapshot)) < 100 * 1024))
     assert.ok(snapshots.every(snapshot => !JSON.stringify(snapshot).match(/dataUrl|dataBase64|[A-Za-z0-9+/]{4096}/)))
+    const control = await readFile(join(dir, 'control.json'), 'utf8')
+    assert.equal(control.includes('dataUrl'), false)
+    assert.equal(control.includes('dataBase64'), false)
+    assert.equal(control.includes(bytes.toString('base64')), false)
+    assert.equal(control.includes(expectedHash), false)
   })
 })
 
@@ -106,12 +112,18 @@ test('content-addressed Blob handles partial file writes without publishing a tr
   }, { fileOpen: partialFileOpen })
 })
 
-test('content publication rejects new Data URL and base64 asset fields', async () => {
+test('ordinary content transactions reject recursive inline binary fields even when they claim legacy permission', async () => {
   await withRepository(async ({ repository }) => {
     await assert.rejects(repository.transactContent({ baseRevision: 0, source: 'human' }, state => {
       state = executeAction(state, { type: 'outline.add', parentId: null, title: '拒绝内联二进制' }).state
       state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
       state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000098', dataUrl: 'data:image/png;base64,AAAA' }]
+      return state
+    }), error => error.code === 'invalid_command')
+    await assert.rejects(repository.transactContent({ baseRevision: 0, source: 'human', allowLegacyDataUrl: true }, state => {
+      state = executeAction(state, { type: 'outline.add', parentId: null, title: '嵌套绕过' }).state
+      state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
+      state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000097', objectRef: { sha256: 'a'.repeat(64), dataBase64: 'AAAA' }, extensionPayload: { upload: { dataUrl: 'data:image/png;base64,AAAA' }, binary: { type: 'Buffer', data: [1, 2, 3] } } }]
       return state
     }), error => error.code === 'invalid_command')
     assert.equal(repository.getState().project.currentRevision, 0)
@@ -120,20 +132,23 @@ test('content publication rejects new Data URL and base64 asset fields', async (
 
 test('legacy page Data URLs remain readable until explicit migration replaces them with ObjectRefs', async () => {
   await withRepository(async ({ repository }) => {
-    const base = repository.getState().project.currentRevision
-    await repository.transactContent({ baseRevision: base, allowLegacyDataUrl: true }, state => {
-      state = executeAction(state, { type: 'outline.add', parentId: null, title: '旧页面' }).state
-      state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
-      state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000002', name: 'old.png', type: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }]
-      return state
-    })
     assert.match(repository.getState().pages[0].assets[0].dataUrl, /^data:/)
+    await repository.applyMigration()
     await repository.migrateLegacyAssets()
     const asset = repository.getState().pages[0].assets[0]
     assert.equal('dataUrl' in asset, false)
     assert.match(asset.objectRef.sha256, /^[a-f0-9]{64}$/)
     assert.equal(JSON.stringify(await repository.getSnapshotAt(repository.getState().project.currentRevision)).includes('dataUrl'), false)
-  })
+  }, { beforeCreate: async dir => {
+    const createdAt = '2026-09-03T00:00:00.000Z'
+    await writeFile(join(dir, 'state.json'), `${JSON.stringify({
+      schemaVersion: 'report-studio.v0.1.0',
+      project: { id: 'project_old', title: '旧项目', currentRevision: 0, createdAt, updatedAt: createdAt },
+      outline: [{ id: 'outline_old', title: '旧页面', children: [] }],
+      pages: [{ id: 'page_old', outlineNodeId: 'outline_old', heading: '旧页面', body: '', bullets: [], script: '', assets: [{ id: 'asset_old', name: 'old.png', type: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }] }],
+      annotations: [], reviewRounds: [], reviewSubmissions: [], proposals: [], revisions: [], ui: { stage: 'draft', activePageId: 'page_old' },
+    })}\n`)
+  } })
 })
 
 test('two content transactions from the same base revision have exactly one winner', async () => {
