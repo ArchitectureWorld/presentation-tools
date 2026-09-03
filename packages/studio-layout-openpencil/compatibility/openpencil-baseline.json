@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "report-studio.openpencil-compatibility.v0.2.0-alpha.2",
+  "openPencil": {
+    "repository": "ZSeven-W/openpencil",
+    "commit": "e6c9bcef45c5b48b38f42824d56b5513178e1a0b"
+  },
+  "dshOpenPencil": {
+    "repository": "ZSeven-W/dsh-openpencil",
+    "commit": "99e05cdbae5e26c920cc20e0793c66446685b0cd",
+    "package": "@zseven-w/dsh-openpencil",
+    "version": "0.1.0-rc.9",
+    "node": ">=24.11.0"
+  },
+  "requiredCapabilities": {
+    "transactionalBatchDesign": true,
+    "createOperation": "I(parentId,nodeJson)",
+    "updateOperation": "U(nodeId,patchJson)",
+    "resultBindings": "results[{binding,nodeId}]",
+    "managedEditor": true
+  }
+}

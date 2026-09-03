@@ -9,12 +9,17 @@ on:
       - 'packages/studio-layout-core/**'
       - 'packages/studio-layout-adapter/**'
       - 'packages/studio-layout-integration/**'
+      - 'packages/studio-layout-engine-binding/**'
+      - 'packages/studio-layout-openpencil/**'
       - 'tools/layout-spike/**'
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
+      - 'scripts/verify-layout-openpencil-v0.2.0.mjs'
       - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-layout-foundation-design.md'
+      - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-openpencil-adapter-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
+      - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-openpencil-adapter.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
   pull_request:
     paths:
@@ -22,12 +27,17 @@ on:
       - 'packages/studio-layout-core/**'
       - 'packages/studio-layout-adapter/**'
       - 'packages/studio-layout-integration/**'
+      - 'packages/studio-layout-engine-binding/**'
+      - 'packages/studio-layout-openpencil/**'
       - 'tools/layout-spike/**'
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
+      - 'scripts/verify-layout-openpencil-v0.2.0.mjs'
       - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-layout-foundation-design.md'
+      - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-openpencil-adapter-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
+      - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-openpencil-adapter.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
 
 permissions:
@@ -42,10 +52,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Run layout foundation, adapter, integration and spike model tests
-        run: node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs tools/layout-spike/*.test.mjs
+      - name: Run layout foundation, adapter, OpenPencil and spike model tests
+        run: node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs packages/studio-layout-engine-binding/*.test.mjs packages/studio-layout-openpencil/*.test.mjs tools/layout-spike/*.test.mjs
       - name: Run deterministic layout verification
         run: node scripts/verify-layout-v0.2.0.mjs
+      - name: Run deterministic OpenPencil adapter verification
+        run: node scripts/verify-layout-openpencil-v0.2.0.mjs
       - name: Run isolated layout spike browser smoke
         env:
           CHROMIUM_PATH: google-chrome
