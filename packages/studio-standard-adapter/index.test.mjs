@@ -1,12 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { validateProjectDirectoryWithAjv } from '../../contracts/presentation-standard-project/src/index.mjs'
 import { readStandardProject, writeStandardProject } from './index.mjs'
+import { createStableId } from '../../contracts/presentation-standard-project/src/index.mjs'
+import { createInitialState, executeAction } from '../studio-core/index.mjs'
+import { canonicalFromState } from '../studio-contracts/index.mjs'
 
 const fixtureRoot = new URL('../../contracts/presentation-standard-project/examples/unformatted-project/project_01992a80-0000-7000-8000-000000000101-campus-renewal-brief/', import.meta.url)
 const testBlobs = new Map()
@@ -137,5 +140,87 @@ test('a fresh Studio project exports as a Contract-valid standard directory', as
     assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2))
   } finally {
     await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('standard import retains formal draft identities for multiple scripts, duplicate page assets and list items', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'report-studio-canonical-import-'))
+  const source = join(parent, 'source-project')
+  try {
+    await cp(new URL('.', fixtureRoot), source, { recursive: true })
+    const manifestPath = join(source, 'pages', 'manifest.json')
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    const draftPath = join(source, ...manifest.pages[0].draftPath.split('/'))
+    const draft = JSON.parse(await readFile(draftPath, 'utf8'))
+    const list = draft.contentBlocks.find(block => block.type === 'list')
+    list.items.push({ listItemId: createStableId('listItem'), content: '保留独立列表项身份', order: list.items.length, sourceRefs: [] })
+    const sourceScript = draft.scriptBlocks[0]
+    draft.scriptBlocks.push({ ...structuredClone(sourceScript), scriptBlockId: createStableId('scriptBlock'), order: 1, content: '第二段讲解稿' })
+    const assetId = 'asset_01992a80-0000-7000-8000-000000000221'
+    draft.pageAssets.push({ pageAssetId: createStableId('pageAsset'), assetId, role: 'supporting', caption: '同一素材的第一处使用', order: 0, sourceRefs: [] })
+    draft.pageAssets.push({ pageAssetId: createStableId('pageAsset'), assetId, role: 'background', caption: '同一素材的第二处使用', order: 1, sourceRefs: [] })
+    await writeFile(draftPath, `${JSON.stringify(draft, null, 2)}\n`, 'utf8')
+
+    const imported = await readStandardProject(source, blobOptions)
+    const page = imported.snapshot.pages[0]
+    assert.equal(page.draftDocumentId, draft.draftDocumentId)
+    assert.deepEqual(page.scriptBlocks.map(block => block.scriptBlockId), draft.scriptBlocks.map(block => block.scriptBlockId))
+    assert.equal(page.pageAssets.length, 2)
+    assert.notEqual(page.pageAssets[0].pageAssetId, page.pageAssets[1].pageAssetId)
+    assert.deepEqual(page.contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId), list.items.map(item => item.listItemId))
+  } finally {
+    await rm(parent, { recursive: true, force: true })
+  }
+})
+
+test('fresh canonical project keeps document and content ids across repeated exports and later edits', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-canonical-fresh-'))
+  try {
+    let state = createInitialState()
+    state = executeAction(state, { type: 'outline.add', title: '结构' }).state
+    state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
+    state = executeAction(state, { type: 'draft.update', pageId: state.pages[0].id, patch: { heading: '稳定标题', body: '稳定正文', bullets: ['稳定要点'], script: '稳定讲解稿' } }).state
+    const snapshot = canonicalFromState(state)
+    const first = await writeStandardProject({ snapshot, exportRoot: join(target, 'first') })
+    const firstDraft = JSON.parse(await readFile(join(first.projectRoot, 'pages', 'drafts', `${snapshot.pages[0].id}.json`), 'utf8'))
+    state = executeAction(state, { type: 'draft.update', pageId: state.pages[0].id, patch: { body: '已编辑正文' } }).state
+    const editedSnapshot = canonicalFromState(state)
+    const second = await writeStandardProject({ snapshot: editedSnapshot, exportRoot: join(target, 'second') })
+    const secondDraft = JSON.parse(await readFile(join(second.projectRoot, 'pages', 'drafts', `${snapshot.pages[0].id}.json`), 'utf8'))
+    assert.equal(secondDraft.draftDocumentId, firstDraft.draftDocumentId)
+    assert.deepEqual(secondDraft.contentBlocks.map(block => block.contentBlockId), firstDraft.contentBlocks.map(block => block.contentBlockId))
+    assert.deepEqual(secondDraft.scriptBlocks.map(block => block.scriptBlockId), firstDraft.scriptBlocks.map(block => block.scriptBlockId))
+    assert.equal(secondDraft.contentBlocks.find(block => block.type === 'text' && block.role === 'body').content, '已编辑正文')
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('imported multi-script and duplicate-page-asset identities survive repeated exports', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'report-studio-canonical-round-trip-'))
+  try {
+    const source = join(parent, 'source-project')
+    await cp(new URL('.', fixtureRoot), source, { recursive: true })
+    const manifest = JSON.parse(await readFile(join(source, 'pages', 'manifest.json'), 'utf8'))
+    const draftPath = join(source, ...manifest.pages[0].draftPath.split('/'))
+    const draft = JSON.parse(await readFile(draftPath, 'utf8'))
+    const script = draft.scriptBlocks[0]
+    draft.scriptBlocks.push({ ...structuredClone(script), scriptBlockId: createStableId('scriptBlock'), order: 1, content: '独立第二段讲解稿' })
+    const assetId = 'asset_01992a80-0000-7000-8000-000000000221'
+    draft.pageAssets.push({ pageAssetId: createStableId('pageAsset'), assetId, role: 'supporting', caption: '位置一', order: 0, sourceRefs: [] })
+    draft.pageAssets.push({ pageAssetId: createStableId('pageAsset'), assetId, role: 'background', caption: '位置二', order: 1, sourceRefs: [] })
+    await writeFile(draftPath, `${JSON.stringify(draft, null, 2)}\n`, 'utf8')
+    const imported = await readStandardProject(source, blobOptions)
+    const first = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: join(parent, 'first'), openBlob: blobOptions.openBlob })
+    const second = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: join(parent, 'second'), openBlob: blobOptions.openBlob })
+    const readDraft = async result => JSON.parse(await readFile(join(result.projectRoot, 'pages', 'drafts', `${imported.snapshot.pages[0].id}.json`), 'utf8'))
+    const [firstDraft, secondDraft] = await Promise.all([readDraft(first), readDraft(second)])
+    assert.deepEqual(firstDraft.scriptBlocks.map(item => item.scriptBlockId), draft.scriptBlocks.map(item => item.scriptBlockId))
+    assert.deepEqual(secondDraft.scriptBlocks.map(item => item.scriptBlockId), draft.scriptBlocks.map(item => item.scriptBlockId))
+    assert.deepEqual(secondDraft.scriptBlocks.map(item => item.content), draft.scriptBlocks.map(item => item.content))
+    assert.deepEqual(secondDraft.pageAssets.map(item => item.pageAssetId), draft.pageAssets.map(item => item.pageAssetId))
+    assert.deepEqual(secondDraft.pageAssets.map(item => item.caption), ['位置一', '位置二'])
+  } finally {
+    await rm(parent, { recursive: true, force: true })
   }
 })

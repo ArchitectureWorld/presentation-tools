@@ -67,6 +67,10 @@ export async function ingestAsset({ repository, request, pageId, mimeType, origi
       const page = state.pages.find(item => item.id === pageId)
       if (!page) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '上传目标页面不存在。', { pageId }, 404)
       page.assets = [...(page.assets ?? []), asset]
+      page.pageAssets = [...(page.pageAssets ?? []), {
+        ...structuredClone(asset), pageAssetId: createStudioId('pageAsset'), assetId: asset.id,
+        role: 'supporting', caption: '', order: (page.pageAssets ?? []).length, sourceRefs: [],
+      }]
       return state
     })
   } catch (error) {

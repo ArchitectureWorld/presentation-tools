@@ -3,16 +3,86 @@ import { ERROR_CODES, StudioError, createStudioId } from '../studio-contracts/in
 
 const now = () => new Date().toISOString();
 const ID_KINDS = Object.freeze({
-  project: 'project', outline: 'outlineNode', page: 'page', revision: 'revision',
+  project: 'project', projectRules: 'projectRules', outlineDocument: 'outlineDocument', outline: 'outlineNode', page: 'page', draftDocument: 'draftDocument', contentBlock: 'contentBlock', listItem: 'listItem', scriptBlock: 'scriptBlock', pageAsset: 'pageAsset', revision: 'revision',
   annotation: 'annotation', round: 'reviewRound', submission: 'reviewSubmission', proposal: 'proposal',
 });
 const id = prefix => createStudioId(ID_KINDS[prefix]);
 const clone = value => structuredClone(value);
 
+function contentBlock(page, type, role) {
+  return page.contentBlocks.find(block => block.type === type && block.role === role) ?? null;
+}
+
+function synchronizePageCanonical(page, preferLegacy = false) {
+  page.id ??= page.pageId ?? id('page');
+  page.pageId ??= page.id;
+  page.draftDocumentId ??= id('draftDocument');
+  page.contentBlocks ??= [];
+  page.scriptBlocks ??= [];
+  page.pageAssets ??= [];
+  let heading = page.contentBlocks.find(block => block.contentBlockId === page.titleBlockId) ?? contentBlock(page, 'heading', 'page_title');
+  if (!heading) {
+    heading = { contentBlockId: id('contentBlock'), type: 'heading', role: 'page_title', order: 0, content: page.heading ?? '未命名页面', sourceRefs: [] };
+    page.contentBlocks.push(heading);
+  }
+  page.titleBlockId = heading.contentBlockId;
+  if (preferLegacy) heading.content = page.heading ?? heading.content;
+  page.heading = heading.content;
+  let body = contentBlock(page, 'text', 'body');
+  if (page.body) {
+    if (!body) {
+      body = { contentBlockId: id('contentBlock'), type: 'text', role: 'body', order: page.contentBlocks.length, content: page.body, sourceRefs: [] };
+      page.contentBlocks.push(body);
+    }
+    if (preferLegacy) body.content = page.body;
+    page.body = body.content;
+  }
+  let list = page.contentBlocks.find(block => block.type === 'list') ?? null;
+  const bullets = (page.bullets ?? []).filter(value => String(value).trim());
+  if (preferLegacy && bullets.length) {
+    if (!list) {
+      list = { contentBlockId: id('contentBlock'), type: 'list', role: 'body', order: page.contentBlocks.length, listStyle: 'unordered', items: [], sourceRefs: [] };
+      page.contentBlocks.push(list);
+    }
+    list.items = bullets.map((value, index) => ({
+      ...(list.items?.[index] ?? {}), listItemId: list.items?.[index]?.listItemId ?? id('listItem'), content: String(value), order: index, sourceRefs: clone(list.items?.[index]?.sourceRefs ?? []),
+    }));
+  }
+  if (page.script) {
+    const script = page.scriptBlocks[0] ?? { scriptBlockId: id('scriptBlock'), order: 0, estimatedDurationSeconds: null, sourceRefs: [], referencedContentBlockIds: [heading.contentBlockId], referencedAssetIds: [] };
+    if (!page.scriptBlocks.length) page.scriptBlocks.push(script);
+    if (preferLegacy) script.content = page.script;
+    page.script = script.content;
+  }
+  if (preferLegacy && Array.isArray(page.assets)) {
+    const preserved = new Map(page.pageAssets.map(link => [link.pageAssetId, link]))
+    page.pageAssets = page.assets.map((asset, index) => {
+      const { id: legacyId, ...legacy } = clone(asset)
+      const prior = preserved.get(asset.pageAssetId) ?? {}
+      return {
+        ...prior, ...legacy,
+        pageAssetId: asset.pageAssetId ?? id('pageAsset'), assetId: asset.assetId ?? legacyId,
+        role: asset.role ?? prior.role ?? 'supporting', caption: asset.caption ?? prior.caption ?? '', order: index,
+        sourceRefs: clone(asset.sourceRefs ?? prior.sourceRefs ?? []),
+      }
+    })
+  } else if (page.assets?.length && !page.pageAssets.length) {
+    page.pageAssets = page.assets.map((asset, index) => {
+      const { id: legacyId, ...legacy } = clone(asset)
+      return { ...legacy, pageAssetId: asset.pageAssetId ?? id('pageAsset'), assetId: asset.assetId ?? legacyId, role: asset.role ?? 'supporting', caption: asset.caption ?? '', order: index, sourceRefs: clone(asset.sourceRefs ?? []) }
+    })
+  }
+  page.contentBlocks = page.contentBlocks.sort((a, b) => a.order - b.order).map((block, index) => ({ ...block, order: index }));
+  page.scriptBlocks = page.scriptBlocks.sort((a, b) => a.order - b.order).map((block, index) => ({ ...block, order: index }));
+  page.assets = page.pageAssets.map(link => ({ ...clone(link), id: link.assetId, assetId: link.assetId }));
+  page.bullets = (list?.items ?? []).map(item => item.content);
+}
+
 export function createInitialState() {
+  const projectId = id('project');
   return {
     schemaVersion: 'report-studio.v0.1.1',
-    project: { id: id('project'), title: '未命名汇报项目', currentRevision: 0, createdAt: now(), updatedAt: now() },
+    project: { id: projectId, projectId, projectRulesId: id('projectRules'), outlineDocumentId: id('outlineDocument'), title: '未命名汇报项目', currentRevision: 0, createdAt: now(), updatedAt: now() },
     outline: [], pages: [], annotations: [], reviewRounds: [], reviewSubmissions: [], proposals: [], revisions: [],
     ui: { stage: 'outline', activePageId: null },
   };
@@ -50,6 +120,21 @@ function findOutlineContainer(nodes, nodeId) {
   return null;
 }
 
+function listBlockForPage(page) {
+  synchronizePageCanonical(page)
+  let list = page.contentBlocks.find(block => block.type === 'list')
+  if (!list) {
+    list = { contentBlockId: id('contentBlock'), type: 'list', role: 'body', order: page.contentBlocks.length, listStyle: 'unordered', items: [], sourceRefs: [] }
+    page.contentBlocks.push(list)
+  }
+  list.items ??= []
+  return list
+}
+
+function normalizeListItems(list) {
+  list.items = list.items.map((item, index) => ({ ...item, order: index }))
+}
+
 function collectOutlineSubtreeIds(node, ids = new Set()) {
   ids.add(node.id);
   for (const child of node.children || []) collectOutlineSubtreeIds(child, ids);
@@ -67,13 +152,15 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
     }
     case 'outline.add': {
       const title = String(action.title || '新章节').trim() || '新章节';
-      const node = { id: id('outline'), title, children: [], createdAt: now() };
+      const node = { id: id('outline'), outlineNodeId: null, parentOutlineNodeId: action.parentId ?? null, title, order: 0, sourceRefs: [], opaqueExtension: null, children: [], createdAt: now() };
+      node.outlineNodeId = node.id;
       if (action.parentId) {
         const parent = findOutlineNode(next.outline, action.parentId);
         if (!parent) throw new Error('未找到父级大纲节点');
         parent.children ??= [];
+        node.order = parent.children.length;
         parent.children.push(node);
-      } else next.outline.push(node);
+      } else { node.order = next.outline.length; next.outline.push(node); }
       break;
     }
     case 'outline.rename': {
@@ -108,6 +195,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       let page = next.pages.find(item => item.outlineNodeId === action.outlineNodeId);
       if (!page) {
         page = { id: id('page'), outlineNodeId: action.outlineNodeId, heading: node.title, body: '', bullets: [''], script: '', assets: [], createdAt: now(), updatedAt: now() };
+        synchronizePageCanonical(page);
         next.pages.push(page);
       }
       next.ui.activePageId = page.id;
@@ -123,8 +211,51 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       if ('script' in patch) page.script = String(patch.script ?? '');
       if ('bullets' in patch) page.bullets = Array.isArray(patch.bullets) ? patch.bullets.map(item => String(item)) : [];
       if ('assets' in patch) page.assets = Array.isArray(patch.assets) ? clone(patch.assets) : [];
+      synchronizePageCanonical(page, true);
       page.updatedAt = now();
       break;
+    }
+    case 'draft.list.insert': {
+      const page = next.pages.find(item => item.id === action.pageId)
+      if (!page) throw new Error('未找到草案页面')
+      const list = listBlockForPage(page)
+      const afterIndex = action.afterListItemId == null ? -1 : list.items.findIndex(item => item.listItemId === action.afterListItemId)
+      if (afterIndex < -1) throw new Error('未找到列表项')
+      if (action.afterListItemId != null && afterIndex < 0) throw new Error('未找到列表项')
+      list.items.splice(afterIndex + 1, 0, { listItemId: id('listItem'), content: String(action.content ?? ''), order: 0, sourceRefs: [] })
+      normalizeListItems(list)
+      page.bullets = list.items.map(item => item.content)
+      synchronizePageCanonical(page)
+      page.updatedAt = now()
+      break
+    }
+    case 'draft.list.delete': {
+      const page = next.pages.find(item => item.id === action.pageId)
+      if (!page) throw new Error('未找到草案页面')
+      const list = listBlockForPage(page)
+      const itemIndex = list.items.findIndex(item => item.listItemId === action.listItemId)
+      if (itemIndex < 0) throw new Error('未找到列表项')
+      list.items.splice(itemIndex, 1)
+      normalizeListItems(list)
+      page.bullets = list.items.map(item => item.content)
+      synchronizePageCanonical(page)
+      page.updatedAt = now()
+      break
+    }
+    case 'draft.list.move': {
+      const page = next.pages.find(item => item.id === action.pageId)
+      if (!page) throw new Error('未找到草案页面')
+      const list = listBlockForPage(page)
+      const itemIndex = list.items.findIndex(item => item.listItemId === action.listItemId)
+      if (itemIndex < 0) throw new Error('未找到列表项')
+      const targetIndex = action.direction === 'up' ? itemIndex - 1 : action.direction === 'down' ? itemIndex + 1 : itemIndex
+      if (targetIndex < 0 || targetIndex >= list.items.length || targetIndex === itemIndex) return state
+      ;[list.items[itemIndex], list.items[targetIndex]] = [list.items[targetIndex], list.items[itemIndex]]
+      normalizeListItems(list)
+      page.bullets = list.items.map(item => item.content)
+      synchronizePageCanonical(page)
+      page.updatedAt = now()
+      break
     }
     default: throw new Error(`不支持的内容操作：${action.type}`);
   }

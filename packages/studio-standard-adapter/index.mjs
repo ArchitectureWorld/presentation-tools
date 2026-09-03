@@ -57,7 +57,12 @@ function buildOutline(nodes) {
   function children(parentId) {
     return (byParent.get(parentId) ?? []).sort((a, b) => a.order - b.order).map(node => ({
       id: node.outlineNodeId,
+      outlineNodeId: node.outlineNodeId,
+      parentOutlineNodeId: node.parentOutlineNodeId,
       title: node.title,
+      order: node.order,
+      sourceRefs: clone(node.sourceRefs ?? []),
+      opaqueExtension: null,
       children: children(node.outlineNodeId),
       extensionPayload: { standard: clone(node) },
     }))
@@ -86,6 +91,9 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
   const snapshot = {
     project: {
       id: documents['project.json'].projectId,
+      projectId: documents['project.json'].projectId,
+      projectRulesId: documents['project.json'].projectRulesId,
+      outlineDocumentId: documents['outline.json'].outlineDocumentId,
       title: documents['project.json'].name,
       createdAt: documents['project.json'].createdAt,
       extensionPayload: {
@@ -100,8 +108,17 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
         ?? draft?.contentBlocks.find(block => block.type === 'text' && block.role === 'key_message') ?? null
       const list = draft?.contentBlocks.find(block => block.type === 'list') ?? null
       const script = draft?.scriptBlocks?.[0] ?? null
-      const pageAssets = (draft?.pageAssets ?? []).map(link => assets.get(link.assetId)).filter(Boolean).map(asset => ({
+      const pageAssets = (draft?.pageAssets ?? []).map(link => ({
+        ...clone(link),
+        asset: assets.get(link.assetId) ?? null,
+      })).filter(item => item.asset).map(({ asset, ...link }) => ({
         id: asset.assetId,
+        assetId: asset.assetId,
+        pageAssetId: link.pageAssetId,
+        role: link.role,
+        caption: link.caption,
+        order: link.order,
+        sourceRefs: clone(link.sourceRefs ?? []),
         name: asset.displayName,
         type: asset.mimeType,
         mimeType: asset.mimeType,
@@ -112,7 +129,14 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
       }))
       return {
         id: page.pageId,
+        pageId: page.pageId,
         outlineNodeId: page.outlineNodeId,
+        draftDocumentId: draft?.draftDocumentId ?? null,
+        titleBlockId: page.titleBlockId,
+        order: page.order,
+        contentBlocks: clone(draft?.contentBlocks ?? []),
+        scriptBlocks: clone(draft?.scriptBlocks ?? []),
+        pageAssets: clone(draft?.pageAssets ?? []),
         heading: heading?.content ?? '',
         body: body?.content ?? '',
         bullets: (list?.items ?? []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(item => item.content),
@@ -167,7 +191,7 @@ function updateDraft(page, projectId) {
     $schema: SCHEMA_IDS.DraftPageDocument,
     documentType: 'DraftPageDocument',
     standardVersion: STANDARD_VERSION,
-    draftDocumentId: createStableId('draftDocument'),
+    draftDocumentId: page.draftDocumentId ?? createStableId('draftDocument'),
     projectId,
     pageId: page.id,
     contentBlocks: [],
@@ -176,7 +200,18 @@ function updateDraft(page, projectId) {
   }
   draft.projectId = projectId
   draft.pageId = page.id
-  let heading = draft.contentBlocks.find(block => block.contentBlockId === refs.headingBlockId)
+  draft.draftDocumentId = page.draftDocumentId ?? draft.draftDocumentId
+  if (Array.isArray(page.contentBlocks)) draft.contentBlocks = clone(page.contentBlocks)
+  if (Array.isArray(page.scriptBlocks)) draft.scriptBlocks = clone(page.scriptBlocks)
+  if (Array.isArray(page.pageAssets)) draft.pageAssets = page.pageAssets.map(link => ({
+    pageAssetId: link.pageAssetId,
+    assetId: link.assetId,
+    role: link.role,
+    caption: link.caption,
+    order: link.order,
+    ...(link.sourceRefs === undefined ? {} : { sourceRefs: clone(link.sourceRefs) }),
+  }))
+  let heading = draft.contentBlocks.find(block => block.contentBlockId === page.titleBlockId || block.contentBlockId === refs.headingBlockId)
     ?? draft.contentBlocks.find(block => block.type === 'heading' && block.role === 'page_title')
   if (!heading) {
     heading = { contentBlockId: createStableId('contentBlock'), type: 'heading', role: 'page_title', order: 0, content: page.heading || '未命名页面', sourceRefs: [] }
@@ -209,25 +244,28 @@ function updateDraft(page, projectId) {
   draft.contentBlocks = draft.contentBlocks.sort((a, b) => a.order - b.order).map((block, index) => ({ ...block, order: index }))
 
   let script = draft.scriptBlocks.find(block => block.scriptBlockId === refs.scriptBlockId) ?? draft.scriptBlocks[0]
+  const canonicalScriptText = draft.scriptBlocks.slice().sort((a, b) => a.order - b.order).map(block => block.content).join('\n\n')
   if (page.script) {
     if (!script) {
       script = { scriptBlockId: createStableId('scriptBlock'), order: 0, content: page.script, estimatedDurationSeconds: null, sourceRefs: [], referencedContentBlockIds: [heading.contentBlockId], referencedAssetIds: [] }
       draft.scriptBlocks.push(script)
     }
-    script.content = page.script
+    if (page.script !== canonicalScriptText) script.content = page.script
   } else if (script) draft.scriptBlocks = draft.scriptBlocks.filter(block => block !== script)
   draft.scriptBlocks = draft.scriptBlocks.map((block, index) => ({ ...block, order: index }))
 
-  const preservedPageAssets = new Map((draft.pageAssets ?? []).map(item => [item.assetId, item]))
-  draft.pageAssets = (page.assets ?? []).map((asset, index) => ({
-    ...clone(preservedPageAssets.get(asset.id) ?? {}),
-    pageAssetId: preservedPageAssets.get(asset.id)?.pageAssetId ?? createStableId('pageAsset'),
-    assetId: asset.id,
-    role: preservedPageAssets.get(asset.id)?.role ?? 'supporting',
-    order: index,
-    caption: preservedPageAssets.get(asset.id)?.caption ?? '',
-    sourceRefs: clone(preservedPageAssets.get(asset.id)?.sourceRefs ?? []),
-  }))
+  if (!Array.isArray(page.pageAssets) || (!page.pageAssets.length && (page.assets?.length ?? 0) > 0)) {
+    const preservedPageAssets = new Map((draft.pageAssets ?? []).map(item => [item.assetId, item]))
+    draft.pageAssets = (page.assets ?? []).map((asset, index) => ({
+      ...clone(preservedPageAssets.get(asset.id) ?? {}),
+      pageAssetId: preservedPageAssets.get(asset.id)?.pageAssetId ?? createStableId('pageAsset'),
+      assetId: asset.id,
+      role: preservedPageAssets.get(asset.id)?.role ?? 'supporting',
+      order: index,
+      caption: preservedPageAssets.get(asset.id)?.caption ?? '',
+      sourceRefs: clone(preservedPageAssets.get(asset.id)?.sourceRefs ?? []),
+    }))
+  }
   return { draft, titleBlockId: heading.contentBlockId }
 }
 

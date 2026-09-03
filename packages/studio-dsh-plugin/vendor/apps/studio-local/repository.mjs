@@ -307,7 +307,16 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     }
     if (!replacements.size) return clone(state)
     return transactContent({ baseRevision: state.project.currentRevision, source: 'migration', detail: { actionType: 'asset.migrate_data_url' } }, candidate => {
-      for (const page of candidate.pages ?? []) page.assets = (page.assets ?? []).map(asset => replacements.get(asset.id) ?? asset)
+      for (const page of candidate.pages ?? []) {
+        page.assets = (page.assets ?? []).map(asset => clone(replacements.get(asset.id) ?? asset))
+        page.pageAssets = (page.pageAssets ?? []).map(link => {
+          const replacement = replacements.get(link.assetId)
+          if (!replacement) return link
+          const { id, ...assetFields } = replacement
+          const { dataUrl, dataBase64, ...linkFields } = link
+          return { ...linkFields, ...clone(assetFields), assetId: id }
+        })
+      }
       return candidate
     })
   }

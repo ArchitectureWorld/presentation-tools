@@ -49,6 +49,54 @@ test('agent proposal is explicit and acceptance creates revision without auto re
   assert.equal(accepted.state.outline[0].title, 'A：明确目标'); assert.equal(accepted.state.project.currentRevision, before + 1); assert.equal(accepted.state.annotations[0].resolution, 'open');
 });
 
+function stateWithList() {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '列表页' }))
+  ;({ state } = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }))
+  const pageId = state.pages[0].id
+  ;({ state } = executeAction(state, { type: 'draft.update', pageId, patch: { bullets: ['甲', '乙', '丙'] } }))
+  return { state, pageId }
+}
+
+test('draft.list.insert gives the new item an identity without replacing existing list items', () => {
+  let { state, pageId } = stateWithList()
+  const originalIds = state.pages[0].contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId)
+  ;({ state } = executeAction(state, { type: 'draft.list.insert', pageId, afterListItemId: originalIds[0], content: '新项' }))
+  const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
+  assert.deepEqual(items.map(item => item.content), ['甲', '新项', '乙', '丙'])
+  assert.equal(items[0].listItemId, originalIds[0])
+  assert.equal(items[2].listItemId, originalIds[1])
+  assert.equal(items[3].listItemId, originalIds[2])
+  assert.match(items[1].listItemId, /^list_item_/)
+})
+
+test('draft.list.insert creates the first list item for a new page', () => {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '空列表页' }))
+  ;({ state } = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }))
+  const pageId = state.pages[0].id
+  ;({ state } = executeAction(state, { type: 'draft.list.insert', pageId, content: '首项' }))
+  const list = state.pages[0].contentBlocks.find(block => block.type === 'list')
+  assert.equal(list.items[0].content, '首项')
+  assert.match(list.items[0].listItemId, /^list_item_/)
+})
+
+test('draft.list.delete removes only the selected list item identity', () => {
+  let { state, pageId } = stateWithList()
+  const originalIds = state.pages[0].contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId)
+  ;({ state } = executeAction(state, { type: 'draft.list.delete', pageId, listItemId: originalIds[1] }))
+  const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
+  assert.deepEqual(items.map(item => item.listItemId), [originalIds[0], originalIds[2]])
+})
+
+test('draft.list.move reorders by list item identity while retaining every identity', () => {
+  let { state, pageId } = stateWithList()
+  const originalIds = state.pages[0].contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId)
+  ;({ state } = executeAction(state, { type: 'draft.list.move', pageId, listItemId: originalIds[2], direction: 'up' }))
+  const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
+  assert.deepEqual(items.map(item => item.listItemId), [originalIds[0], originalIds[2], originalIds[1]])
+})
+
 test('deleting an outline parent removes descendant pages and repairs active page', () => {
   let state = createInitialState()
   ;({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '父章节' }))

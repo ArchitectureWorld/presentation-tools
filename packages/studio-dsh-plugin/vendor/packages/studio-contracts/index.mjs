@@ -31,8 +31,15 @@ export class StudioError extends Error {
 
 const STANDARD_KINDS = Object.freeze({
   project: 'project',
+  projectRules: 'projectRules',
+  outlineDocument: 'outlineDocument',
   outlineNode: 'outlineNode',
   page: 'page',
+  draftDocument: 'draftDocument',
+  contentBlock: 'contentBlock',
+  listItem: 'listItem',
+  scriptBlock: 'scriptBlock',
+  pageAsset: 'pageAsset',
   asset: 'asset',
 })
 
@@ -89,14 +96,39 @@ export function canonicalFromState(state) {
   const snapshot = {
     project: {
       id: state.project.id,
+      projectId: state.project.projectId ?? state.project.id,
+      projectRulesId: state.project.projectRulesId,
+      outlineDocumentId: state.project.outlineDocumentId,
       title: state.project.title,
       createdAt: state.project.createdAt,
       ...(state.project.extensionPayload === undefined ? {} : { extensionPayload: clone(state.project.extensionPayload) }),
     },
     outline: clone(state.outline ?? []),
-    pages: clone(state.pages ?? []),
+    pages: (state.pages ?? []).map(page => {
+      const { heading, body, bullets, script, assets, createdAt, updatedAt, ...canonical } = clone(page)
+      return canonical
+    }),
   }
   return assertCanonicalSnapshot(snapshot)
+}
+
+function legacyPageView(page) {
+  const view = clone(page)
+  view.id ??= view.pageId
+  const blocks = view.contentBlocks ?? []
+  const heading = blocks.find(block => block.contentBlockId === view.titleBlockId)
+    ?? blocks.find(block => block.type === 'heading' && block.role === 'page_title')
+  const body = blocks.find(block => block.type === 'text' && block.role === 'body')
+    ?? blocks.find(block => block.type === 'text' && block.role === 'key_message')
+  const list = blocks.find(block => block.type === 'list')
+  view.heading = heading?.content ?? view.heading ?? ''
+  view.body = body?.content ?? view.body ?? ''
+  view.bullets = (list?.items ?? view.bullets ?? []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(item => typeof item === 'string' ? item : item.content)
+  view.script = (view.scriptBlocks ?? []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(block => block.content).join('\n\n') || view.script || ''
+  view.assets = (view.pageAssets ?? []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(link => ({
+    ...clone(link), id: link.assetId, assetId: link.assetId,
+  }))
+  return view
 }
 
 export function projectStateFromParts({ snapshot, currentRevision, operational = {}, ui = {} }) {
@@ -109,7 +141,7 @@ export function projectStateFromParts({ snapshot, currentRevision, operational =
       updatedAt: operational.project?.updatedAt ?? snapshot.project.createdAt,
     },
     outline: clone(snapshot.outline),
-    pages: clone(snapshot.pages),
+    pages: (snapshot.pages ?? []).map(legacyPageView),
     annotations: clone(operational.annotations ?? []),
     reviewRounds: clone(operational.reviewRounds ?? []),
     reviewSubmissions: clone(operational.reviewSubmissions ?? []),

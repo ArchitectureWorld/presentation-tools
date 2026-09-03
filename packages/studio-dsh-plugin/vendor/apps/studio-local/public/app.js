@@ -245,11 +245,15 @@ function renderDraft() {
   }
 
   const pageIndex = state.pages.findIndex(item => item.id === page.id);
-  const bullets = (page.bullets?.length ? page.bullets : ['']).map((item, index) => `
+  const canonicalList = page.contentBlocks?.find(block => block.type === 'list');
+  const bulletItems = canonicalList?.items?.length
+    ? [...canonicalList.items].sort((left, right) => left.order - right.order)
+    : (page.bullets?.length ? page.bullets : ['']).map(content => ({ content, listItemId: null }));
+  const bullets = bulletItems.map((item, index) => `
     <div class="bullet-row">
       <span class="bullet-index">${String(index + 1).padStart(2, '0')}</span>
-      <input data-bullet-index="${index}" value="${escapeAttr(item)}" aria-label="第 ${index + 1} 条要点">
-      <button class="small-button" data-remove-bullet="${index}" type="button">移除</button>
+      <input data-bullet-index="${index}" value="${escapeAttr(item.content)}" aria-label="第 ${index + 1} 条要点">
+      ${item.listItemId ? `<button class="small-button" data-remove-bullet="${escapeAttr(item.listItemId)}" type="button">移除</button>` : ''}
     </div>
   `).join('');
   const assets = (page.assets || []).map(renderAsset).join('');
@@ -669,15 +673,15 @@ document.addEventListener('click', async event => {
 
   if (event.target.id === 'add-bullet') {
     const page = activePage();
-    await action({ type: 'draft.update', pageId: page.id, patch: { bullets: [...(page.bullets || []), ''] } });
+    const items = page.contentBlocks?.find(block => block.type === 'list')?.items ?? [];
+    await action({ type: 'draft.list.insert', pageId: page.id, afterListItemId: items.at(-1)?.listItemId ?? null, content: '' });
     return;
   }
 
   const removeBullet = event.target.closest('[data-remove-bullet]');
   if (removeBullet) {
     const page = activePage();
-    const bullets = (page.bullets || []).filter((_, index) => index !== Number(removeBullet.dataset.removeBullet));
-    await action({ type: 'draft.update', pageId: page.id, patch: { bullets: bullets.length ? bullets : [''] } });
+    await action({ type: 'draft.list.delete', pageId: page.id, listItemId: removeBullet.dataset.removeBullet });
     return;
   }
 
