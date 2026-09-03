@@ -1,6 +1,6 @@
 import { isAbsolute, join, resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { ERROR_CODES, StudioError, projectStateFromParts } from '../../packages/studio-contracts/index.mjs'
+import { ERROR_CODES, StudioError } from '../../packages/studio-contracts/index.mjs'
 import { readStandardProject, writeStandardProject } from '../../packages/studio-standard-adapter/index.mjs'
 
 export function createStandardProjectService(repository) {
@@ -19,20 +19,11 @@ export function createStandardProjectService(repository) {
         throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '导入路径必须是本机绝对路径。', { projectRoot }, 400)
       }
       const imported = await readStandardProject(projectRoot)
-      const current = repository.getState()
-      const state = await repository.transactContent(
-        {
-          baseRevision: current.project.currentRevision,
-          source: 'standard_import',
-          detail: { actionType: 'standard.import', sourceProjectRoot: resolve(projectRoot) },
-        },
-        previous => projectStateFromParts({
-          snapshot: imported.snapshot,
-          currentRevision: previous.project.currentRevision + 1,
-          operational: { project: { updatedAt: new Date().toISOString() } },
-          ui: { stage: imported.snapshot.pages.length ? 'draft' : 'outline', activePageId: imported.snapshot.pages[0]?.id ?? null },
-        }),
-      )
+      const state = await repository.initializeFromStandardProject({
+        snapshot: imported.snapshot,
+        detail: { actionType: 'standard.import', sourceProjectRoot: resolve(projectRoot) },
+        ui: { stage: imported.snapshot.pages.length ? 'draft' : 'outline', activePageId: imported.snapshot.pages[0]?.id ?? null },
+      })
       return { state, validation: imported.validation }
     },
     async exportProject() {

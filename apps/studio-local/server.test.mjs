@@ -108,3 +108,20 @@ test('HTTP API imports and exports a Contract-valid standard project', async () 
     assert.match(exportedPayload.projectRoot, /exports/);
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
 });
+
+test('HTTP standard import returns a structured conflict for a non-empty Workspace', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-standard-conflict-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'已有章节', baseRevision:0 }) });
+    const projectRoot = new URL('../../contracts/presentation-standard-project/fixtures/minimal/project_01992a80-0000-7000-8000-000000000001-minimal-project/', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/u, '$1');
+    const response = await fetch(`${base}/api/standard/import`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ projectRoot }) });
+    assert.equal(response.status, 409);
+    const payload = await response.json();
+    assert.equal(payload.error.code, 'standard_import_requires_new_workspace');
+    assert.equal(payload.error.message, '当前工作区已有项目内容或评审历史。为避免覆盖数据，请在新的 DSH Session 或新的空白项目工作区中导入标准项目。');
+    const state = await fetch(`${base}/api/state`).then(result => result.json());
+    assert.equal(state.outline[0].title, '已有章节');
+  } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
+});

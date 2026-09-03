@@ -99,6 +99,24 @@ function revisionSummary(record, revisionRef) {
   }
 }
 
+function isUnusedWorkspace(state, currentControl) {
+  const initialProject = createInitialState().project
+  const collections = [
+    state.outline,
+    state.pages,
+    state.annotations,
+    state.reviewRounds,
+    state.reviewSubmissions,
+    state.proposals,
+    state.reviewRuns,
+    currentControl.operational?.reviewRuns,
+  ]
+  return currentControl.projectHead.currentRevision === 0
+    && collections.every(collection => (collection ?? []).length === 0)
+    && state.project.title === initialProject.title
+    && state.project.status === initialProject.status
+}
+
 export async function createRepository(dataDir, { faultInjector = () => undefined } = {}) {
   const root = resolve(dataDir)
   await mkdir(root, { recursive: true })
@@ -305,6 +323,55 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     })
   }
 
+  async function initializeFromStandardProject({ snapshot: importedSnapshot, detail = null, ui = {} }) {
+    assertReady()
+    return enqueue(async () => {
+      const fresh = await readControlFresh()
+      const current = await loadState(fresh)
+      if (!isUnusedWorkspace(current, fresh)) {
+        throw new StudioError(
+          ERROR_CODES.STANDARD_IMPORT_REQUIRES_NEW_WORKSPACE,
+          '当前工作区已有项目内容或评审历史。为避免覆盖数据，请在新的 DSH Session 或新的空白项目工作区中导入标准项目。',
+          undefined,
+          409,
+        )
+      }
+
+      const snapshot = clone(importedSnapshot)
+      assertCanonicalSnapshot(snapshot)
+      const createdAt = new Date().toISOString()
+      const candidate = projectStateFromParts({
+        snapshot,
+        currentRevision: 0,
+        operational: { project: { updatedAt: createdAt } },
+        ui,
+      })
+      const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
+      const revision = {
+        kind: 'RevisionRecord',
+        revisionId: createStudioId('revision'),
+        revisionNumber: 0,
+        parentRevision: null,
+        parentRevisionRef: null,
+        snapshotRef,
+        source: 'standard_import',
+        detail: clone(detail),
+        idempotencyKey: null,
+        createdAt,
+      }
+      const revisionRef = await putObject(revision)
+      const nextControl = {
+        ...fresh,
+        projectHead: { projectId: snapshot.project.id, currentRevision: 0, currentRevisionRef: revisionRef },
+        operational: operationalFromState(candidate, [revisionSummary(revision, revisionRef)]),
+        ui: clone(ui),
+      }
+      await loadState(nextControl)
+      await faultInjector('before_standard_import_head_publish', { nextControl, revision, revisionRef, snapshotRef })
+      return publish(nextControl)
+    })
+  }
+
   async function getSnapshotAt(revisionNumber) {
     assertReady()
     const summary = control.operational.revisions.find(item => item.number === revisionNumber)
@@ -388,6 +455,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     },
     applyMigration,
     getSnapshotAt,
+    initializeFromStandardProject,
     transactContent,
     transactOperational,
     async replace(next) { return replace(next) },

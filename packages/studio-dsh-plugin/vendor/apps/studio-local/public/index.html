@@ -105,7 +105,7 @@
         <div><span class="stage-eyebrow">CONTRACT 0.1.0</span><h2 id="standard-project-title">Presentation 标准项目</h2></div>
         <button class="icon-button" data-close-standard-modal type="button" aria-label="关闭">×</button>
       </header>
-      <p>导入只读源目录；导出固定写入当前数据目录的 exports 文件夹，并在完成后重新执行 Contract 校验。</p>
+      <p>导入仅面向当前空白 Workspace，导入后采用源项目的 projectId，且不会修改源目录；当前 Workspace 已有内容或评审历史时将拒绝导入。导出固定写入当前数据目录的 exports 文件夹，并在完成后重新执行 Contract 校验。</p>
       <label class="standard-path-label" for="standard-import-path">标准项目绝对路径</label>
       <input id="standard-import-path" class="draft-input" placeholder="C:\\projects\\project_xxx-name">
       <div class="standard-project-actions">

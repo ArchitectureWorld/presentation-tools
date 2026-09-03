@@ -14,6 +14,7 @@ export const ERROR_CODES = Object.freeze({
   PROPOSAL_ALREADY_EXISTS: 'proposal_already_exists',
   STANDARD_CONTRACT_INVALID: 'standard_contract_invalid',
   STANDARD_IMPORT_UNSUPPORTED: 'standard_import_unsupported',
+  STANDARD_IMPORT_REQUIRES_NEW_WORKSPACE: 'standard_import_requires_new_workspace',
   REPOSITORY_LOCKED: 'repository_locked',
   REPOSITORY_INTEGRITY_ERROR: 'repository_integrity_error',
 })

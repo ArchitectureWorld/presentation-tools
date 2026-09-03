@@ -1,10 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRepository } from './repository.mjs'
 import { executeAction } from '../../packages/studio-core/index.mjs'
+
+const importedSnapshot = () => ({
+  project: {
+    id: 'project_01993e40-0000-7000-8000-000000000010',
+    title: '导入项目',
+    createdAt: '2026-09-03T08:00:00.000Z',
+  },
+  outline: [],
+  pages: [],
+})
 
 async function withRepository(run, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-repository-'))
@@ -108,4 +118,56 @@ test('a second repository writer is rejected until the first closes', async () =
     await first.close().catch(() => undefined)
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('standard project initialization replaces the unused root without linking project histories', async () => {
+  await withRepository(async ({ dir, repository }) => {
+    const initializedProjectId = repository.getState().project.id
+    const state = await repository.initializeFromStandardProject({
+      snapshot: importedSnapshot(),
+      detail: { actionType: 'standard.import', sourceProjectRoot: 'C:\\source-project' },
+      ui: { stage: 'outline', activePageId: null },
+    })
+
+    assert.notEqual(state.project.id, initializedProjectId)
+    assert.equal(state.project.id, importedSnapshot().project.id)
+    assert.equal(state.project.currentRevision, 0)
+    assert.equal(state.revisions.length, 1)
+    assert.equal(state.revisions[0].number, 0)
+    assert.equal(state.revisions[0].parentRevision, null)
+
+    const control = JSON.parse(await readFile(repository.controlPath, 'utf8'))
+    assert.equal(control.projectHead.projectId, importedSnapshot().project.id)
+    assert.equal(control.projectHead.currentRevision, 0)
+    const revision = JSON.parse(await readFile(join(dir, 'objects', 'sha256', `${control.projectHead.currentRevisionRef.sha256}.json`), 'utf8'))
+    assert.equal(revision.parentRevision, null)
+    assert.equal(revision.parentRevisionRef, null)
+  })
+})
+
+test('failed standard project initialization leaves the prior Head and visible state unchanged', async () => {
+  let fail = true
+  await withRepository(async ({ repository }) => {
+    const beforeState = repository.getState()
+    const beforeControl = await readFile(repository.controlPath, 'utf8')
+
+    await assert.rejects(
+      repository.initializeFromStandardProject({
+        snapshot: importedSnapshot(),
+        detail: { actionType: 'standard.import' },
+        ui: { stage: 'outline', activePageId: null },
+      }),
+      /injected-standard-import-failure/,
+    )
+
+    assert.deepEqual(repository.getState(), beforeState)
+    assert.equal(await readFile(repository.controlPath, 'utf8'), beforeControl)
+  }, {
+    faultInjector(point) {
+      if (point === 'before_standard_import_head_publish' && fail) {
+        fail = false
+        throw new Error('injected-standard-import-failure')
+      }
+    },
+  })
 })
