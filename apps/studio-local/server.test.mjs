@@ -11,8 +11,10 @@ test('repository persists state across reload', async () => {
   try {
     const first = await createRepository(dir); const original = first.getState();
     await first.update(state => ({ ...state, project: { ...state.project, title: '测试项目' } }));
+    await first.close();
     const second = await createRepository(dir);
-    assert.equal(second.getState().project.title, '测试项目'); assert.equal(second.getState().project.id, original.project.id);
+    try { assert.equal(second.getState().project.title, '测试项目'); assert.equal(second.getState().project.id, original.project.id); }
+    finally { await second.close(); }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -25,7 +27,10 @@ test('HTTP API exposes health, state and persisted actions', async () => {
     let state = await fetch(`${base}/api/state`).then(r => r.json()); assert.equal(state.outline.length, 0);
     const response = await fetch(`${base}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'outline.add', parentId: null, title: '第一章' }) });
     assert.equal(response.status, 200); state = await response.json(); assert.equal(state.outline[0].title, '第一章');
-    const reloaded = await createRepository(dir); assert.equal(reloaded.getState().outline[0].title, '第一章');
+    await app.stop();
+    const reloaded = await createRepository(dir);
+    try { assert.equal(reloaded.getState().outline[0].title, '第一章'); }
+    finally { await reloaded.close(); }
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
 });
 

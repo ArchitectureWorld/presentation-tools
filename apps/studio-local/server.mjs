@@ -116,7 +116,10 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
       });
       return this;
     },
-    async stop() { if (!server.listening) return; await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); },
+    async stop() {
+      if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      await repository.close();
+    },
   };
 }
 
