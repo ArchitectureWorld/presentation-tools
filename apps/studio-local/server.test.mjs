@@ -65,3 +65,21 @@ test('HTTP API exposes migration status and blocks writes until confirmed', asyn
     assert.equal((await migrated.json()).status, 'ready');
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
 });
+
+test('HTTP API imports and exports a Contract-valid standard project', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-standard-api-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    const projectRoot = new URL('../../contracts/presentation-standard-project/fixtures/minimal/project_01992a80-0000-7000-8000-000000000001-minimal-project/', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/u, '$1');
+    const imported = await fetch(`${base}/api/standard/import`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ projectRoot }) });
+    const importedText = await imported.text(); assert.equal(imported.status, 200, importedText);
+    const importedPayload = JSON.parse(importedText);
+    assert.equal(importedPayload.state.project.id, 'project_01992a80-0000-7000-8000-000000000001');
+    const exported = await fetch(`${base}/api/standard/export`, { method:'POST', headers:{'content-type':'application/json'}, body:'{}' });
+    const exportedText = await exported.text(); assert.equal(exported.status, 200, exportedText);
+    const exportedPayload = JSON.parse(exportedText);
+    assert.equal(exportedPayload.validation.valid, true);
+    assert.match(exportedPayload.projectRoot, /exports/);
+  } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
+});

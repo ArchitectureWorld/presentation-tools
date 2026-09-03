@@ -6,6 +6,7 @@ import { createRepository } from './repository.mjs';
 import { createAgentBridge } from './agent-bridge.mjs';
 import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent } from '../../packages/studio-core/index.mjs';
 import { errorPayload } from '../../packages/studio-contracts/index.mjs';
+import { createStandardProjectService } from './standard-project.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
@@ -31,6 +32,7 @@ async function readJson(req, limit = 20 * 1024 * 1024) {
 
 export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_DATA_DIR || join(process.cwd(), '.report-studio-data'), port = Number(process.env.PORT || 4173), host = process.env.HOST || '127.0.0.1', agentBridge = undefined } = {}) {
   const repository = await createRepository(dataDir);
+  const standardProject = createStandardProjectService(repository);
   const bridge = agentBridge === undefined ? createAgentBridge() : agentBridge;
   let actualPort = port;
   let server;
@@ -39,6 +41,12 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.0', dataPath: repository.statePath, migrationStatus: repository.migrationStatus().status, agentConfigured: Boolean(bridge?.configured) });
     if (req.method === 'GET' && url.pathname === '/api/migration/status') return sendJson(res, 200, repository.migrationStatus());
     if (req.method === 'POST' && url.pathname === '/api/migration/apply') return sendJson(res, 200, await repository.applyMigration());
+    if (req.method === 'GET' && url.pathname === '/api/standard/status') return sendJson(res, 200, standardProject.status());
+    if (req.method === 'POST' && url.pathname === '/api/standard/import') {
+      const input = await readJson(req);
+      return sendJson(res, 200, await standardProject.importProject(input.projectRoot));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/standard/export') return sendJson(res, 200, await standardProject.exportProject());
     if (req.method === 'GET' && url.pathname === '/api/state') return sendJson(res, 200, repository.getState());
     if (req.method === 'POST' && url.pathname === '/api/action') {
       const action = await readJson(req);
