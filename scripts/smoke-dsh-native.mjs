@@ -182,19 +182,21 @@ try {
   const logs = () => `${stdout}\n${stderr}`
   const healthUrl = `http://127.0.0.1:${port}/report-studio/api/health?sessionId=smoke-session`
   const health = await waitForHealth(healthUrl, child, logs)
-  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true) {
+  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true || health.migrationStatus !== 'ready') {
     throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
   }
 
   console.log('DSH smoke 5/5: verify production UI and native browser bridge')
+  const shellResponse = await fetch(`http://127.0.0.1:${port}/`)
   const pageResponse = await fetch(`http://127.0.0.1:${port}/report-studio/?sessionId=smoke-session`)
   const runtimeResponse = await fetch(`http://127.0.0.1:${port}/report-studio/dsh-native-runtime.js`)
-  if (!pageResponse.ok || !runtimeResponse.ok) {
-    throw new Error(`DSH route failed: page=${pageResponse.status}, runtime=${runtimeResponse.status}`)
+  if (!shellResponse.ok || !pageResponse.ok || !runtimeResponse.ok) {
+    throw new Error(`DSH route failed: shell=${shellResponse.status}, page=${pageResponse.status}, runtime=${runtimeResponse.status}`)
   }
+  const shell = await shellResponse.text()
   const page = await pageResponse.text()
   const nativeRuntime = await runtimeResponse.text()
-  if (!page.includes('Report Studio') || !nativeRuntime.includes('report-studio.prompt')) {
+  if (!shell.includes('<!doctype html>') || !page.includes('report-studio-standalone-notice') || !nativeRuntime.includes('report-studio.prompt')) {
     throw new Error('DSH route did not serve the production Report Studio UI.')
   }
 

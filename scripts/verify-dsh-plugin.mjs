@@ -42,6 +42,8 @@ for (const token of [
   "inject: () => ({ sessions })",
   "session.prompt([{ type: 'text', text }], 'queue')",
   "/report-studio/?sessionId=${encodeURIComponent(sessionId)}",
+  "Report Studio · 独立打开",
+  'window.confirm(',
 ]) assert.ok(client.includes(token), `missing client integration token: ${token}`)
 
 const browser = await read('apps/studio-local/public/dsh-native-runtime.js')
@@ -50,6 +52,8 @@ for (const token of [
   "type: 'report-studio.prompt'",
   'report-studio.prompt-result',
   "apiPath('/api/state')",
+  "report-studio-dsh-embedded",
+  "report-studio-standalone",
 ]) assert.ok(browser.includes(token), `missing browser native bridge token: ${token}`)
 
 const smoke = await read('scripts/smoke-dsh-native.mjs')
@@ -61,6 +65,10 @@ assert.match(html, /href="\.\/styles\.css"/)
 assert.match(html, /src="\.\/dsh-native-runtime\.js"/)
 assert.match(html, /src="\.\/app\.js"/)
 assert.ok(html.indexOf('./dsh-native-runtime.js') < html.indexOf('./app.js'))
+assert.match(html, /id="report-studio-standalone-notice"/)
+assert.match(html, /当前为 Report Studio 独立工作台。模型、推理等级和 Agent 会话由 DSH 主界面管理。/)
+assert.match(html, /id="report-studio-return-dsh" href="\/"/)
+assert.doesNotMatch(html, /<select[^>]+(?:model|reasoning|推理|模型)/i)
 
 console.log('Report Studio native DSH plugin verification PASS')
 console.log('plugin=@architectureworld/report-studio-dsh@0.1.1')

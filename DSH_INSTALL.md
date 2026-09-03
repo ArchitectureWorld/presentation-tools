@@ -6,7 +6,7 @@
 
 ```text
 Repository: ArchitectureWorld/presentation-tools
-Branch: main
+Branch: feat/report-studio-v0.1.1-hardening
 Report Studio: 0.1.1
 Plugin: @architectureworld/report-studio-dsh@0.1.1
 Tested DSH: 0.1.1-rc.2
@@ -19,7 +19,7 @@ Node.js: 22+
 ```bash
 git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
-git checkout main
+git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
 node --version
 dsh --version
@@ -71,7 +71,14 @@ dsh --profile web --no-open
 
 首次安装时，`remove` 提示插件不存在可以继续。发布 tarball 已包含 Studio Runtime、UI 和标准 Adapter，并显式安装 AJV 运行依赖。`dump-config` 必须包含 `@architectureworld/report-studio-dsh`，并继续保留用户原有插件。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。
 
-DSH Web 默认地址为 `http://127.0.0.1:3080/`。进入任一 Session 后，应在会话标签和会话头部看到 `Report Studio`。
+DSH Web 的正式入口是 `http://127.0.0.1:3080/`。使用顺序固定为：
+
+1. 在 DSH 中选择现有 Session 或创建新 Session；
+2. 点击会话顶部原生视图栏中的 `Report Studio` 标签；
+3. 在 DSH 底部原生控制栏选择模型和推理等级，并使用 DSH 原生输入区与 Agent 交互；
+4. 在 Report Studio 中完成编辑、批注、评审提交与 Proposal 人工确认。
+
+不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。会话头部的 `Report Studio · 独立打开` 只用于备用独立窗口，点击前会说明该窗口不显示 DSH 模型、推理等级、会话侧栏和主对话区。独立页面顶部提供“返回 DSH 主界面”。
 
 ## 4. A1.1 旧数据无损升级
 
@@ -117,12 +124,14 @@ npm run smoke:dsh
 
 正式环境至少验收：
 
-- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`；
+- 从 `http://127.0.0.1:3080/` 进入后，DSH 会话侧栏、模型选择器、推理等级和消息输入区保持可用；
+- 点击原生 `Report Studio` 标签后仍留在 DSH 外壳内，并以当前 Session ID 加载工作台；
+- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`；
 - 迁移前旧 `state.json` 与备份 SHA-256 一致；
 - 大纲、草案、批注、Submission、Proposal 接受和重启恢复可用；
 - 标准项目导出通过 Contract `0.1.0`；
 - `studio_get_context` 和 `studio_apply_commands` 已注册；
-- 原有 DSH 插件仍在，且没有独立 `4173` 服务。
+- 原有 DSH 插件仍在，且没有把独立 `4173` 服务作为正式入口。
 
 自动化验证不等同于真实模型质量验收；模型是否能按业务意图生成满意建议，需要在目标账号、目标模型和真实项目资料中另行确认。
 

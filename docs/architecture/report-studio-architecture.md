@@ -61,7 +61,7 @@ scope:
 1. 产品是通用的按页汇报内容生产与排版平台，不绑定“前期策划”或任何单一业务。
 2. 前期策划、BIM 汇报、技术方案、论文答辩等均属于上层模板、规则包或内容能力，不进入平台核心领域模型。
 3. DSH Harness 是唯一的智能执行面，负责 Agent、Agent Preset、模型与 Provider 路由、Agent Loop、工具调用、子 Agent、Session 日志、取消与恢复。
-4. Report Studio 不自建第二套 Agent Runtime，不固定模型，不由 UI 直接调用模型，也不让排版引擎内置的 AI / MCP 形成第二条智能执行链。
+4. Report Studio 不自建第二套 Agent Runtime，不固定模型，不由 UI 直接调用模型，也不让排版引擎内置的 AI / MCP 形成第二条智能执行链。正式产品入口是 DSH Web 根地址 `http://127.0.0.1:3080/`；Report Studio 通过当前 Session 的 `conversation.view` 呈现。模型、推理等级、Session 与消息输入留在 DSH 原生外壳，`/report-studio` 只承担同源 iframe/独立工作台内容与 API，不构成第二套应用外壳。
 5. Report Studio 负责结构化业务事实：项目、大纲、页面、草案、素材、排版、批注、ReviewBatch、Proposal、Revision、审计与导出。
 6. 人工界面、DSH Agent 工具和导出器围绕同一套 Canonical Model 工作；Tiptap、OpenPencil 或其他编辑器都只是 Adapter 后的交互与渲染实现。
 7. 所有可被选择、批注、修改、引用、同步或导出的对象都必须拥有稳定且类型明确的 ID。

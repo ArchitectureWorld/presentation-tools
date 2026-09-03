@@ -75,7 +75,7 @@ button:disabled {
   height: 100dvh;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   background:
     radial-gradient(circle at 10% 110%, rgba(74, 137, 255, 0.08), transparent 34%),
     transparent;
@@ -1587,6 +1587,50 @@ button:disabled {
   color: #ffd5d9;
 }
 
+.standalone-notice {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px clamp(14px, 2vw, 26px);
+  border-bottom: 1px solid rgba(120, 183, 255, 0.28);
+  background: rgba(18, 31, 50, 0.96);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+  z-index: 24;
+}
+
+.standalone-notice a {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid rgba(120, 183, 255, 0.45);
+  border-radius: 8px;
+  color: #c9e2ff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.standalone-notice a:hover {
+  background: rgba(120, 183, 255, 0.12);
+}
+
+.dsh-agent-guidance {
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.report-studio-dsh-embedded .dsh-agent-guidance {
+  display: inline-flex !important;
+}
+
+.report-studio-dsh-native #agent-fab,
+.report-studio-dsh-native #agent-modal {
+  display: none !important;
+}
+
 .migration-card,
 .standard-project-card {
   width: min(620px, calc(100vw - 28px));
@@ -1781,7 +1825,13 @@ button:disabled {
   .app-shell {
     height: auto;
     min-height: 100dvh;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto auto auto;
+  }
+
+  .standalone-notice {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .topbar {

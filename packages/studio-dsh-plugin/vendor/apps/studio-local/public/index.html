@@ -10,6 +10,11 @@
 </head>
 <body>
   <div id="app" class="app-shell">
+    <aside id="report-studio-standalone-notice" class="standalone-notice" aria-label="DSH 使用提示" hidden>
+      <span>当前为 Report Studio 独立工作台。模型、推理等级和 Agent 会话由 DSH 主界面管理。</span>
+      <a id="report-studio-return-dsh" href="/">返回 DSH 主界面</a>
+    </aside>
+
     <header class="topbar">
       <div class="project-brand">
         <div class="project-glyph" aria-hidden="true">研</div>
@@ -28,6 +33,7 @@
       </nav>
 
       <div class="top-actions">
+        <span id="dsh-agent-guidance" class="dsh-agent-guidance" hidden>Agent：请使用 DSH 原生对话框</span>
         <span id="save-status" class="save-status">已保存</span>
         <button id="standard-project-open" class="small-button" type="button">标准项目</button>
         <span class="version-chip">v0.1.1</span>

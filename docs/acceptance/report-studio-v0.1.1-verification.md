@@ -6,7 +6,7 @@
 
 起始基线：`main@804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`
 
-验收候选：`c8b87ac886c3e8e5ffad42d4833d7c1e5cee9d32`
+入口修复基线：`feat/report-studio-v0.1.1-hardening@77dd34023c88c591c4d0b8d57c511bc6706d116f`
 
 产品版本：`Report Studio 0.1.1`
 
@@ -15,6 +15,8 @@
 ## 结论
 
 Report Studio v0.1.1 已形成可安装、可启动、可迁移、可编辑、可评审、可恢复、可导入/导出标准项目的“大纲 + 草案”产品闭环。发布 tarball 已在隔离 DSH Home 中真实安装并启动，不依赖仓库外部相对路径。
+
+正式产品入口统一为 `http://127.0.0.1:3080/`。正常使用时先在 DSH 中选择或创建会话，再点击会话顶部的 `Report Studio` 标签；模型、推理等级和消息输入继续由 DSH 原生控制栏管理。`/report-studio/?sessionId=...` 只是同源 iframe 内容或带明确提示的独立工作台，不再作为安装、启动或验收默认入口。
 
 “标准化结构性文件”与当前交付范围完全适配，但不是与未来全部能力完全等同：
 
@@ -53,7 +55,7 @@ npm run verify:all
 
 结果：PASS。
 
-- Root 单元/集成测试：45/45；
+- Root 单元/集成测试：49/49；
 - 标准 Contract Node 测试：8/8；
 - Schema Set SHA-256：`5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc`；
 - 最小 Fixture、完整示例、npm pack 和独立 consumer：PASS；
@@ -61,6 +63,7 @@ npm run verify:all
 - E2E：迁移 → 编辑 → Submission → Proposal → 接受 → 重启 → 标准导出 → Contract 校验，PASS；
 - 浏览器：720×900、820×900、1024×768、1366×768、1600×900、1920×1080，PASS；
 - 浏览器控制台错误与水平溢出：0。
+- DSH 入口回归：`conversation.view` 绑定当前 Session，正常标签路径不调用 `window.open()`；HeaderAction 明确标注“独立打开”并在打开前提示边界；独立页显示返回 DSH 主界面的非遮挡提示；Studio 未定义模型或推理等级选择器。
 
 ### 发布包隔离安装与启动
 
@@ -76,14 +79,36 @@ npm run smoke:dsh
 - `version=v0.1.1`；
 - `agentMode=dsh-native`；
 - `agentConfigured=true`；
-- 正式 UI 与 `dsh-native-runtime.js` 可访问。
+- `migrationStatus=ready`；
+- DSH 根页面、正式 UI 与 `dsh-native-runtime.js` 可访问；独立页包含返回 DSH 的提示。
+
+## 真实 DSH Web Profile 验收
+
+新 tgz 已安装到真实 `web` Profile，并在 `http://127.0.0.1:3080/` 验收：
+
+- DSH 会话侧栏、原生消息输入、模型选择器和推理等级可见且可用；
+- `Report Studio` 标签注册成功；从“对话”切换到该标签后浏览器地址仍为 `/`，没有跳转到独立页；
+- iframe 加载当前 Session，Studio 内部重复 Agent FAB/弹窗不再作为入口，顶部引导使用 DSH 原生对话框；
+- Studio 自有模型选择器数量为 0；
+- 直接访问独立页时显示“当前为 Report Studio 独立工作台……”以及“返回 DSH 主界面”；
+- 浏览器控制台新增错误为 0；
+- 批注生成的不可变 ReviewSubmission 已进入当前 DSH Session，Studio 显示“已投递”，Revision 保持 9，没有绕过 Proposal 直接写入；
+- DSH 重启后重新读取：Revision 9、1 个草案页、3 条批注、1 个 ReviewRound、2 个 ReviewSubmission、0 个 Proposal；
+- 健康检查返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`。
+
+宿主截图：
+
+- `docs/acceptance/evidence/report-studio-v0.1.1-dsh-shell.png`
+- `docs/acceptance/evidence/report-studio-v0.1.1-standalone-notice.png`
+
+真实 Agent 闭环存在一个宿主环境边界：当前 Session 的 DSH 模型请求连续重试 5 次后返回 `TRANSPORT / fetch failed`。因此本次真实宿主已证明 Prompt bridge 投递和“不直接改 Revision”，但没有由真实模型生成 Proposal。Proposal 创建、人工确认后才产生新 Revision、刷新与重启持久化的产品逻辑由自动化 E2E 覆盖并通过；真实模型端闭环需在 DSH Provider 传输恢复后复验，不把该外部传输失败误报为 Report Studio 通过。
 
 ## 发布物
 
 ```text
 dist/architectureworld-report-studio-dsh-0.1.1.tgz
-sizeBytes: 59580
-sha256: 3D552FDECD12E04E05F080AD49699515331993B16A9FB1F61555378C31DC2A68
+sizeBytes: 60483
+sha256: 4E1478B0948659C248FBEFDE529E0BBAB209AFEFFDB2F609C844EB7A233BE526
 files: 36
 ```
 
@@ -101,7 +126,7 @@ files: 36
 
 ## 验收边界
 
-已验证的是代码、数据迁移、浏览器 UI、标准目录、发布包和 DSH Host 路由。烟测没有调用真实付费模型，也没有评价真实业务资料上的生成质量；目标账号、模型路由和真实项目内容质量仍属于部署后的产品验收。正式排版、分页以及 PPTX/PDF/HTML 成品导出不属于 v0.1.1。
+已验证的是代码、数据迁移、浏览器 UI、标准目录、发布包、真实 DSH Host 路由和 Session prompt 投递。真实模型返回受当前 DSH Provider 的 `TRANSPORT / fetch failed` 阻断；目标账号、模型路由和真实项目内容质量仍属于部署环境验收。正式排版、分页以及 PPTX/PDF/HTML 成品导出不属于 v0.1.1。
 
 ## 部署与回滚
 

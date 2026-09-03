@@ -68,8 +68,12 @@ window.__ModuleLoader__.load({
       usePromptBridge({ sessionId, sessions, source })
       return React.createElement('button', {
         type: 'button',
-        title: '在独立窗口打开 Report Studio（仍绑定当前 DSH Session）',
+        title: '独立窗口不显示 DSH 模型与会话控制；正式使用请点击会话内的 Report Studio 标签',
         onClick: () => {
+          const confirmed = window.confirm(
+            '即将在独立窗口打开 Report Studio。\n\n独立窗口不显示 DSH 模型、推理等级和会话控制；请在 DSH 主界面完成模型和推理等级选择。\n\n是否继续？',
+          )
+          if (!confirmed) return
           childRef.current = window.open(
             `/report-studio/?sessionId=${encodeURIComponent(sessionId)}`,
             `report-studio-${sessionId}`,
@@ -85,7 +89,7 @@ window.__ModuleLoader__.load({
           cursor: 'pointer',
           fontWeight: 650,
         },
-      }, 'Report Studio')
+      }, 'Report Studio · 独立打开')
     }
 
     function apply(ctx) {
@@ -104,7 +108,7 @@ window.__ModuleLoader__.load({
         name: 'conversation.session.header.actions',
         id: 'report-studio',
         order: 70,
-        label: 'Report Studio',
+        label: 'Report Studio · 独立打开',
         inject: () => ({ sessions }),
       }, HeaderAction))
     }

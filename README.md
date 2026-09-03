@@ -15,7 +15,7 @@ Report Studio `v0.1.1` 是可部署的“大纲 + 草案”工作台：支持 A1
 ## 部署基线
 
 ```text
-Branch: main
+Branch: feat/report-studio-v0.1.1-hardening
 Report Studio: 0.1.1
 DSH plugin: @architectureworld/report-studio-dsh@0.1.1
 Tested DSH: 0.1.1-rc.2
@@ -28,7 +28,7 @@ Node.js: 22+
 ```bash
 git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
-git checkout main
+git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
@@ -38,7 +38,9 @@ dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
 
-进入 DSH Session 后，从会话视图或会话头部打开 `Report Studio`。完整备份、升级和回滚说明见 [DSH_INSTALL.md](DSH_INSTALL.md)。
+正式入口统一为 `http://127.0.0.1:3080/`：先在 DSH 中选择或创建 Session，再点击会话顶部的 `Report Studio` 标签；模型和推理等级继续在 DSH 底部原生控制栏选择。不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。
+
+会话头部的 `Report Studio · 独立打开` 只是带提示的备用动作。独立窗口不显示 DSH 模型、推理等级、Session 侧栏或主对话区。完整备份、升级和回滚说明见 [DSH_INSTALL.md](DSH_INSTALL.md)。
 
 ## A1.1 旧数据升级
 
@@ -54,9 +56,9 @@ dsh --profile web --no-open
 ## DSH 原生能力
 
 ```text
-/report-studio              DSH 同源 UI/API 路由
+/report-studio              DSH 同源内部 UI/API 路由，不是正式入口
 conversation.view           Report Studio 会话视图
-session.header.actions      Report Studio 入口
+session.header.actions      明确标注的独立打开备用动作
 studio_get_context          按 Submission 冻结 Revision 读取上下文
 studio_apply_commands       幂等生成待确认 Proposal
 ```
@@ -78,7 +80,7 @@ npm run smoke:dsh
 npm start
 ```
 
-独立服务默认监听 `127.0.0.1:4173`，正式使用仍以 DSH 原生插件为准。同一数据目录只允许一个 Node.js 进程写入。
+独立开发服务默认监听 `127.0.0.1:4173`，只用于源码调试，不得作为正式部署入口。正式使用始终从 `http://127.0.0.1:3080/` 进入 DSH 原生界面。同一数据目录只允许一个 Node.js 进程写入。
 
 <!-- PRESENTATION_STANDARD_PROJECT_V0_1_0_START -->
 

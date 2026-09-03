@@ -7,7 +7,7 @@
 ```bash
 git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
-git checkout main
+git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
@@ -26,6 +26,12 @@ dsh --profile web --no-open
 ```
 
 兼容数据根继续使用 `report-studio-v0.1.0` 名称，以便发现旧 Session 的 `state.json`。检测到旧数据后必须在 UI 中点击“备份并升级”；系统完成逐字节备份、稳定 ID 映射、校验后才原子发布新 Head。旧文件不会被覆盖。
+
+## 正式入口与交互
+
+正式使用只从 `http://127.0.0.1:3080/` 进入：先选择或创建 DSH Session，再点击会话顶部的 `Report Studio` 标签。模型、推理等级、Session 与消息输入由 DSH 底部原生控制栏统一管理；Report Studio 只负责编辑、批注、评审提交和 Proposal 确认。
+
+`/report-studio/?sessionId=...` 是 DSH iframe 和备用独立窗口使用的内部地址。独立页面会提示返回 DSH 主界面，且不会复制或伪造模型选择器。端口 `4173` 仅供源码调试，不是部署入口。
 
 ## 产品链路
 

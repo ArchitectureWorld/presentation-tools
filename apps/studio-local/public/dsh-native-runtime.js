@@ -1,6 +1,16 @@
 (() => {
   const sessionId = new URLSearchParams(window.location.search).get('sessionId')
-  const nativeMode = window.location.pathname.startsWith('/report-studio') && Boolean(sessionId)
+  const reportStudioRoute = window.location.pathname.startsWith('/report-studio')
+  const embedded = window.parent !== window
+  const nativeMode = reportStudioRoute && Boolean(sessionId)
+
+  if (reportStudioRoute && !embedded) {
+    document.documentElement.classList.add('report-studio-standalone')
+    const notice = document.querySelector('#report-studio-standalone-notice')
+    if (notice) notice.hidden = false
+  }
+  if (nativeMode) document.documentElement.classList.add('report-studio-dsh-native')
+  if (embedded) document.documentElement.classList.add('report-studio-dsh-embedded')
   if (!nativeMode) return
 
   const pendingPrompts = new Map()
