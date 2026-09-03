@@ -48,3 +48,17 @@ test('agent proposal is explicit and acceptance creates revision without auto re
   const accepted = acceptProposal(state, proposalResult.proposal.id);
   assert.equal(accepted.state.outline[0].title, 'A：明确目标'); assert.equal(accepted.state.project.currentRevision, before + 1); assert.equal(accepted.state.annotations[0].resolution, 'open');
 });
+
+test('deleting an outline parent removes descendant pages and repairs active page', () => {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '父章节' }))
+  const parentId = state.outline[0].id
+  ;({ state } = executeAction(state, { type: 'outline.add', parentId, title: '子章节' }))
+  const childId = state.outline[0].children[0].id
+  ;({ state } = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: childId }))
+  assert.equal(state.pages.length, 1)
+  ;({ state } = executeAction(state, { type: 'outline.delete', nodeId: parentId }))
+  assert.equal(state.outline.length, 0)
+  assert.equal(state.pages.length, 0)
+  assert.equal(state.ui.activePageId, null)
+})

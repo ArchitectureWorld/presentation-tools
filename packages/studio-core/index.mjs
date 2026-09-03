@@ -1,7 +1,12 @@
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { createStudioId } from '../studio-contracts/index.mjs';
 
 const now = () => new Date().toISOString();
-const id = prefix => `${prefix}_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+const ID_KINDS = Object.freeze({
+  project: 'project', outline: 'outlineNode', page: 'page', revision: 'revision',
+  annotation: 'annotation', round: 'reviewRound', submission: 'reviewSubmission', proposal: 'proposal',
+});
+const id = prefix => createStudioId(ID_KINDS[prefix]);
 const clone = value => structuredClone(value);
 
 export function createInitialState() {
@@ -45,6 +50,12 @@ function findOutlineContainer(nodes, nodeId) {
   return null;
 }
 
+function collectOutlineSubtreeIds(node, ids = new Set()) {
+  ids.add(node.id);
+  for (const child of node.children || []) collectOutlineSubtreeIds(child, ids);
+  return ids;
+}
+
 function applyContentAction(state, action, { commit = true, source = 'human' } = {}) {
   let next = clone(state);
   switch (action.type) {
@@ -76,8 +87,9 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
     case 'outline.delete': {
       const location = findOutlineContainer(next.outline, action.nodeId);
       if (!location) throw new Error('未找到大纲节点');
+      const removedIds = collectOutlineSubtreeIds(location.nodes[location.index]);
       location.nodes.splice(location.index, 1);
-      next.pages = next.pages.filter(page => page.outlineNodeId !== action.nodeId);
+      next.pages = next.pages.filter(page => !removedIds.has(page.outlineNodeId));
       if (next.ui.activePageId && !next.pages.some(page => page.id === next.ui.activePageId)) next.ui.activePageId = next.pages[0]?.id ?? null;
       break;
     }
