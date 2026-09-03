@@ -8,6 +8,34 @@ import {
   projectStateFromParts,
 } from './index.mjs'
 
+function validSnapshot({ pageCount = 1, withAsset = false } = {}) {
+  const projectId = createStudioId('project')
+  const outline = Array.from({ length: pageCount }, (_, order) => {
+    const outlineNodeId = createStudioId('outlineNode')
+    return { id: outlineNodeId, outlineNodeId, parentOutlineNodeId: null, title: `页面 ${order + 1}`, order, sourceRefs: [], opaqueExtension: null, children: [] }
+  })
+  const assetId = withAsset ? createStudioId('asset') : null
+  const pages = outline.map((node, order) => {
+    const pageId = createStudioId('page')
+    const titleBlockId = createStudioId('contentBlock')
+    return {
+      id: pageId,
+      pageId,
+      outlineNodeId: node.outlineNodeId,
+      draftDocumentId: createStudioId('draftDocument'),
+      titleBlockId,
+      order,
+      contentBlocks: [{ contentBlockId: titleBlockId, type: 'heading', role: 'page_title', order: 0, content: node.title, sourceRefs: [] }],
+      scriptBlocks: [],
+      pageAssets: withAsset && order === 0 ? [{ pageAssetId: createStudioId('pageAsset'), assetId, role: 'supporting', caption: '', order: 0, sourceRefs: [] }] : [],
+    }
+  })
+  return {
+    snapshot: { project: { id: projectId, projectId, projectRulesId: createStudioId('projectRules'), outlineDocumentId: createStudioId('outlineDocument'), title: '有效快照', createdAt: '2026-09-03T00:00:00.000Z' }, outline, pages },
+    assetId,
+  }
+}
+
 test('new Studio ids use typed lowercase UUIDv7 values', () => {
   const zeroes = () => Buffer.alloc(10)
   assert.equal(
@@ -30,6 +58,37 @@ test('canonical validation rejects a page whose outline node is missing', () => 
     () => assertCanonicalSnapshot(snapshot),
     error => error.code === ERROR_CODES.INVALID_REFERENCE && error.details.pageId === snapshot.pages[0].id,
   )
+})
+
+test('canonical validation rejects a titleBlockId that points at another page', () => {
+  const { snapshot } = validSnapshot({ pageCount: 2 })
+  snapshot.pages[1].titleBlockId = snapshot.pages[0].titleBlockId
+  assert.throws(() => assertCanonicalSnapshot(snapshot), error => error.code === ERROR_CODES.INVALID_REFERENCE)
+})
+
+test('canonical validation requires exactly one page_title block and requires titleBlockId to reference it', () => {
+  const { snapshot } = validSnapshot()
+  snapshot.pages[0].contentBlocks[0].role = 'section_title'
+  assert.throws(() => assertCanonicalSnapshot(snapshot), error => error.code === ERROR_CODES.INVALID_REFERENCE)
+
+  const duplicate = validSnapshot().snapshot
+  duplicate.pages[0].contentBlocks.push({ contentBlockId: createStudioId('contentBlock'), type: 'heading', role: 'page_title', order: 1, content: '重复标题', sourceRefs: [] })
+  assert.throws(() => assertCanonicalSnapshot(duplicate), error => error.code === ERROR_CODES.INVALID_REFERENCE)
+})
+
+test('canonical validation rejects duplicate Page order values', () => {
+  const { snapshot } = validSnapshot({ pageCount: 2 })
+  snapshot.pages[1].order = snapshot.pages[0].order
+  assert.throws(() => assertCanonicalSnapshot(snapshot), error => error.code === ERROR_CODES.INVALID_REFERENCE)
+})
+
+test('canonical validation rejects ScriptBlock asset references outside the project asset set', () => {
+  const { snapshot } = validSnapshot({ withAsset: true })
+  snapshot.pages[0].scriptBlocks.push({
+    scriptBlockId: createStudioId('scriptBlock'), content: '引用项目外素材', order: 0, estimatedDurationSeconds: null,
+    referencedContentBlockIds: [snapshot.pages[0].titleBlockId], referencedAssetIds: [createStudioId('asset')], sourceRefs: [],
+  })
+  assert.throws(() => assertCanonicalSnapshot(snapshot), error => error.code === ERROR_CODES.INVALID_REFERENCE)
 })
 
 test('canonical projection excludes operational and view records', () => {

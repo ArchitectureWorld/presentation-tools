@@ -67,6 +67,26 @@ async function action(payload) {
   }
 }
 
+function buildDraftUpdatePatch(page, { heading, body, listInputs = [], scriptInputs = [], script = '' }) {
+  const list = page.contentBlocks?.find(block => block.type === 'list');
+  const listItems = list ? listInputs.filter(input => input.listItemId).map((input, index) => {
+    const current = list.items.find(item => item.listItemId === input.listItemId);
+    return { ...current, content: input.value, order: index };
+  }) : null;
+  const placeholderListContent = listInputs.find(input => !input.listItemId)?.value.trim() || '';
+  const scriptBlocks = page.scriptBlocks?.length ? scriptInputs.map((input, index) => {
+    const current = page.scriptBlocks.find(block => block.scriptBlockId === input.scriptBlockId);
+    return { ...current, content: input.value, order: index };
+  }) : null;
+  return {
+    heading,
+    body,
+    ...(list ? { listBlockId: list.contentBlockId, listItems } : {}),
+    ...(placeholderListContent ? { listCreateContent: placeholderListContent } : {}),
+    ...(scriptBlocks ? { scriptBlocks } : { script }),
+  };
+}
+
 function createBrowserUuidV7() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let timestamp = BigInt(Date.now());
@@ -559,26 +579,17 @@ function render() {
 async function saveDraft() {
   const page = activePage();
   if (!page) return;
-  const list = page.contentBlocks?.find(block => block.type === 'list');
-  const listItems = list ? queryAll('[data-list-item-id]').filter(input => input.dataset.listItemId).map((input, index) => {
-    const current = list.items.find(item => item.listItemId === input.dataset.listItemId);
-    return { ...current, content: input.value, order: index };
-  }) : null;
-  const placeholderListContent = list ? queryAll('[data-list-item-id]').find(input => !input.dataset.listItemId)?.value.trim() : '';
-  const scriptBlocks = page.scriptBlocks?.length ? queryAll('[data-script-block-id]').map((input, index) => {
-    const current = page.scriptBlocks.find(block => block.scriptBlockId === input.dataset.scriptBlockId);
-    return { ...current, content: input.value, order: index };
-  }) : null;
 
   await action({
     type: 'draft.update',
     pageId: page.id,
-    patch: {
+    patch: buildDraftUpdatePatch(page, {
       heading: query('#draft-heading').value,
       body: query('#draft-body').value,
-      ...(list ? { listBlockId: list.contentBlockId, listItems, ...(placeholderListContent ? { listCreateContent: placeholderListContent } : {}) } : {}),
-      ...(scriptBlocks ? { scriptBlocks } : { script: query('#draft-script').value }),
-    },
+      listInputs: queryAll('[data-list-item-id]').map(input => ({ listItemId: input.dataset.listItemId, value: input.value })),
+      scriptInputs: queryAll('[data-script-block-id]').map(input => ({ scriptBlockId: input.dataset.scriptBlockId, value: input.value })),
+      script: query('#draft-script')?.value ?? '',
+    }),
   });
   toast('草案已保存');
 }

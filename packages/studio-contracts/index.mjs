@@ -102,13 +102,21 @@ export function assertCanonicalSnapshot(snapshot) {
   }
   checkOutline(snapshot.outline)
   const pageIds = new Set()
+  const pageOrders = new Set()
+  const projectAssetIds = new Set()
+  for (const asset of snapshot.project.extensionPayload?.standardArchive?.documents?.['assets/manifest.json']?.assets ?? []) {
+    projectAssetIds.add(requiredId('asset', asset?.assetId, 'Asset.assetId'))
+  }
+  for (const page of snapshot.pages) {
+    for (const asset of page?.pageAssets ?? []) projectAssetIds.add(requiredId('asset', asset?.assetId, 'PageAsset.assetId', { pageId: page?.id ?? null }))
+  }
   const draftIds = new Set(); const blockIds = new Set(); const listItemIds = new Set(); const scriptIds = new Set(); const pageAssetIds = new Set()
   for (const page of snapshot.pages) {
     requiredId('page', page?.id, 'Page')
     requiredId('page', page?.pageId, 'Page.pageId')
     requiredId('draftDocument', page?.draftDocumentId, 'Page.draftDocumentId')
     requiredId('contentBlock', page?.titleBlockId, 'Page.titleBlockId')
-    if (pageIds.has(page.id) || page.id !== page.pageId || draftIds.has(page.draftDocumentId) || !Number.isInteger(page.order) || page.order < 0 || !Array.isArray(page.contentBlocks) || !Array.isArray(page.scriptBlocks) || !Array.isArray(page.pageAssets)) {
+    if (pageIds.has(page.id) || page.id !== page.pageId || draftIds.has(page.draftDocumentId) || !Number.isInteger(page.order) || page.order < 0 || pageOrders.has(page.order) || !Array.isArray(page.contentBlocks) || !Array.isArray(page.scriptBlocks) || !Array.isArray(page.pageAssets)) {
       throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '页面 ID 缺失或重复。', { pageId: page?.id ?? null })
     }
     if (!outlineIds.has(page.outlineNodeId)) {
@@ -117,7 +125,7 @@ export function assertCanonicalSnapshot(snapshot) {
         outlineNodeId: page.outlineNodeId,
       })
     }
-    pageIds.add(page.id); draftIds.add(page.draftDocumentId)
+    pageIds.add(page.id); pageOrders.add(page.order); draftIds.add(page.draftDocumentId)
     const blockOrder = new Set(); const pageBlockIds = new Set()
     for (const block of page.contentBlocks) {
       requiredId('contentBlock', block?.contentBlockId, 'ContentBlock', { pageId: page.id })
@@ -133,13 +141,17 @@ export function assertCanonicalSnapshot(snapshot) {
         }
       }
     }
-    if (!blockIds.has(page.titleBlockId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Page.titleBlockId 未引用 ContentBlock。', { pageId: page.id, titleBlockId: page.titleBlockId })
+    const titleBlocks = page.contentBlocks.filter(block => block.type === 'heading' && block.role === 'page_title')
+    if (titleBlocks.length !== 1 || titleBlocks[0].contentBlockId !== page.titleBlockId || !pageBlockIds.has(page.titleBlockId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Page.titleBlockId 必须引用本页唯一的 page_title ContentBlock。', { pageId: page.id, titleBlockId: page.titleBlockId })
     const scriptOrder = new Set()
     for (const script of page.scriptBlocks) {
       requiredId('scriptBlock', script?.scriptBlockId, 'ScriptBlock', { pageId: page.id })
       if (scriptIds.has(script.scriptBlockId) || !Number.isInteger(script.order) || script.order < 0 || scriptOrder.has(script.order) || typeof script.content !== 'string' || !Array.isArray(script.referencedContentBlockIds) || !Array.isArray(script.referencedAssetIds) || !Array.isArray(script.sourceRefs)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ScriptBlock Canonical 字段不完整。', { pageId: page.id, scriptBlockId: script?.scriptBlockId ?? null })
       for (const contentBlockId of script.referencedContentBlockIds) if (!pageBlockIds.has(contentBlockId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ScriptBlock 引用了不存在的 ContentBlock。', { pageId: page.id, scriptBlockId: script.scriptBlockId, contentBlockId })
-      for (const assetId of script.referencedAssetIds) requiredId('asset', assetId, 'ScriptBlock.referencedAssetId', { pageId: page.id, scriptBlockId: script.scriptBlockId })
+      for (const assetId of script.referencedAssetIds) {
+        requiredId('asset', assetId, 'ScriptBlock.referencedAssetId', { pageId: page.id, scriptBlockId: script.scriptBlockId })
+        if (!projectAssetIds.has(assetId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ScriptBlock 引用了项目中不存在的 Asset。', { pageId: page.id, scriptBlockId: script.scriptBlockId, assetId })
+      }
       scriptIds.add(script.scriptBlockId); scriptOrder.add(script.order)
     }
     const assetOrder = new Set(); const assetIds = new Set()
