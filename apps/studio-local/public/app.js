@@ -564,6 +564,7 @@ async function saveDraft() {
     const current = list.items.find(item => item.listItemId === input.dataset.listItemId);
     return { ...current, content: input.value, order: index };
   }) : null;
+  const placeholderListContent = list ? queryAll('[data-list-item-id]').find(input => !input.dataset.listItemId)?.value.trim() : '';
   const scriptBlocks = page.scriptBlocks?.length ? queryAll('[data-script-block-id]').map((input, index) => {
     const current = page.scriptBlocks.find(block => block.scriptBlockId === input.dataset.scriptBlockId);
     return { ...current, content: input.value, order: index };
@@ -575,7 +576,7 @@ async function saveDraft() {
     patch: {
       heading: query('#draft-heading').value,
       body: query('#draft-body').value,
-      ...(list ? { listBlockId: list.contentBlockId, listItems } : {}),
+      ...(list ? { listBlockId: list.contentBlockId, listItems, ...(placeholderListContent ? { listCreateContent: placeholderListContent } : {}) } : {}),
       ...(scriptBlocks ? { scriptBlocks } : { script: query('#draft-script').value }),
     },
   });

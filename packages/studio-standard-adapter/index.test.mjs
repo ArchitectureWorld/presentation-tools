@@ -28,9 +28,7 @@ test('standard fixture imports into the Studio canonical model without changing 
   assert.equal(imported.snapshot.project.id, 'project_01992a80-0000-7000-8000-000000000101')
   assert.equal(imported.snapshot.outline[0].id, 'outline_node_01992a80-0000-7000-8000-000000000110')
   assert.equal(imported.snapshot.pages[0].id, 'page_01992a80-0000-7000-8000-000000000111')
-  assert.equal(imported.snapshot.pages[0].heading, '更新基础已经具备')
-  assert.deepEqual(imported.snapshot.pages[0].bullets, ['优先改善高频公共活动空间', '保留可复用的现状资源', '分阶段验证投入与效果'])
-  assert.match(imported.snapshot.pages[0].script, /本页先说明项目具备更新基础/)
+  for (const field of ['heading', 'body', 'bullets', 'script', 'assets']) assert.equal(Object.hasOwn(imported.snapshot.pages[0], field), false)
   assert.ok(seen.length > 0)
   assert.equal(JSON.stringify(imported.snapshot).includes('dataBase64'), false)
   assert.equal(JSON.stringify(imported.snapshot).includes('dataUrl'), false)
@@ -68,13 +66,6 @@ test('new Studio ObjectRef assets are materialized and declared by both manifest
     const assetId = 'asset_01993e40-0000-7000-8000-000000000001'
     const sha256 = createHash('sha256').update(svg).digest('hex')
     testBlobs.set(sha256, svg)
-    imported.snapshot.pages[0].assets.push({
-      id: assetId,
-      name: '新增示意图.svg',
-      type: 'image/svg+xml',
-      mimeType: 'image/svg+xml',
-      objectRef: { sha256, sizeBytes: svg.length, mimeType: 'image/svg+xml', originalFileName: '新增示意图.svg' },
-    })
     imported.snapshot.pages[0].pageAssets.push({
       pageAssetId: createStableId('pageAsset'), assetId, role: 'supporting', caption: '',
       order: imported.snapshot.pages[0].pageAssets.length, sourceRefs: [], name: '新增示意图.svg', mimeType: 'image/svg+xml',

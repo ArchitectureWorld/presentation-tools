@@ -135,12 +135,7 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
         order: page.order,
         contentBlocks: clone(draft?.contentBlocks ?? []),
         scriptBlocks: clone(draft?.scriptBlocks ?? []),
-        pageAssets: clone(draft?.pageAssets ?? []),
-        heading: heading?.content ?? '',
-        body: body?.content ?? '',
-        bullets: (list?.items ?? []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map(item => item.content),
-        script: (draft?.scriptBlocks ?? []).sort((a, b) => a.order - b.order).map(item => item.content).join('\n\n'),
-        assets: pageAssets,
+        pageAssets: clone(pageAssets),
         extensionPayload: {
           standard: {
             manifest: clone(page),

@@ -233,6 +233,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
         const currentIds = new Set(list.items.map(item => item.listItemId))
         if (patch.listItems.some(item => !currentIds.has(item.listItemId))) throw new Error('列表编辑必须引用现有 listItemId')
         list.items = clone(patch.listItems).map((item, index) => ({ ...item, order: index }))
+        if (patch.listCreateContent !== undefined) list.items.push({ listItemId: id('listItem'), content: String(patch.listCreateContent), order: list.items.length, sourceRefs: [] })
       }
       if ('scriptBlocks' in patch) {
         const currentIds = new Set(page.scriptBlocks.map(block => block.scriptBlockId))
