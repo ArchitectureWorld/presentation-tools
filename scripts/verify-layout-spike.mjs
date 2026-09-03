@@ -163,6 +163,36 @@ async function dragElement(cdp, layoutElementId) {
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rect.x + 70, y: rect.y + 34, button: 'left', buttons: 0, clickCount: 1 })
 }
 
+async function stopBrowser(browser, browserExited) {
+  if (browser.exitCode !== null || browser.signalCode !== null) return
+  browser.kill('SIGTERM')
+  const terminated = await Promise.race([
+    browserExited.then(() => true),
+    delay(3000).then(() => false),
+  ])
+  if (terminated) return
+  browser.kill('SIGKILL')
+  await Promise.race([
+    browserExited,
+    delay(3000),
+  ])
+}
+
+async function removeDirectoryWithRetry(path) {
+  let lastError
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (!['ENOTEMPTY', 'EBUSY', 'EPERM'].includes(error?.code)) throw error
+      lastError = error
+      await delay(attempt * 100)
+    }
+  }
+  throw lastError
+}
+
 const staticHost = await startStaticServer()
 const browserProfile = await mkdtemp(join(tmpdir(), 'report-studio-layout-spike-browser-'))
 const debuggingPort = await freePort()
@@ -182,6 +212,7 @@ const browser = spawn(findBrowser(), [
   `--user-data-dir=${browserProfile}`,
   'about:blank',
 ], { stdio: ['ignore', 'pipe', 'pipe'] })
+const browserExited = new Promise(resolvePromise => browser.once('exit', resolvePromise))
 
 let cdp
 try {
@@ -241,14 +272,7 @@ try {
   console.log('drag=PASS frame-only-serialization=PASS reload-reset=PASS')
 } finally {
   cdp?.close()
-  if (browser.exitCode === null) {
-    browser.kill('SIGTERM')
-    await Promise.race([
-      new Promise(resolvePromise => browser.once('exit', resolvePromise)),
-      delay(3000),
-    ])
-    if (browser.exitCode === null) browser.kill('SIGKILL')
-  }
+  await stopBrowser(browser, browserExited)
   await new Promise(resolvePromise => staticHost.server.close(resolvePromise))
-  await rm(browserProfile, { recursive: true, force: true })
+  await removeDirectoryWithRetry(browserProfile)
 }
