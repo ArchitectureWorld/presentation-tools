@@ -50,6 +50,7 @@
 
 ### Changed files and concerns
 
+- Fix commit: `de19cefd80b62320b829d971393f8447805bc49c` (`fix(storage): close Task 3 review findings`).
 - Changed authoritative files: `apps/studio-local/{asset-service.mjs,repository.mjs,server.mjs,agent-context.mjs,public/app.js}`, `packages/studio-dsh-plugin/lib/{index.js,runtime.js}`, `packages/studio-standard-adapter/index.mjs`, and the DSH vendor manifest plus paired regressions/vendor output.
 - Frozen Contract files, Schema Set hash and stable ID rules remain untouched (`git diff -- contracts/presentation-standard-project` was empty).
 - Task 5 still owns atomic export staging and publication. This fix removes the known archive `Buffer.concat` path but does not claim a Task 5 export protocol.
