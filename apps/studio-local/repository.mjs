@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { Readable } from 'node:stream'
 import { createInitialState } from '../../packages/studio-core/index.mjs'
 import {
   CONTROL_SCHEMA_VERSION,
@@ -173,6 +175,74 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     const payload = await readFile(join(objectsDirectory, `${reference.sha256}.json`), 'utf8')
     if (sha256(payload) !== reference.sha256) throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '对象文件哈希校验失败。', { sha256: reference.sha256 }, 500)
     return JSON.parse(payload)
+  }
+
+  async function putBlob(source, { mimeType, originalFileName, sizeBytes = null, sha256: expectedSha256 = null } = {}) {
+    if (!source || typeof source[Symbol.asyncIterator] !== 'function') throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 输入必须是可流式读取的字节流。', undefined, 400)
+    if (typeof mimeType !== 'string' || !mimeType || typeof originalFileName !== 'string' || !originalFileName) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 缺少 MIME 类型或原始文件名。', undefined, 400)
+    const temporary = join(objectsDirectory, `.${randomUUID()}.blob.tmp`)
+    const handle = await open(temporary, 'wx')
+    const hash = createHash('sha256')
+    let written = 0
+    let complete = false
+    try {
+      for await (const chunk of source) {
+        const bytes = Buffer.from(chunk)
+        written += bytes.length
+        hash.update(bytes)
+        await handle.write(bytes)
+      }
+      await handle.sync()
+      complete = true
+    } finally {
+      await handle.close()
+      if (!complete) await unlink(temporary).catch(() => undefined)
+    }
+    const digest = hash.digest('hex')
+    if ((sizeBytes !== null && sizeBytes !== written) || (expectedSha256 && expectedSha256 !== digest)) {
+      await unlink(temporary).catch(() => undefined)
+      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 字节数或 SHA-256 校验失败。', { sizeBytes: written, sha256: digest }, 400)
+    }
+    const blobPath = join(objectsDirectory, `${digest}.blob`)
+    try { await rename(temporary, blobPath) }
+    catch (error) {
+      if (!(await pathExists(blobPath))) throw error
+      await unlink(temporary).catch(() => undefined)
+    }
+    const descriptor = { sha256: digest, sizeBytes: written, mimeType, originalFileName, createdAt: new Date().toISOString() }
+    const descriptorPath = join(objectsDirectory, `${digest}.blob.json`)
+    if (!(await pathExists(descriptorPath))) await atomicWriteJson(descriptorPath, descriptor)
+    else return JSON.parse(await readFile(descriptorPath, 'utf8'))
+    return descriptor
+  }
+
+  async function openBlob(reference) {
+    const sha = String(reference?.sha256 ?? '')
+    if (!/^[a-f0-9]{64}$/i.test(sha)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Blob 引用缺少有效 SHA-256。', { reference }, 404)
+    const descriptor = JSON.parse(await readFile(join(objectsDirectory, `${sha}.blob.json`), 'utf8'))
+    const blobPath = join(objectsDirectory, `${sha}.blob`)
+    const info = await stat(blobPath)
+    if (descriptor.sha256 !== sha || descriptor.sizeBytes !== info.size) throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 描述符与字节文件不一致。', { sha256: sha }, 500)
+    return createReadStream(blobPath)
+  }
+
+  async function migrateLegacyAssets() {
+    assertReady()
+    const replacements = new Map()
+    for (const page of state.pages ?? []) for (const asset of page.assets ?? []) {
+      const match = /^data:([^;,]+);base64,([a-z0-9+/=\s]+)$/iu.exec(String(asset.dataUrl ?? ''))
+      if (!match) continue
+      const bytes = Buffer.from(match[2].replace(/\s/gu, ''), 'base64')
+      const mimeType = match[1].toLowerCase()
+      const objectRef = await putBlob(Readable.from([bytes]), { mimeType, originalFileName: asset.name ?? `${asset.id}.bin` })
+      replacements.set(asset.id, { ...clone(asset), mimeType, objectRef, sizeBytes: objectRef.sizeBytes, sha256: objectRef.sha256 })
+      delete replacements.get(asset.id).dataUrl
+    }
+    if (!replacements.size) return clone(state)
+    return transactContent({ baseRevision: state.project.currentRevision, source: 'migration', detail: { actionType: 'asset.migrate_data_url' } }, candidate => {
+      for (const page of candidate.pages ?? []) page.assets = (page.assets ?? []).map(asset => replacements.get(asset.id) ?? asset)
+      return candidate
+    })
   }
 
   async function loadState(currentControl) {
@@ -455,6 +525,9 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     },
     applyMigration,
     getSnapshotAt,
+    putBlob,
+    openBlob,
+    migrateLegacyAssets,
     initializeFromStandardProject,
     transactContent,
     transactOperational,

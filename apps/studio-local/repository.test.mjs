@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
+import { createHash } from 'node:crypto'
 import { createRepository } from './repository.mjs'
 import { executeAction } from '../../packages/studio-core/index.mjs'
 
@@ -48,6 +50,40 @@ test('content transaction persists an immutable snapshot that reloads through Pr
     } finally {
       await reopened.close()
     }
+  })
+})
+
+test('content-addressed blobs stream 20 MiB once and round-trip their descriptor and bytes', async () => {
+  await withRepository(async ({ dir, repository }) => {
+    const bytes = Buffer.alloc(20 * 1024 * 1024, 0x5a)
+    const expectedHash = createHash('sha256').update(bytes).digest('hex')
+    const first = await repository.putBlob(Readable.from([bytes]), { mimeType: 'image/png', originalFileName: 'large.png' })
+    const second = await repository.putBlob(Readable.from([bytes]), { mimeType: 'image/png', originalFileName: 'large.png' })
+    assert.deepEqual(second, first)
+    assert.equal(first.sha256, expectedHash)
+    assert.equal(first.sizeBytes, bytes.length)
+    assert.deepEqual(Buffer.concat(await Array.fromAsync(await repository.openBlob(first))), bytes)
+    const stored = await readdir(join(dir, 'objects', 'sha256'))
+    assert.equal(stored.filter(name => name === `${expectedHash}.blob`).length, 1)
+    assert.equal(stored.some(name => name.includes('base64')), false)
+  })
+})
+
+test('legacy page Data URLs remain readable until explicit migration replaces them with ObjectRefs', async () => {
+  await withRepository(async ({ repository }) => {
+    const base = repository.getState().project.currentRevision
+    await repository.transactContent({ baseRevision: base }, state => {
+      state = executeAction(state, { type: 'outline.add', parentId: null, title: '旧页面' }).state
+      state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
+      state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000002', name: 'old.png', type: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }]
+      return state
+    })
+    assert.match(repository.getState().pages[0].assets[0].dataUrl, /^data:/)
+    await repository.migrateLegacyAssets()
+    const asset = repository.getState().pages[0].assets[0]
+    assert.equal('dataUrl' in asset, false)
+    assert.match(asset.objectRef.sha256, /^[a-f0-9]{64}$/)
+    assert.equal(JSON.stringify(await repository.getSnapshotAt(repository.getState().project.currentRevision)).includes('dataUrl'), false)
   })
 })
 

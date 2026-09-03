@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { join, relative, resolve, sep } from 'node:path'
+import { basename, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 import {
   REQUIRED_DIRECTORIES,
   SCHEMA_IDS,
@@ -23,13 +24,21 @@ async function readJson(root, relativePath) {
   return JSON.parse(await readFile(join(root, ...relativePath.split('/')), 'utf8'))
 }
 
-async function archiveFiles(root) {
+async function archiveFiles(root, putBlob) {
   const files = []
   async function walk(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name)
       if (entry.isDirectory()) await walk(path)
-      else if (entry.isFile()) files.push({ relativePath: relative(root, path).split(sep).join('/'), dataBase64: (await readFile(path)).toString('base64') })
+      else if (entry.isFile()) {
+        const relativePath = relative(root, path).split(sep).join('/')
+        if (JSON_DOCUMENTS.includes(relativePath) || relativePath.startsWith('pages/drafts/')) continue
+        if (typeof putBlob !== 'function') throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目导入需要 Repository Blob 存储。', undefined, 500)
+        const info = await stat(path)
+        const mimeType = relativePath.endsWith('.svg') ? 'image/svg+xml' : relativePath.endsWith('.csv') ? 'text/csv' : 'application/octet-stream'
+        const objectRef = await putBlob(createReadStream(path), { mimeType, originalFileName: basename(path), sizeBytes: info.size })
+        files.push({ relativePath, objectRef, sizeBytes: objectRef.sizeBytes, mimeType: objectRef.mimeType, sha256: objectRef.sha256 })
+      }
     }
   }
   await walk(root)
@@ -57,10 +66,10 @@ function buildOutline(nodes) {
 
 function findAssetData(archive, asset) {
   const stored = archive.find(file => file.relativePath === asset.relativePath)
-  return stored ? `data:${asset.mimeType};base64,${stored.dataBase64}` : null
+  return stored?.objectRef ?? null
 }
 
-export async function readStandardProject(projectRoot) {
+export async function readStandardProject(projectRoot, { putBlob } = {}) {
   const root = rootPath(projectRoot)
   const validation = await validateProjectDirectoryWithAjv(root, { allowGitKeep: true })
   if (!validation.valid) {
@@ -71,7 +80,7 @@ export async function readStandardProject(projectRoot) {
   for (const page of documents['pages/manifest.json'].pages) {
     if (page.draftPath) pageDocuments[page.draftPath] = await readJson(root, page.draftPath)
   }
-  const archive = await archiveFiles(root)
+  const archive = await archiveFiles(root, putBlob)
   const assets = new Map(documents['assets/manifest.json'].assets.map(asset => [asset.assetId, asset]))
   const snapshot = {
     project: {
@@ -94,7 +103,8 @@ export async function readStandardProject(projectRoot) {
         id: asset.assetId,
         name: asset.displayName,
         type: asset.mimeType,
-        dataUrl: findAssetData(archive, asset),
+        mimeType: asset.mimeType,
+        objectRef: findAssetData(archive, asset),
         widthPx: asset.metadata?.widthPx,
         heightPx: asset.metadata?.heightPx,
         extensionPayload: { standard: clone(asset) },
@@ -337,7 +347,7 @@ async function writeBytesWithin(projectRoot, relativePath, bytes) {
   await writeFile(target, bytes)
 }
 
-export async function writeStandardProject({ snapshot, exportRoot }) {
+export async function writeStandardProject({ snapshot, exportRoot, openBlob } = {}) {
   assertCanonicalSnapshot(snapshot)
   const root = resolve(exportRoot)
   const archived = snapshot.project.extensionPayload?.standardArchive
@@ -353,7 +363,8 @@ export async function writeStandardProject({ snapshot, exportRoot }) {
   for (const directory of REQUIRED_DIRECTORIES) await mkdir(join(projectRoot, ...directory.split('/')), { recursive: true })
   for (const file of archived?.files ?? []) {
     if (JSON_DOCUMENTS.includes(file.relativePath) || file.relativePath.startsWith('pages/drafts/')) continue
-    await writeBytesWithin(projectRoot, file.relativePath, Buffer.from(file.dataBase64, 'base64'))
+    if (typeof openBlob !== 'function' || !file.objectRef) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复标准项目文件需要 Blob 读取器。', { relativePath: file.relativePath })
+    await writeBytesWithin(projectRoot, file.relativePath, Buffer.concat(await Array.fromAsync(await openBlob(file.objectRef))))
   }
 
   documents['project.json'].projectId = snapshot.project.id

@@ -50,6 +50,27 @@ test('review submission through configured bridge creates a persisted proposal',
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
 });
 
+test('controlled asset ingestion stores binary outside state and serves only referenced assets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-ingestion-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'图片页', baseRevision:0 }) }).then(r=>r.json());
+    state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'draft.ensurePage', outlineNodeId:state.outline[0].id, baseRevision:state.project.currentRevision }) }).then(r=>r.json());
+    const png = Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0]);
+    const upload = await fetch(`${base}/api/assets/ingest?pageId=${encodeURIComponent(state.pages[0].id)}`, { method:'POST', headers:{'content-type':'image/png','x-file-name':'preview.png'}, body:png });
+    const uploadText = await upload.text();
+    assert.equal(upload.status, 200, uploadText);
+    const asset = JSON.parse(uploadText);
+    state = await fetch(`${base}/api/state`).then(r=>r.json());
+    assert.equal(JSON.stringify(state).includes('dataUrl'), false);
+    assert.equal(JSON.stringify(state).includes('base64'), false);
+    assert.equal(state.pages[0].assets[0].objectRef.sha256, asset.objectRef.sha256);
+    assert.equal((await fetch(`${base}/api/assets/${asset.assetId}/content`)).status, 200);
+    assert.equal((await fetch(`${base}/api/assets/not-current/content`)).status, 404);
+  } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
+});
+
 test('configured bridge failure is persisted and the same submission can be retried', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-agent-failure-'));
   let shouldFail = true;

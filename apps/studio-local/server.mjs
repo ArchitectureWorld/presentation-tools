@@ -5,13 +5,16 @@ import { fileURLToPath } from 'node:url';
 import { createRepository } from './repository.mjs';
 import { createAgentBridge } from './agent-bridge.mjs';
 import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent, markSubmissionDispatch, retryReviewSubmission } from '../../packages/studio-core/index.mjs';
-import { ERROR_CODES, StudioError, errorPayload } from '../../packages/studio-contracts/index.mjs';
+import { ERROR_CODES, StudioError, createStudioId, errorPayload } from '../../packages/studio-contracts/index.mjs';
 import { createStandardProjectService } from './standard-project.mjs';
+import { projectAgentContext } from './agent-context.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const isContentAction = type => ['project.', 'outline.', 'draft.'].some(prefix => String(type).startsWith(prefix));
+const MAX_ASSET_BYTES = 20 * 1024 * 1024;
+const imageSignature = (mimeType, bytes) => (mimeType === 'image/png' && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) || (mimeType === 'image/jpeg' && bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255])));
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);
@@ -47,7 +50,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     try {
       const agentResult = await bridge.submit({
         submission,
-        context: { projectId: before.project.id, projectTitle: before.project.title, scopeKey: round?.scopeKey ?? null },
+        context: { ...projectAgentContext(before, { stage: before.ui?.stage, pageId: before.ui?.activePageId }), scopeKey: round?.scopeKey ?? null },
       });
       let proposal = null;
       await repository.transactOperational(state => {
@@ -89,6 +92,39 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     }
     if (req.method === 'POST' && url.pathname === '/api/standard/export') return sendJson(res, 200, await standardProject.exportProject());
     if (req.method === 'GET' && url.pathname === '/api/state') return sendJson(res, 200, repository.getState());
+    if (req.method === 'POST' && url.pathname === '/api/assets/ingest') {
+      const pageId = url.searchParams.get('pageId');
+      const mimeType = String(req.headers['content-type'] ?? '').split(';', 1)[0].toLowerCase();
+      const originalFileName = String(req.headers['x-file-name'] ?? 'upload').replace(/[\\/\0]/g, '_');
+      if (!pageId || !['image/png', 'image/jpeg'].includes(mimeType) || !originalFileName) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '上传素材必须指定页面、受支持的图片 MIME 和文件名。', undefined, 400);
+      let total = 0; let prefix = Buffer.alloc(0);
+      async function* checked() {
+        for await (const chunk of req) {
+          const bytes = Buffer.from(chunk); total += bytes.length;
+          if (total > MAX_ASSET_BYTES) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '上传素材超过 20 MiB 限制。', undefined, 413);
+          if (prefix.length < 8) prefix = Buffer.concat([prefix, bytes]).subarray(0, 8);
+          yield bytes;
+        }
+        if (!imageSignature(mimeType, prefix)) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '上传素材的文件签名与声明 MIME 不一致。', undefined, 400);
+      }
+      const objectRef = await repository.putBlob(checked(), { mimeType, originalFileName });
+      const asset = { id: createStudioId('asset'), name: originalFileName, mimeType, objectRef, sizeBytes: objectRef.sizeBytes, sha256: objectRef.sha256 };
+      const before = repository.getState();
+      await repository.transactContent({ baseRevision: before.project.currentRevision, source: 'human', detail: { actionType: 'asset.ingest', pageId } }, state => {
+        const page = state.pages.find(item => item.id === pageId);
+        if (!page) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '上传目标页面不存在。', { pageId }, 404);
+        page.assets = [...(page.assets ?? []), asset]; return state;
+      });
+      return sendJson(res, 200, { assetId: asset.id, objectRef, metadata: { name: asset.name, mimeType, sizeBytes: asset.sizeBytes, sha256: asset.sha256 } });
+    }
+    const contentMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/content$/);
+    if (req.method === 'GET' && contentMatch) {
+      const asset = repository.getState().pages.flatMap(page => page.assets ?? []).find(item => item.id === decodeURIComponent(contentMatch[1]));
+      if (!asset?.objectRef) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '未找到当前项目引用的素材。', undefined, 404);
+      const stream = await repository.openBlob(asset.objectRef);
+      res.writeHead(200, { 'content-type': asset.mimeType, 'content-length': asset.sizeBytes, 'x-content-type-options': 'nosniff' });
+      stream.pipe(res); return true;
+    }
     if (req.method === 'POST' && url.pathname === '/api/action') {
       const action = await readJson(req);
       if (isContentAction(action.type)) {
@@ -140,7 +176,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
       const input = await readJson(req);
       if (!bridge?.configured) return sendJson(res, 503, { error: 'DSH Bridge 未配置' });
       const current = repository.getState();
-      const result = await bridge.chat({ text: input.text, context: { projectId: current.project.id, projectTitle: current.project.title, currentRevision: current.project.currentRevision, stage: input.stage || current.ui.stage, pageId: input.pageId || current.ui.activePageId } });
+      const result = await bridge.chat({ text: input.text, context: projectAgentContext(current, { stage: input.stage || current.ui.stage, pageId: input.pageId || current.ui.activePageId }) });
       return sendJson(res, 200, { message: result.message, sessionRef: result.sessionRef ?? null });
     }
     const proposalMatch = url.pathname.match(/^\/api\/proposal\/([^/]+)\/accept$/);

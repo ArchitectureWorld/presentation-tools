@@ -209,8 +209,8 @@ function renderOutline() {
 }
 
 function renderAsset(asset, index) {
-  const preview = asset.dataUrl?.startsWith('data:image')
-    ? `<img src="${escapeAttr(asset.dataUrl)}" alt="${escapeAttr(asset.name || `素材 ${index + 1}`)}">`
+  const preview = asset.id && String(asset.mimeType || asset.type || '').startsWith('image/')
+    ? `<img src="${escapeAttr(`/api/assets/${encodeURIComponent(asset.id)}/content`)}" alt="${escapeAttr(asset.name || `素材 ${index + 1}`)}">`
     : `<div class="empty-state" style="min-height:110px;padding:18px"><div><strong>素材预览</strong><p>当前文件没有可显示的图片预览。</p></div></div>`;
 
   return `
@@ -897,22 +897,19 @@ document.addEventListener('change', async event => {
 
   if (event.target.id === 'asset-upload' && event.target.files?.[0]) {
     const file = event.target.files[0];
-    if (file.size > 8 * 1024 * 1024) {
-      toast('单个素材请控制在 8 MB 以内', true);
+    if (file.size > 20 * 1024 * 1024) {
+      toast('单个素材请控制在 20 MiB 以内', true);
       return;
     }
     const page = activePage();
-    const reader = new FileReader();
-    reader.onerror = () => toast('素材读取失败', true);
-    reader.onload = async () => {
-      const assets = [
-        ...(page.assets || []),
-        { id: `asset_${createBrowserUuidV7()}`, name: file.name, type: file.type, dataUrl: reader.result },
-      ];
-      await action({ type: 'draft.update', pageId: page.id, patch: { assets } });
+    try {
+      setSaveStatus('上传素材中…', true);
+      await api(`/api/assets/ingest?pageId=${encodeURIComponent(page.id)}`, { method: 'POST', headers: { 'content-type': file.type, 'x-file-name': file.name }, body: file });
+      state = await api('/api/state');
+      setSaveStatus('已保存');
       toast('素材已加入本页');
-    };
-    reader.readAsDataURL(file);
+      render();
+    } catch (error) { setSaveStatus('上传失败'); toast(error.message, true); }
   }
 });
 
