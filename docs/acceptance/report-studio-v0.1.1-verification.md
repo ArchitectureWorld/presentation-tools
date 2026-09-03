@@ -55,7 +55,7 @@ npm run verify:all
 
 结果：PASS。
 
-- Root 单元/集成测试：49/49；
+- Root 单元/集成测试：51/51；
 - 标准 Contract Node 测试：8/8；
 - Schema Set SHA-256：`5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc`；
 - 最小 Fixture、完整示例、npm pack 和独立 consumer：PASS；
@@ -64,6 +64,7 @@ npm run verify:all
 - 浏览器：720×900、820×900、1024×768、1366×768、1600×900、1920×1080，PASS；
 - 浏览器控制台错误与水平溢出：0。
 - DSH 入口回归：`conversation.view` 绑定当前 Session，正常标签路径不调用 `window.open()`；HeaderAction 明确标注“独立打开”并在打开前提示边界；独立页显示返回 DSH 主界面的非遮挡提示；Studio 未定义模型或推理等级选择器。
+- 批注历史回归：Proposal 按 `submissionId` 归入对应“第 N 次提交”底部；待确认 Proposal 在“未完成”筛选中保持可见；长批注列表可由“待确认 N”入口重新定位到确认按钮。
 
 ### 发布包隔离安装与启动
 
@@ -90,16 +91,18 @@ npm run smoke:dsh
 - `Report Studio` 标签注册成功；从“对话”切换到该标签后浏览器地址仍为 `/`，没有跳转到独立页；
 - iframe 加载当前 Session，Studio 内部重复 Agent FAB/弹窗不再作为入口，顶部引导使用 DSH 原生对话框；
 - Studio 自有模型选择器数量为 0；
+- 当前待确认 Proposal 显示在对应“第 1 次提交”容器底部；“待确认 1”可将“确认应用”按钮定位到批注滚动区可视范围；
 - 直接访问独立页时显示“当前为 Report Studio 独立工作台……”以及“返回 DSH 主界面”；
 - 浏览器控制台新增错误为 0；
 - 批注生成的不可变 ReviewSubmission 已进入当前 DSH Session，Studio 显示“已投递”，Revision 保持 9，没有绕过 Proposal 直接写入；
-- DSH 重启后重新读取：Revision 9、1 个草案页、3 条批注、1 个 ReviewRound、2 个 ReviewSubmission、0 个 Proposal；
+- DSH 重启后重新读取：Revision 9、1 个草案页、4 条批注、2 个 ReviewRound、3 个 ReviewSubmission、1 个待确认 Proposal；
 - 健康检查返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`。
 
 宿主截图：
 
 - `docs/acceptance/evidence/report-studio-v0.1.1-dsh-shell.png`
 - `docs/acceptance/evidence/report-studio-v0.1.1-standalone-notice.png`
+- `docs/acceptance/evidence/report-studio-v0.1.1-review-history-grouped.png`
 
 真实 Agent 闭环存在一个宿主环境边界：当前 Session 的 DSH 模型请求连续重试 5 次后返回 `TRANSPORT / fetch failed`。因此本次真实宿主已证明 Prompt bridge 投递和“不直接改 Revision”，但没有由真实模型生成 Proposal。Proposal 创建、人工确认后才产生新 Revision、刷新与重启持久化的产品逻辑由自动化 E2E 覆盖并通过；真实模型端闭环需在 DSH Provider 传输恢复后复验，不把该外部传输失败误报为 Report Studio 通过。
 
@@ -107,8 +110,8 @@ npm run smoke:dsh
 
 ```text
 dist/architectureworld-report-studio-dsh-0.1.1.tgz
-sizeBytes: 60483
-sha256: 4E1478B0948659C248FBEFDE529E0BBAB209AFEFFDB2F609C844EB7A233BE526
+sizeBytes: 61618
+sha256: 87D0571C3FC55787BD8C97A2C19E7B21E5656AEFFFFC31170BC117BE100A3338
 files: 36
 ```
 

@@ -5,6 +5,7 @@ let selectedRoundId = null;
 let commentFilter = 'all';
 let toastTimer = null;
 let migration = null;
+const revealedProposalIds = new Set();
 
 const query = selector => document.querySelector(selector);
 const queryAll = selector => [...document.querySelectorAll(selector)];
@@ -357,9 +358,10 @@ function submissionHtml(submission) {
 
 function proposalHtml(proposal) {
   const stale = proposal.status === 'pending' && proposal.baseRevision !== state.project.currentRevision;
+  const statusLabel = stale ? '已过期' : proposal.status === 'pending' ? '待确认' : proposal.status === 'accepted' ? '已应用' : proposal.status;
   return `
-    <article class="proposal-card">
-      <header><strong>Agent Proposal</strong><span class="batch-status batch-status-review">${escapeHtml(proposal.status)}</span></header>
+    <article class="proposal-card ${proposal.status === 'accepted' ? 'proposal-card-accepted' : ''}" data-proposal-id="${escapeAttr(proposal.id)}" data-proposal-status="${escapeAttr(stale ? 'stale' : proposal.status)}">
+      <header><strong>Agent 修改建议</strong><span class="batch-status ${proposal.status === 'accepted' ? 'batch-status-completed' : 'batch-status-review'}">${escapeHtml(statusLabel)}</span></header>
       <p>${escapeHtml(proposal.message || 'Agent 已返回结构化修改建议。')}</p>
       <details><summary>查看 Command</summary><pre>${escapeHtml(JSON.stringify(proposal.commands, null, 2))}</pre></details>
       <small class="proposal-revision">基于 Revision ${proposal.baseRevision}${stale ? ' · 当前项目已前进，不能应用' : ''}</small>
@@ -368,6 +370,41 @@ function proposalHtml(proposal) {
         : ''}
     </article>
   `;
+}
+
+function proposalVisibleForFilter(proposal) {
+  if (proposal.status === 'pending') return true;
+  if (commentFilter === 'all') return true;
+  if (commentFilter === 'unfinished') return proposal.status !== 'accepted';
+  return proposal.status === 'accepted';
+}
+
+function submissionVisibleForFilter(submission, proposal) {
+  if (commentFilter === 'all') return true;
+  if (proposal) return proposalVisibleForFilter(proposal);
+  const unfinished = ['pending_dispatch', 'dispatched', 'dispatch_failed', 'proposal_created', 'stale'].includes(submission.status);
+  return commentFilter === 'unfinished' ? unfinished : submission.status === 'accepted';
+}
+
+function submissionGroupHtml(submission, proposal) {
+  return `
+    <section class="submission-group" data-submission-id="${escapeAttr(submission.id)}">
+      ${submissionHtml(submission)}
+      ${proposal ? proposalHtml(proposal) : ''}
+    </section>
+  `;
+}
+
+function revealProposal(proposalId, force = false) {
+  if (!proposalId || (!force && revealedProposalIds.has(proposalId))) return;
+  revealedProposalIds.add(proposalId);
+  window.requestAnimationFrame(() => {
+    const proposal = query(`[data-proposal-id="${proposalId}"]`);
+    if (!proposal) return;
+    proposal.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    proposal.classList.toggle('proposal-revealed', true);
+    window.setTimeout(() => proposal.classList.toggle('proposal-revealed', false), 1600);
+  });
 }
 
 function batchStats(annotations) {
@@ -385,9 +422,16 @@ function renderAnnotations() {
   const annotations = state.annotations.filter(annotation => annotation.scopeKey === scopeKey);
   const visibleAnnotations = filteredAnnotations(annotations);
   const unfinishedCount = annotations.filter(annotation => annotation.resolution === 'open').length;
+  const scopeRoundIds = new Set(scopeRounds.map(round => round.id));
+  const pendingProposals = state.proposals.filter(proposal => scopeRoundIds.has(proposal.reviewRoundId) && proposal.status === 'pending');
+  const newestPendingProposal = pendingProposals.at(-1) ?? null;
 
   query('#scope-label').textContent = currentScopeLabel();
   query('#annotation-count').textContent = unfinishedCount;
+  const proposalAttention = query('#proposal-attention');
+  proposalAttention.hidden = pendingProposals.length === 0;
+  proposalAttention.textContent = `待确认 ${pendingProposals.length}`;
+  proposalAttention.dataset.focusProposal = newestPendingProposal?.id ?? '';
   query('#annotation-target').textContent = selectedTarget
     ? `已定位：${selectedTarget.label}`
     : `未选择对象，将批注${currentScopeLabel()}`;
@@ -416,13 +460,19 @@ function renderAnnotations() {
   for (const round of scopeRounds.slice().reverse()) {
     const roundAnnotations = annotations.filter(annotation => annotation.reviewRoundId === round.id);
     const visibleRoundAnnotations = visibleAnnotations.filter(annotation => annotation.reviewRoundId === round.id);
-    if (commentFilter !== 'all' && !visibleRoundAnnotations.length) continue;
-
-    const submissions = state.reviewSubmissions.filter(submission => submission.reviewRoundId === round.id);
+    const submissions = state.reviewSubmissions
+      .filter(submission => submission.reviewRoundId === round.id)
+      .sort((left, right) => left.number - right.number);
     const proposals = state.proposals.filter(proposal => proposal.reviewRoundId === round.id);
+    const proposalsBySubmission = new Map(proposals.map(proposal => [proposal.submissionId, proposal]));
+    const visibleSubmissionGroups = submissions
+      .map(submission => ({ submission, proposal: proposalsBySubmission.get(submission.id) ?? null }))
+      .filter(({ submission, proposal }) => submissionVisibleForFilter(submission, proposal));
+    const orphanProposals = proposals.filter(proposal => !submissions.some(submission => submission.id === proposal.submissionId) && proposalVisibleForFilter(proposal));
     const pendingDrafts = roundAnnotations.filter(annotation => annotation.lifecycle === 'draft' && annotation.resolution === 'open');
     const stats = batchStats(roundAnnotations);
     const completed = stats.unfinished === 0 && roundAnnotations.length > 0;
+    if (commentFilter !== 'all' && !visibleRoundAnnotations.length && !visibleSubmissionGroups.length && !orphanProposals.length) continue;
 
     html.push(`
       <section class="comment-batch">
@@ -440,14 +490,15 @@ function renderAnnotations() {
         </header>
         <div class="comment-batch-body">
           ${visibleRoundAnnotations.map(annotationHtml).join('') || '<div class="empty-comments">当前筛选下没有批注。</div>'}
-          ${commentFilter === 'all' ? submissions.map(submissionHtml).join('') : ''}
-          ${commentFilter === 'all' ? proposals.map(proposalHtml).join('') : ''}
+          ${visibleSubmissionGroups.map(({ submission, proposal }) => submissionGroupHtml(submission, proposal)).join('')}
+          ${orphanProposals.map(proposal => `<section class="submission-group submission-group-orphan"><small>未找到对应的提交记录</small>${proposalHtml(proposal)}</section>`).join('')}
         </div>
       </section>
     `);
   }
 
   query('#review-history').innerHTML = html.join('') || '<div class="empty-comments">当前作用域在此筛选下没有批注。</div>';
+  if (newestPendingProposal) revealProposal(newestPendingProposal.id);
 }
 
 function renderAgent() {
@@ -563,6 +614,12 @@ document.addEventListener('click', async event => {
   if (filter) {
     commentFilter = filter.dataset.filter;
     renderAnnotations();
+    return;
+  }
+
+  const proposalAttention = event.target.closest('[data-focus-proposal]');
+  if (proposalAttention?.dataset.focusProposal) {
+    revealProposal(proposalAttention.dataset.focusProposal, true);
     return;
   }
 

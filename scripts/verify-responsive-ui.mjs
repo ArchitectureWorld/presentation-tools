@@ -236,6 +236,43 @@ async function main() {
       fetch(`${baseUrl}/api/state`).then(response => response.json()),
       fetch(`${baseUrl}/api/health`).then(response => response.json()),
     ]);
+    const visualRoundId = 'review_round_visual';
+    const visualSubmissionId = 'review_submission_visual';
+    const visualCreatedAt = '2026-09-03T08:00:00.000Z';
+    const visualAnnotations = Array.from({ length: 16 }, (_, index) => ({
+      id: `annotation_visual_${index + 1}`,
+      scopeKey: 'outline:root',
+      reviewRoundId: visualRoundId,
+      target: { type: 'scope', id: 'outline:root', label: '整份大纲' },
+      instruction: `用于验证长批注列表中 Proposal 可发现性的批注 ${index + 1}`,
+      lifecycle: 'submitted',
+      resolution: 'open',
+      version: 1,
+      createdAgainstRevision: seededState.project.currentRevision,
+      createdAt: visualCreatedAt,
+      updatedAt: visualCreatedAt,
+    }));
+    seededState.annotations.push(...visualAnnotations);
+    seededState.reviewRounds.push({ id: visualRoundId, scopeKey: 'outline:root', status: 'open', createdAt: visualCreatedAt, updatedAt: visualCreatedAt });
+    seededState.reviewSubmissions.push({
+      id: visualSubmissionId,
+      reviewRoundId: visualRoundId,
+      number: 1,
+      baseRevision: seededState.project.currentRevision,
+      status: 'proposal_created',
+      annotations: visualAnnotations,
+      createdAt: visualCreatedAt,
+    });
+    seededState.proposals.push({
+      id: 'proposal_visual',
+      submissionId: visualSubmissionId,
+      reviewRoundId: visualRoundId,
+      baseRevision: seededState.project.currentRevision,
+      status: 'pending',
+      message: '长批注列表中的待确认修改建议',
+      commands: [],
+      createdAt: visualCreatedAt,
+    });
     const fetchStub = `
       <script>
         (() => {
@@ -283,6 +320,12 @@ async function main() {
 
       await cdp.evaluate(`document.querySelector('[data-stage="outline"]').click()`);
       await waitFor(cdp, `document.querySelector('[data-stage="outline"]').classList.contains('active')`, '大纲阶段切换');
+      await cdp.evaluate(`document.querySelector('#proposal-attention').click()`);
+      await waitFor(cdp, `(() => {
+        const region = document.querySelector('.comment-scroll-region').getBoundingClientRect();
+        const button = document.querySelector('[data-proposal-id="proposal_visual"] [data-accept-proposal]')?.getBoundingClientRect();
+        return Boolean(button && button.top >= region.top && button.bottom <= region.bottom);
+      })()`, `${viewport.name} Proposal 确认按钮进入可视范围`);
 
       const outlineMetrics = await cdp.evaluate(`(() => {
         const body = document.body;
@@ -290,6 +333,10 @@ async function main() {
         const stage = document.querySelector('.stage-workspace').getBoundingClientRect();
         const panel = document.querySelector('.comment-panel').getBoundingClientRect();
         const topbar = document.querySelector('.topbar').getBoundingClientRect();
+        const scrollRegion = document.querySelector('.comment-scroll-region').getBoundingClientRect();
+        const proposal = document.querySelector('[data-submission-id="${visualSubmissionId}"] [data-proposal-id="proposal_visual"]');
+        const proposalButton = proposal?.querySelector('[data-accept-proposal]');
+        const proposalButtonRect = proposalButton?.getBoundingClientRect();
         return {
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
@@ -300,6 +347,9 @@ async function main() {
           topbarHeight: topbar.height,
           colorScheme: getComputedStyle(document.documentElement).colorScheme,
           background: getComputedStyle(body).backgroundImage,
+          proposalGrouped: Boolean(proposal),
+          proposalAttentionVisible: !document.querySelector('#proposal-attention').hidden,
+          proposalButtonVisible: Boolean(proposalButtonRect && proposalButtonRect.top >= scrollRegion.top && proposalButtonRect.bottom <= scrollRegion.bottom),
         };
       })()`);
 
@@ -308,6 +358,9 @@ async function main() {
       assert.ok(outlineMetrics.panelWidth >= 275, `${viewport.name} 批注栏过窄`);
       assert.equal(outlineMetrics.colorScheme, 'dark');
       assert.match(outlineMetrics.background, /gradient/i);
+      assert.equal(outlineMetrics.proposalGrouped, true, `${viewport.name} Proposal 未归入对应提交`);
+      assert.equal(outlineMetrics.proposalAttentionVisible, true, `${viewport.name} 未显示待确认提示`);
+      assert.equal(outlineMetrics.proposalButtonVisible, true, `${viewport.name} 待确认按钮未进入批注滚动区可视范围`);
 
       const outlineShot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
       await writeFile(join(screenshotDir, `${viewport.name}-outline.png`), Buffer.from(outlineShot.data, 'base64'));
@@ -331,7 +384,7 @@ async function main() {
       await writeFile(join(screenshotDir, `${viewport.name}-draft.png`), Buffer.from(draftShot.data, 'base64'));
 
       await clickCenter(cdp, '#agent-fab .agent-orb-image');
-      await waitFor(cdp, `!document.querySelector('#agent-modal').hidden`, 'Agent 弹窗打开');
+      await waitFor(cdp, `!document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗打开`);
       const agentState = await cdp.evaluate(`(() => ({
         status: document.querySelector('#agent-status').textContent.trim(),
         modalWidth: document.querySelector('.agent-chat-card').getBoundingClientRect().width,
@@ -345,7 +398,7 @@ async function main() {
       await writeFile(join(screenshotDir, `${viewport.name}-agent.png`), Buffer.from(agentShot.data, 'base64'));
 
       await clickCenter(cdp, '#agent-close');
-      await waitFor(cdp, `document.querySelector('#agent-modal').hidden`, 'Agent 弹窗关闭');
+      await waitFor(cdp, `document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗关闭`);
       results.push({ viewport: viewport.name, outlineMetrics, draftMetrics, agentState });
     }
 
