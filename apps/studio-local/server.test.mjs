@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { createRepository } from './repository.mjs';
 import { createStudioServer } from './server.mjs';
 
+const png = (width = 1, height = 1) => Buffer.from([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,(width >>> 24)&255,(width >>> 16)&255,(width >>> 8)&255,width&255,(height >>> 24)&255,(height >>> 16)&255,(height >>> 8)&255,height&255,8,2,0,0,0]);
+
 test('repository persists state across reload', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-repo-'));
   try {
@@ -57,8 +59,7 @@ test('controlled asset ingestion stores binary outside state and serves only ref
     const base = `http://127.0.0.1:${app.port}`;
     let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'图片页', baseRevision:0 }) }).then(r=>r.json());
     state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'draft.ensurePage', outlineNodeId:state.outline[0].id, baseRevision:state.project.currentRevision }) }).then(r=>r.json());
-    const png = Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0]);
-    const upload = await fetch(`${base}/api/assets/ingest?pageId=${encodeURIComponent(state.pages[0].id)}`, { method:'POST', headers:{'content-type':'image/png','x-file-name':'preview.png'}, body:png });
+    const upload = await fetch(`${base}/api/assets/ingest?pageId=${encodeURIComponent(state.pages[0].id)}`, { method:'POST', headers:{'content-type':'image/png','x-file-name':'preview.png'}, body:png() });
     const uploadText = await upload.text();
     assert.equal(upload.status, 200, uploadText);
     const asset = JSON.parse(uploadText);
@@ -66,8 +67,38 @@ test('controlled asset ingestion stores binary outside state and serves only ref
     assert.equal(JSON.stringify(state).includes('dataUrl'), false);
     assert.equal(JSON.stringify(state).includes('base64'), false);
     assert.equal(state.pages[0].assets[0].objectRef.sha256, asset.objectRef.sha256);
+    assert.equal(state.pages[0].assets[0].widthPx, 1);
+    assert.equal(state.pages[0].assets[0].heightPx, 1);
     assert.equal((await fetch(`${base}/api/assets/${asset.assetId}/content`)).status, 200);
     assert.equal((await fetch(`${base}/api/assets/not-current/content`)).status, 404);
+  } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
+});
+
+test('asset ingestion rejects truncated, zero-size and implausibly large image dimensions', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-image-validation-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'图片页', baseRevision:0 }) }).then(r=>r.json());
+    state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'draft.ensurePage', outlineNodeId:state.outline[0].id, baseRevision:state.project.currentRevision }) }).then(r=>r.json());
+    for (const bytes of [png().subarray(0, 12), png(0, 1), png(20000, 20000)]) {
+      const response = await fetch(`${base}/api/assets/ingest?pageId=${state.pages[0].id}`, { method:'POST', headers:{'content-type':'image/png','x-file-name':'bad.png'}, body:bytes });
+      assert.equal(response.status, 400, await response.text());
+    }
+    const mismatch = await fetch(`${base}/api/assets/ingest?pageId=${state.pages[0].id}`, { method:'POST', headers:{'content-type':'image/jpeg','x-file-name':'mismatch.jpg'}, body:png() });
+    assert.equal(mismatch.status, 400);
+  } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
+});
+
+test('HTTP draft updates cannot publish new inline Data URLs', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-inline-reject-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'页面', baseRevision:0 }) }).then(r=>r.json());
+    state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'draft.ensurePage', outlineNodeId:state.outline[0].id, baseRevision:state.project.currentRevision }) }).then(r=>r.json());
+    const response = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'draft.update', pageId:state.pages[0].id, baseRevision:state.project.currentRevision, patch:{ assets:[{ id:'asset_inline', dataUrl:'data:image/png;base64,AAAA' }] } }) });
+    assert.equal(response.status, 400, await response.text());
   } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
 });
 

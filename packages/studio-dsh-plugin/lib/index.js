@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createStudioDshRuntime } from './runtime.js'
 import { errorPayload } from '../vendor/packages/studio-contracts/index.mjs'
 import { createStandardProjectService } from '../vendor/apps/studio-local/standard-project.mjs'
+import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/asset-service.mjs'
 
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt']
@@ -179,6 +180,14 @@ function createRoute(runtime) {
         if (request.method === 'GET' && url.pathname === '/report-studio/api/state') {
           return sendJson(response, 200, await runtime.getState(sessionId))
         }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/assets/ingest') {
+          const pageId = url.searchParams.get('pageId')
+          const mimeType = String(request.headers?.['content-type'] ?? '').split(';', 1)[0].toLowerCase()
+          const originalFileName = String(request.headers?.['x-file-name'] ?? 'upload').replace(/[\\/\0]/g, '_')
+          return sendJson(response, 200, await ingestAsset({ repository, request, pageId, mimeType, originalFileName }))
+        }
+        const contentMatch = url.pathname.match(/^\/report-studio\/api\/assets\/([^/]+)\/content$/)
+        if (request.method === 'GET' && contentMatch) return await serveReferencedAsset({ repository, assetId: decodeURIComponent(contentMatch[1]), response })
         if (request.method === 'POST' && url.pathname === '/report-studio/api/action') {
           return sendJson(response, 200, await runtime.executeAction(sessionId, await readJson(request)))
         }

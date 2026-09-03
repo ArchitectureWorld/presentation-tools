@@ -11,6 +11,7 @@ import {
   submitReviewRound,
 } from '../vendor/packages/studio-core/index.mjs'
 import { ERROR_CODES, StudioError } from '../vendor/packages/studio-contracts/index.mjs'
+import { projectAgentContext } from '../vendor/apps/studio-local/agent-context.mjs'
 
 const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
 const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))
@@ -163,12 +164,11 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
       }, 409)
     }
     const snapshot = await repository.getSnapshotAt(submission.baseRevision)
+    const projection = projectAgentContext(snapshot, { stage: state.ui?.stage, pageId: state.ui?.activePageId })
     return {
       contractVersion: 'report-studio.v0.1.1',
       sessionId: id,
-      project: snapshot.project,
-      outline: snapshot.outline,
-      pages: snapshot.pages,
+      ...projection,
       submission: structuredClone(submission),
       annotations: structuredClone(submission.annotations),
       writableCommands: [

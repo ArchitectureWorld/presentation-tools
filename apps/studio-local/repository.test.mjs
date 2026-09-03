@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, open as openFile, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -53,12 +53,13 @@ test('content transaction persists an immutable snapshot that reloads through Pr
   })
 })
 
-test('content-addressed blobs stream 20 MiB once and round-trip their descriptor and bytes', async () => {
+test('content-addressed blobs stream multi-chunk 20 MiB once across revisions without growing snapshots', async () => {
   await withRepository(async ({ dir, repository }) => {
     const bytes = Buffer.alloc(20 * 1024 * 1024, 0x5a)
     const expectedHash = createHash('sha256').update(bytes).digest('hex')
-    const first = await repository.putBlob(Readable.from([bytes]), { mimeType: 'image/png', originalFileName: 'large.png' })
-    const second = await repository.putBlob(Readable.from([bytes]), { mimeType: 'image/png', originalFileName: 'large.png' })
+    const chunks = () => Readable.from(Array.from({ length: 80 }, (_, index) => bytes.subarray(index * 262144, (index + 1) * 262144)))
+    const first = await repository.putBlob(chunks(), { mimeType: 'image/png', originalFileName: 'large.png' })
+    const second = await repository.putBlob(chunks(), { mimeType: 'image/png', originalFileName: 'large.png' })
     assert.deepEqual(second, first)
     assert.equal(first.sha256, expectedHash)
     assert.equal(first.sizeBytes, bytes.length)
@@ -66,13 +67,61 @@ test('content-addressed blobs stream 20 MiB once and round-trip their descriptor
     const stored = await readdir(join(dir, 'objects', 'sha256'))
     assert.equal(stored.filter(name => name === `${expectedHash}.blob`).length, 1)
     assert.equal(stored.some(name => name.includes('base64')), false)
+    let state = await repository.transactContent({ baseRevision: 0, source: 'human' }, state => {
+      state = executeAction(state, { type: 'outline.add', parentId: null, title: '大图页' }).state
+      state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
+      state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000099', name: 'large.png', mimeType: 'image/png', objectRef: first, sizeBytes: first.sizeBytes, sha256: first.sha256 }]
+      return state
+    })
+    state = await repository.transactContent({ baseRevision: state.project.currentRevision, source: 'human' }, value => executeAction(value, { type: 'project.rename', title: '第二个 Revision' }).state)
+    const snapshots = await Promise.all([repository.getSnapshotAt(1), repository.getSnapshotAt(2)])
+    assert.ok(snapshots.every(snapshot => Buffer.byteLength(JSON.stringify(snapshot)) < 100 * 1024))
+    assert.ok(snapshots.every(snapshot => !JSON.stringify(snapshot).match(/dataUrl|dataBase64|[A-Za-z0-9+/]{4096}/)))
+  })
+})
+
+test('verifyBlob rejects a same-size on-disk corruption before it can be opened', async () => {
+  await withRepository(async ({ dir, repository }) => {
+    const descriptor = await repository.putBlob(Readable.from([Buffer.from('verified bytes')]), { mimeType: 'image/png', originalFileName: 'verified.png' })
+    await writeFile(join(dir, 'objects', 'sha256', `${descriptor.sha256}.blob`), Buffer.from('corrupted bytes'))
+    await assert.rejects(repository.verifyBlob(descriptor), error => error.code === 'repository_integrity_error')
+    await assert.rejects(repository.openBlob(descriptor), error => error.code === 'repository_integrity_error')
+  })
+})
+
+test('content-addressed Blob handles partial file writes without publishing a truncated file', async () => {
+  const partialFileOpen = async (path, flags) => {
+    const handle = await openFile(path, flags)
+    if (!String(path).endsWith('.blob.tmp')) return handle
+    return Object.assign(Object.create(handle), {
+      async write(buffer, offset, length, position) {
+        return handle.write(buffer, offset, Math.min(3, length), position)
+      },
+    })
+  }
+  await withRepository(async ({ repository }) => {
+    const bytes = Buffer.from('a partial write must still retain every byte')
+    const descriptor = await repository.putBlob(Readable.from([bytes]), { mimeType: 'image/png', originalFileName: 'partial.png' })
+    assert.deepEqual(Buffer.concat(await Array.fromAsync(await repository.openBlob(descriptor))), bytes)
+  }, { fileOpen: partialFileOpen })
+})
+
+test('content publication rejects new Data URL and base64 asset fields', async () => {
+  await withRepository(async ({ repository }) => {
+    await assert.rejects(repository.transactContent({ baseRevision: 0, source: 'human' }, state => {
+      state = executeAction(state, { type: 'outline.add', parentId: null, title: '拒绝内联二进制' }).state
+      state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
+      state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000098', dataUrl: 'data:image/png;base64,AAAA' }]
+      return state
+    }), error => error.code === 'invalid_command')
+    assert.equal(repository.getState().project.currentRevision, 0)
   })
 })
 
 test('legacy page Data URLs remain readable until explicit migration replaces them with ObjectRefs', async () => {
   await withRepository(async ({ repository }) => {
     const base = repository.getState().project.currentRevision
-    await repository.transactContent({ baseRevision: base }, state => {
+    await repository.transactContent({ baseRevision: base, allowLegacyDataUrl: true }, state => {
       state = executeAction(state, { type: 'outline.add', parentId: null, title: '旧页面' }).state
       state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
       state.pages[0].assets = [{ id: 'asset_01993e40-0000-7000-8000-000000000002', name: 'old.png', type: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }]

@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import {
   REQUIRED_DIRECTORIES,
   SCHEMA_IDS,
@@ -238,12 +239,6 @@ const EXTENSION_BY_MIME = Object.freeze({
   'image/svg+xml': '.svg',
 })
 
-function decodeDataUrl(dataUrl) {
-  const match = /^data:([^;,]+);base64,([a-z0-9+/=\s]+)$/iu.exec(String(dataUrl ?? ''))
-  if (!match) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '素材必须使用带 MIME 类型的 base64 data URL。')
-  return { mimeType: match[1].toLowerCase(), bytes: Buffer.from(match[2].replace(/\s/gu, ''), 'base64') }
-}
-
 function jpegDimensions(bytes) {
   let offset = 2
   while (offset + 8 < bytes.length) {
@@ -286,29 +281,44 @@ function imageDimensions(bytes, mimeType) {
   return null
 }
 
-async function materializePageAssets({ snapshot, documents, projectRoot }) {
+async function blobHeader(openBlob, objectRef, limit = 256 * 1024) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of await openBlob(objectRef)) {
+    const bytes = Buffer.from(chunk)
+    chunks.push(bytes.subarray(0, Math.max(0, limit - size)))
+    size += bytes.length
+    if (size >= limit) break
+  }
+  return Buffer.concat(chunks)
+}
+
+async function materializePageAssets({ snapshot, documents, projectRoot, openBlob }) {
   const manifest = documents['assets/manifest.json']
   const records = new Map((manifest.assets ?? []).map(asset => [asset.assetId, asset]))
   for (const page of snapshot.pages) {
     for (const asset of page.assets ?? []) {
       const preserved = records.get(asset.id) ?? asset.extensionPayload?.standard ?? null
-      if (!asset.dataUrl) {
+      if (!asset.objectRef) {
+        if (asset.dataUrl || asset.dataBase64) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '旧版内联素材必须先迁移为 ObjectRef 后才能导出。', { assetId: asset.id })
         if (!preserved) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '页面素材缺少可导出的文件内容。', { assetId: asset.id })
         continue
       }
-      const { mimeType, bytes } = decodeDataUrl(asset.dataUrl)
+      if (typeof openBlob !== 'function') throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复页面素材需要 Blob 读取器。', { assetId: asset.id })
+      const mimeType = asset.mimeType ?? asset.type
       const extension = EXTENSION_BY_MIME[mimeType]
       if (!extension) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '当前版本不支持导出该素材格式。', { assetId: asset.id, mimeType })
+      const header = await blobHeader(openBlob, asset.objectRef)
       const dimensions = {
         widthPx: asset.widthPx ?? preserved?.metadata?.widthPx,
         heightPx: asset.heightPx ?? preserved?.metadata?.heightPx,
-        ...imageDimensions(bytes, mimeType),
+        ...imageDimensions(header, mimeType),
       }
       if (!dimensions.widthPx || !dimensions.heightPx) {
         throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '无法读取图片尺寸，不能生成可信的标准素材记录。', { assetId: asset.id, mimeType })
       }
       const relativePath = preserved?.relativePath ?? `assets/images/${asset.id}${extension}`
-      await writeBytesWithin(projectRoot, relativePath, bytes)
+      await writeStreamWithin(projectRoot, relativePath, await openBlob(asset.objectRef))
       const createdAt = asset.createdAt ?? preserved?.createdAt ?? snapshot.project.createdAt
       records.set(asset.id, {
         ...clone(preserved ?? {}),
@@ -319,8 +329,8 @@ async function materializePageAssets({ snapshot, documents, projectRoot }) {
         semanticRole: preserved?.semanticRole ?? '页面素材',
         relativePath,
         mimeType,
-        sizeBytes: bytes.length,
-        sha256: createHash('sha256').update(bytes).digest('hex'),
+        sizeBytes: asset.sizeBytes ?? asset.objectRef.sizeBytes,
+        sha256: asset.sha256 ?? asset.objectRef.sha256,
         metadata: { ...clone(preserved?.metadata ?? {}), ...dimensions },
         adoptionStatus: preserved?.adoptionStatus ?? 'adopted',
         origin: clone(preserved?.origin ?? {
@@ -347,6 +357,13 @@ async function writeBytesWithin(projectRoot, relativePath, bytes) {
   await writeFile(target, bytes)
 }
 
+async function writeStreamWithin(projectRoot, relativePath, stream) {
+  const target = resolve(projectRoot, ...relativePath.split('/'))
+  if (target !== projectRoot && !target.startsWith(`${projectRoot}${sep}`)) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目文件路径越界。', { relativePath })
+  await mkdir(resolve(target, '..'), { recursive: true })
+  await pipeline(stream, createWriteStream(target, { flags: 'w' }))
+}
+
 export async function writeStandardProject({ snapshot, exportRoot, openBlob } = {}) {
   assertCanonicalSnapshot(snapshot)
   const root = resolve(exportRoot)
@@ -364,7 +381,7 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
   for (const file of archived?.files ?? []) {
     if (JSON_DOCUMENTS.includes(file.relativePath) || file.relativePath.startsWith('pages/drafts/')) continue
     if (typeof openBlob !== 'function' || !file.objectRef) throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '恢复标准项目文件需要 Blob 读取器。', { relativePath: file.relativePath })
-    await writeBytesWithin(projectRoot, file.relativePath, Buffer.concat(await Array.fromAsync(await openBlob(file.objectRef))))
+    await writeStreamWithin(projectRoot, file.relativePath, await openBlob(file.objectRef))
   }
 
   documents['project.json'].projectId = snapshot.project.id
@@ -374,7 +391,7 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
   documents['pages/manifest.json'].projectId = snapshot.project.id
   documents['source-materials/manifest.json'].projectId = snapshot.project.id
   documents['assets/manifest.json'].projectId = snapshot.project.id
-  await materializePageAssets({ snapshot, documents, projectRoot })
+  await materializePageAssets({ snapshot, documents, projectRoot, openBlob })
   const preservedOutline = new Map((documents['outline.json'].nodes ?? []).map(node => [node.outlineNodeId, node]))
   documents['outline.json'].nodes = flattenOutline(snapshot.outline, preservedOutline)
 

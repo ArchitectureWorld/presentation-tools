@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { appendFile, mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { createInitialState } from '../../packages/studio-core/index.mjs'
@@ -119,12 +119,13 @@ function isUnusedWorkspace(state, currentControl) {
     && state.project.status === initialProject.status
 }
 
-export async function createRepository(dataDir, { faultInjector = () => undefined } = {}) {
+export async function createRepository(dataDir, { faultInjector = () => undefined, fileOpen = open } = {}) {
   const root = resolve(dataDir)
   await mkdir(root, { recursive: true })
   const controlPath = join(root, 'control.json')
   const legacyStatePath = join(root, 'state.json')
   const objectsDirectory = join(root, 'objects', 'sha256')
+  const orphanLogPath = join(root, 'objects', 'orphaned-blobs.jsonl')
   const lockPath = join(root, 'repository.lock')
   await mkdir(objectsDirectory, { recursive: true })
   const lockToken = await acquireLock(lockPath)
@@ -181,7 +182,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     if (!source || typeof source[Symbol.asyncIterator] !== 'function') throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 输入必须是可流式读取的字节流。', undefined, 400)
     if (typeof mimeType !== 'string' || !mimeType || typeof originalFileName !== 'string' || !originalFileName) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 缺少 MIME 类型或原始文件名。', undefined, 400)
     const temporary = join(objectsDirectory, `.${randomUUID()}.blob.tmp`)
-    const handle = await open(temporary, 'wx')
+    const handle = await fileOpen(temporary, 'wx')
     const hash = createHash('sha256')
     let written = 0
     let complete = false
@@ -190,7 +191,12 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
         const bytes = Buffer.from(chunk)
         written += bytes.length
         hash.update(bytes)
-        await handle.write(bytes)
+        let offset = 0
+        while (offset < bytes.length) {
+          const result = await handle.write(bytes, offset, bytes.length - offset, written - bytes.length + offset)
+          if (!result?.bytesWritten) throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 落盘时发生短写入。', undefined, 500)
+          offset += result.bytesWritten
+        }
       }
       await handle.sync()
       complete = true
@@ -204,6 +210,11 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 字节数或 SHA-256 校验失败。', { sizeBytes: written, sha256: digest }, 400)
     }
     const blobPath = join(objectsDirectory, `${digest}.blob`)
+    const staged = await stat(temporary)
+    if (staged.size !== written || await hashBlobFile(temporary) !== digest) {
+      await unlink(temporary).catch(() => undefined)
+      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 暂存文件的字节数或 SHA-256 校验失败。', { sizeBytes: staged.size, sha256: digest }, 500)
+    }
     try { await rename(temporary, blobPath) }
     catch (error) {
       if (!(await pathExists(blobPath))) throw error
@@ -216,14 +227,43 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     return descriptor
   }
 
-  async function openBlob(reference) {
+  async function hashBlobFile(path) {
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(path)) hash.update(chunk)
+    return hash.digest('hex')
+  }
+
+  async function verifyBlob(reference) {
     const sha = String(reference?.sha256 ?? '')
     if (!/^[a-f0-9]{64}$/i.test(sha)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Blob 引用缺少有效 SHA-256。', { reference }, 404)
     const descriptor = JSON.parse(await readFile(join(objectsDirectory, `${sha}.blob.json`), 'utf8'))
     const blobPath = join(objectsDirectory, `${sha}.blob`)
     const info = await stat(blobPath)
-    if (descriptor.sha256 !== sha || descriptor.sizeBytes !== info.size) throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 描述符与字节文件不一致。', { sha256: sha }, 500)
-    return createReadStream(blobPath)
+    if (descriptor.sha256 !== sha || descriptor.sizeBytes !== info.size || await hashBlobFile(blobPath) !== sha) {
+      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 描述符、字节数或 SHA-256 校验失败。', { sha256: sha }, 500)
+    }
+    return descriptor
+  }
+
+  async function openBlob(reference) {
+    const sha = String(reference?.sha256 ?? '')
+    if (!/^[a-f0-9]{64}$/i.test(sha)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Blob 引用缺少有效 SHA-256。', { reference }, 404)
+    await verifyBlob(reference)
+    return createReadStream(join(objectsDirectory, `${sha}.blob`))
+  }
+
+  async function recordOrphanBlob(reference, detail = {}) {
+    await appendFile(orphanLogPath, `${JSON.stringify({ recordedAt: new Date().toISOString(), objectRef: clone(reference), detail: clone(detail) })}\n`, 'utf8')
+  }
+
+  function assertNoNewInlineAssetData(baseState, candidate) {
+    const existing = new Map((baseState.pages ?? []).flatMap(page => (page.assets ?? []).map(asset => [asset.id, { dataUrl: asset.dataUrl, dataBase64: asset.dataBase64 }])))
+    for (const page of candidate.pages ?? []) for (const asset of page.assets ?? []) {
+      for (const field of ['dataUrl', 'dataBase64']) if (Object.hasOwn(asset, field) && asset[field] != null) {
+        const prior = existing.get(asset.id)
+        if (!prior || prior[field] !== asset[field]) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL 或 Base64 页面素材；请使用受控上传或显式迁移。', { assetId: asset.id, field }, 400)
+      }
+    }
   }
 
   async function migrateLegacyAssets() {
@@ -344,6 +384,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       const baseState = await loadState(fresh)
       const candidate = await mutator(clone(baseState))
       if (!candidate || typeof candidate !== 'object') throw new StudioError(ERROR_CODES.INVALID_COMMAND, '内容事务必须返回完整项目状态。')
+      if (!input.allowLegacyDataUrl) assertNoNewInlineAssetData(baseState, candidate)
       const snapshot = canonicalFromState(candidate)
       const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
       const revisionNumber = currentRevision + 1
@@ -409,6 +450,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
 
       const snapshot = clone(importedSnapshot)
       assertCanonicalSnapshot(snapshot)
+      assertNoNewInlineAssetData({ pages: [] }, snapshot)
       const createdAt = new Date().toISOString()
       const candidate = projectStateFromParts({
         snapshot,
@@ -527,6 +569,8 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     getSnapshotAt,
     putBlob,
     openBlob,
+    verifyBlob,
+    recordOrphanBlob,
     migrateLegacyAssets,
     initializeFromStandardProject,
     transactContent,

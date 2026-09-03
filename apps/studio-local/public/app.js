@@ -210,7 +210,7 @@ function renderOutline() {
 
 function renderAsset(asset, index) {
   const preview = asset.id && String(asset.mimeType || asset.type || '').startsWith('image/')
-    ? `<img src="${escapeAttr(`/api/assets/${encodeURIComponent(asset.id)}/content`)}" alt="${escapeAttr(asset.name || `素材 ${index + 1}`)}">`
+    ? `<img src="${escapeAttr(assetContentUrl(asset.id))}" alt="${escapeAttr(asset.name || `素材 ${index + 1}`)}">`
     : `<div class="empty-state" style="min-height:110px;padding:18px"><div><strong>素材预览</strong><p>当前文件没有可显示的图片预览。</p></div></div>`;
 
   return `
@@ -354,6 +354,14 @@ function submissionHtml(submission) {
       </div>
     </div>
   `;
+}
+
+function assetContentUrl(assetId) {
+  const nativePrefix = window.location.pathname.startsWith('/report-studio') ? '/report-studio' : '';
+  const url = new URL(`${nativePrefix}/api/assets/${encodeURIComponent(assetId)}/content`, window.location.origin);
+  const sessionId = new URLSearchParams(window.location.search).get('sessionId');
+  if (nativePrefix && sessionId) url.searchParams.set('sessionId', sessionId);
+  return `${url.pathname}${url.search}`;
 }
 
 function proposalHtml(proposal) {

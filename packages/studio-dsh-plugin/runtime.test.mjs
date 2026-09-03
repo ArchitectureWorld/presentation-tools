@@ -11,6 +11,11 @@ test('native DSH runtime binds isolated Report Studio projects to session ids an
     const runtime = createStudioDshRuntime({ dataRoot: root })
     let state = await runtime.executeAction('session-a', { type: 'outline.add', parentId: null, title: 'DSH 原生接入', baseRevision: 0 })
     const nodeId = state.outline[0].id
+    state = await runtime.executeAction('session-a', { type: 'draft.ensurePage', outlineNodeId: nodeId, baseRevision: state.project.currentRevision })
+    await (await runtime.repositoryFor('session-a')).transactContent({ baseRevision: state.project.currentRevision, source: 'human' }, current => {
+      current.project.extensionPayload = { standardArchive: { files: [{ dataBase64: 'never expose this' }] } }
+      return current
+    })
     state = await runtime.executeAction('session-a', { type: 'annotation.add', scopeKey: 'outline:root', reviewRoundId: null, target: { type: 'outline-node', id: nodeId, label: 'DSH 原生接入' }, instruction: '将标题改为原生 DSH 工作台' })
     const submitted = await runtime.submitReview('session-a', { scopeKey: 'outline:root', reviewRoundId: null })
     assert.match(submitted.dshPrompt.text, /studio_get_context/)
@@ -18,6 +23,11 @@ test('native DSH runtime binds isolated Report Studio projects to session ids an
     const context = await runtime.getContext('session-a', submitted.submission.id)
     assert.equal(context.submission.id, submitted.submission.id)
     assert.equal(context.project.currentRevision, undefined)
+    assert.equal('standardArchive' in context.project, false)
+    assert.equal('pages' in context, false)
+    assert.equal('outline' in context, false)
+    assert.equal(context.page.id, state.pages[0].id)
+    assert.equal(JSON.stringify(context).includes('standardArchive'), false)
     const applied = await runtime.applyCommands('session-a', {
       submissionId: submitted.submission.id,
       idempotencyKey: submitted.submission.idempotencyKey,

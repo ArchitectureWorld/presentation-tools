@@ -53,17 +53,20 @@ test('standard round trip preserves unsupported blocks and managed source bytes'
   }
 })
 
-test('new Studio data-url assets are materialized and declared by both manifests', async () => {
+test('new Studio ObjectRef assets are materialized and declared by both manifests without inline bytes', async () => {
   const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-asset-export-'))
   try {
     const imported = await readStandardProject(fixtureRoot, blobOptions)
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"></svg>')
     const assetId = 'asset_01993e40-0000-7000-8000-000000000001'
+    const sha256 = createHash('sha256').update(svg).digest('hex')
+    testBlobs.set(sha256, svg)
     imported.snapshot.pages[0].assets.push({
       id: assetId,
       name: '新增示意图.svg',
       type: 'image/svg+xml',
-      dataUrl: `data:image/svg+xml;base64,${svg.toString('base64')}`,
+      mimeType: 'image/svg+xml',
+      objectRef: { sha256, sizeBytes: svg.length, mimeType: 'image/svg+xml', originalFileName: '新增示意图.svg' },
     })
 
     const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
