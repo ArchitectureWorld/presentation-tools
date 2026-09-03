@@ -11,6 +11,9 @@ import { executeAction } from '../../packages/studio-core/index.mjs'
 const importedSnapshot = () => ({
   project: {
     id: 'project_01993e40-0000-7000-8000-000000000010',
+    projectId: 'project_01993e40-0000-7000-8000-000000000010',
+    projectRulesId: 'project_rules_01993e40-0000-7000-8000-000000000010',
+    outlineDocumentId: 'outline_01993e40-0000-7000-8000-000000000010',
     title: '导入项目',
     createdAt: '2026-09-03T08:00:00.000Z',
   },

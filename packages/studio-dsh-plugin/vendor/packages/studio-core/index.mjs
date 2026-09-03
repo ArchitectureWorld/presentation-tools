@@ -13,7 +13,7 @@ function contentBlock(page, type, role) {
   return page.contentBlocks.find(block => block.type === type && block.role === role) ?? null;
 }
 
-function synchronizePageCanonical(page, preferLegacy = false) {
+function synchronizePageCanonical(page, preferLegacy = false, explicit = new Set()) {
   page.id ??= page.pageId ?? id('page');
   page.pageId ??= page.id;
   page.draftDocumentId ??= id('draftDocument');
@@ -26,20 +26,20 @@ function synchronizePageCanonical(page, preferLegacy = false) {
     page.contentBlocks.push(heading);
   }
   page.titleBlockId = heading.contentBlockId;
-  if (preferLegacy) heading.content = page.heading ?? heading.content;
+  if (preferLegacy && explicit.has('heading')) heading.content = page.heading;
   page.heading = heading.content;
   let body = contentBlock(page, 'text', 'body');
-  if (page.body) {
+  if (page.body || explicit.has('body')) {
     if (!body) {
       body = { contentBlockId: id('contentBlock'), type: 'text', role: 'body', order: page.contentBlocks.length, content: page.body, sourceRefs: [] };
       page.contentBlocks.push(body);
     }
-    if (preferLegacy) body.content = page.body;
+    if (preferLegacy && explicit.has('body')) body.content = page.body;
     page.body = body.content;
   }
   let list = page.contentBlocks.find(block => block.type === 'list') ?? null;
   const bullets = (page.bullets ?? []).filter(value => String(value).trim());
-  if (preferLegacy && bullets.length) {
+  if (preferLegacy && explicit.has('bullets') && bullets.length) {
     if (!list) {
       list = { contentBlockId: id('contentBlock'), type: 'list', role: 'body', order: page.contentBlocks.length, listStyle: 'unordered', items: [], sourceRefs: [] };
       page.contentBlocks.push(list);
@@ -48,13 +48,13 @@ function synchronizePageCanonical(page, preferLegacy = false) {
       ...(list.items?.[index] ?? {}), listItemId: list.items?.[index]?.listItemId ?? id('listItem'), content: String(value), order: index, sourceRefs: clone(list.items?.[index]?.sourceRefs ?? []),
     }));
   }
-  if (page.script) {
+  if (preferLegacy && explicit.has('script') && !explicit.has('scriptBlocks')) {
     const script = page.scriptBlocks[0] ?? { scriptBlockId: id('scriptBlock'), order: 0, estimatedDurationSeconds: null, sourceRefs: [], referencedContentBlockIds: [heading.contentBlockId], referencedAssetIds: [] };
     if (!page.scriptBlocks.length) page.scriptBlocks.push(script);
-    if (preferLegacy) script.content = page.script;
+    script.content = page.script;
     page.script = script.content;
   }
-  if (preferLegacy && Array.isArray(page.assets)) {
+  if (preferLegacy && explicit.has('assets') && Array.isArray(page.assets)) {
     const preserved = new Map(page.pageAssets.map(link => [link.pageAssetId, link]))
     page.pageAssets = page.assets.map((asset, index) => {
       const { id: legacyId, ...legacy } = clone(asset)
@@ -76,6 +76,7 @@ function synchronizePageCanonical(page, preferLegacy = false) {
   page.scriptBlocks = page.scriptBlocks.sort((a, b) => a.order - b.order).map((block, index) => ({ ...block, order: index }));
   page.assets = page.pageAssets.map(link => ({ ...clone(link), id: link.assetId, assetId: link.assetId }));
   page.bullets = (list?.items ?? []).map(item => item.content);
+  page.script = page.scriptBlocks.map(block => block.content).join('\n\n');
 }
 
 export function createInitialState() {
@@ -118,6 +119,18 @@ function findOutlineContainer(nodes, nodeId) {
     if (found) return found;
   }
   return null;
+}
+
+function normalizeOutlineOrder(nodes, parentOutlineNodeId = null) {
+  nodes.forEach((node, index) => {
+    node.order = index
+    node.parentOutlineNodeId = parentOutlineNodeId
+    normalizeOutlineOrder(node.children ?? [], node.outlineNodeId)
+  })
+}
+
+function normalizePageOrder(pages) {
+  pages.forEach((page, index) => { page.order = index })
 }
 
 function listBlockForPage(page) {
@@ -176,7 +189,9 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       if (!location) throw new Error('未找到大纲节点');
       const removedIds = collectOutlineSubtreeIds(location.nodes[location.index]);
       location.nodes.splice(location.index, 1);
+      normalizeOutlineOrder(next.outline)
       next.pages = next.pages.filter(page => !removedIds.has(page.outlineNodeId));
+      normalizePageOrder(next.pages)
       if (next.ui.activePageId && !next.pages.some(page => page.id === next.ui.activePageId)) next.ui.activePageId = next.pages[0]?.id ?? null;
       break;
     }
@@ -187,6 +202,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       const target = location.index + delta;
       if (!delta || target < 0 || target >= location.nodes.length) return state;
       [location.nodes[location.index], location.nodes[target]] = [location.nodes[target], location.nodes[location.index]];
+      normalizeOutlineOrder(next.outline)
       break;
     }
     case 'draft.ensurePage': {
@@ -194,7 +210,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       if (!node) throw new Error('未找到对应大纲节点');
       let page = next.pages.find(item => item.outlineNodeId === action.outlineNodeId);
       if (!page) {
-        page = { id: id('page'), outlineNodeId: action.outlineNodeId, heading: node.title, body: '', bullets: [''], script: '', assets: [], createdAt: now(), updatedAt: now() };
+        page = { id: id('page'), pageId: null, outlineNodeId: action.outlineNodeId, draftDocumentId: null, titleBlockId: null, order: next.pages.length, heading: node.title, body: '', bullets: [''], script: '', assets: [], createdAt: now(), updatedAt: now() };
         synchronizePageCanonical(page);
         next.pages.push(page);
       }
@@ -211,7 +227,24 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       if ('script' in patch) page.script = String(patch.script ?? '');
       if ('bullets' in patch) page.bullets = Array.isArray(patch.bullets) ? patch.bullets.map(item => String(item)) : [];
       if ('assets' in patch) page.assets = Array.isArray(patch.assets) ? clone(patch.assets) : [];
-      synchronizePageCanonical(page, true);
+      if ('listItems' in patch || 'listBlockId' in patch) {
+        const list = page.contentBlocks.find(block => block.contentBlockId === patch.listBlockId)
+        if (!list || list.type !== 'list' || !Array.isArray(patch.listItems)) throw new Error('未找到对应列表块')
+        const currentIds = new Set(list.items.map(item => item.listItemId))
+        if (patch.listItems.some(item => !currentIds.has(item.listItemId))) throw new Error('列表编辑必须引用现有 listItemId')
+        list.items = clone(patch.listItems).map((item, index) => ({ ...item, order: index }))
+      }
+      if ('scriptBlocks' in patch) {
+        const currentIds = new Set(page.scriptBlocks.map(block => block.scriptBlockId))
+        if (!Array.isArray(patch.scriptBlocks) || patch.scriptBlocks.some(block => !currentIds.has(block.scriptBlockId))) throw new Error('讲解稿编辑必须引用现有 scriptBlockId')
+        page.scriptBlocks = clone(patch.scriptBlocks).map((block, index) => ({ ...block, order: index }))
+      }
+      if ('pageAssets' in patch) {
+        const currentIds = new Set(page.pageAssets.map(asset => asset.pageAssetId))
+        if (!Array.isArray(patch.pageAssets) || patch.pageAssets.some(asset => !currentIds.has(asset.pageAssetId))) throw new Error('素材编辑必须引用现有 pageAssetId')
+        page.pageAssets = clone(patch.pageAssets).map((asset, index) => ({ ...asset, order: index }))
+      }
+      synchronizePageCanonical(page, true, new Set(Object.keys(patch)));
       page.updatedAt = now();
       break;
     }

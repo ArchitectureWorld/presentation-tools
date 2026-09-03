@@ -9,7 +9,6 @@ import {
   SCHEMA_IDS,
   STANDARD_VERSION,
   createMinimalProjectDocuments,
-  createStableId,
   validateProjectDirectoryWithAjv,
 } from '../../contracts/presentation-standard-project/src/index.mjs'
 import { ERROR_CODES, StudioError, assertCanonicalSnapshot } from '../studio-contracts/index.mjs'
@@ -97,7 +96,7 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
       title: documents['project.json'].name,
       createdAt: documents['project.json'].createdAt,
       extensionPayload: {
-        standardArchive: { documents: clone(documents), pageDocuments: clone(pageDocuments), files: archive },
+        standardArchive: { documents: clone(documents), files: archive },
       },
     },
     outline: buildOutline(documents['outline.json'].nodes),
@@ -145,7 +144,6 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
         extensionPayload: {
           standard: {
             manifest: clone(page),
-            draft: clone(draft),
             fieldRefs: {
               headingBlockId: heading?.contentBlockId ?? null,
               bodyBlockId: body?.contentBlockId ?? null,
@@ -187,11 +185,11 @@ function flattenOutline(nodes, preserved, parentId = null, rows = []) {
 function updateDraft(page, projectId) {
   const standard = page.extensionPayload?.standard ?? {}
   const refs = standard.fieldRefs ?? {}
-  const draft = standard.draft ? clone(standard.draft) : {
+  const draft = {
     $schema: SCHEMA_IDS.DraftPageDocument,
     documentType: 'DraftPageDocument',
     standardVersion: STANDARD_VERSION,
-    draftDocumentId: page.draftDocumentId ?? createStableId('draftDocument'),
+    draftDocumentId: page.draftDocumentId,
     projectId,
     pageId: page.id,
     contentBlocks: [],
@@ -200,7 +198,7 @@ function updateDraft(page, projectId) {
   }
   draft.projectId = projectId
   draft.pageId = page.id
-  draft.draftDocumentId = page.draftDocumentId ?? draft.draftDocumentId
+  draft.draftDocumentId = page.draftDocumentId
   if (Array.isArray(page.contentBlocks)) draft.contentBlocks = clone(page.contentBlocks)
   if (Array.isArray(page.scriptBlocks)) draft.scriptBlocks = clone(page.scriptBlocks)
   if (Array.isArray(page.pageAssets)) draft.pageAssets = page.pageAssets.map(link => ({
@@ -213,52 +211,41 @@ function updateDraft(page, projectId) {
   }))
   let heading = draft.contentBlocks.find(block => block.contentBlockId === page.titleBlockId || block.contentBlockId === refs.headingBlockId)
     ?? draft.contentBlocks.find(block => block.type === 'heading' && block.role === 'page_title')
-  if (!heading) {
-    heading = { contentBlockId: createStableId('contentBlock'), type: 'heading', role: 'page_title', order: 0, content: page.heading || '未命名页面', sourceRefs: [] }
-    draft.contentBlocks.push(heading)
-  }
-  heading.content = page.heading || '未命名页面'
+  if (!heading) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少 titleBlockId 所指向的 ContentBlock。', { pageId: page.id, titleBlockId: page.titleBlockId })
+  if (Object.hasOwn(page, 'heading')) heading.content = page.heading
   let body = draft.contentBlocks.find(block => block.contentBlockId === refs.bodyBlockId)
-  if (page.body) {
-    if (!body) {
-      body = { contentBlockId: createStableId('contentBlock'), type: 'text', role: 'body', order: draft.contentBlocks.length, content: page.body, sourceRefs: [] }
-      draft.contentBlocks.push(body)
-    }
+    ?? draft.contentBlocks.find(block => block.type === 'text' && block.role === 'body')
+  if (Object.hasOwn(page, 'body')) {
+    if (!body) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少正文 ContentBlock。', { pageId: page.id })
     body.content = page.body
-  } else if (body) draft.contentBlocks = draft.contentBlocks.filter(block => block !== body)
+  }
   let list = draft.contentBlocks.find(block => block.contentBlockId === refs.listBlockId)
-  const bullets = (page.bullets ?? []).filter(value => String(value).trim())
-  if (bullets.length) {
-    if (!list) {
-      list = { contentBlockId: createStableId('contentBlock'), type: 'list', role: 'body', order: draft.contentBlocks.length, listStyle: 'unordered', items: [], sourceRefs: [] }
-      draft.contentBlocks.push(list)
-    }
+  const bullets = (page.bullets ?? []).map(value => String(value))
+  if (Object.hasOwn(page, 'bullets') && (list || bullets.length)) {
+    if (!list) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少列表 ContentBlock。', { pageId: page.id })
     list.items = bullets.map((content, index) => ({
       ...(list.items?.[index] ?? {}),
-      listItemId: list.items?.[index]?.listItemId ?? createStableId('listItem'),
+      listItemId: list.items?.[index]?.listItemId,
       content,
       order: index,
       sourceRefs: clone(list.items?.[index]?.sourceRefs ?? []),
     }))
-  } else if (list) draft.contentBlocks = draft.contentBlocks.filter(block => block !== list)
+  }
   draft.contentBlocks = draft.contentBlocks.sort((a, b) => a.order - b.order).map((block, index) => ({ ...block, order: index }))
 
   let script = draft.scriptBlocks.find(block => block.scriptBlockId === refs.scriptBlockId) ?? draft.scriptBlocks[0]
   const canonicalScriptText = draft.scriptBlocks.slice().sort((a, b) => a.order - b.order).map(block => block.content).join('\n\n')
-  if (page.script) {
-    if (!script) {
-      script = { scriptBlockId: createStableId('scriptBlock'), order: 0, content: page.script, estimatedDurationSeconds: null, sourceRefs: [], referencedContentBlockIds: [heading.contentBlockId], referencedAssetIds: [] }
-      draft.scriptBlocks.push(script)
-    }
+  if (Object.hasOwn(page, 'script') && (script || page.script)) {
+    if (!script) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Page 缺少讲解稿 ScriptBlock。', { pageId: page.id })
     if (page.script !== canonicalScriptText) script.content = page.script
-  } else if (script) draft.scriptBlocks = draft.scriptBlocks.filter(block => block !== script)
+  }
   draft.scriptBlocks = draft.scriptBlocks.map((block, index) => ({ ...block, order: index }))
 
   if (!Array.isArray(page.pageAssets) || (!page.pageAssets.length && (page.assets?.length ?? 0) > 0)) {
     const preservedPageAssets = new Map((draft.pageAssets ?? []).map(item => [item.assetId, item]))
     draft.pageAssets = (page.assets ?? []).map((asset, index) => ({
       ...clone(preservedPageAssets.get(asset.id) ?? {}),
-      pageAssetId: preservedPageAssets.get(asset.id)?.pageAssetId ?? createStableId('pageAsset'),
+      pageAssetId: preservedPageAssets.get(asset.id)?.pageAssetId,
       assetId: asset.id,
       role: preservedPageAssets.get(asset.id)?.role ?? 'supporting',
       order: index,
@@ -413,6 +400,10 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
     projectSlug,
     name: snapshot.project.title,
     createdAt: snapshot.project.createdAt,
+    ids: {
+      projectRulesId: snapshot.project.projectRulesId,
+      outlineDocumentId: snapshot.project.outlineDocumentId,
+    },
   })
   await mkdir(projectRoot, { recursive: true })
   for (const directory of REQUIRED_DIRECTORIES) await mkdir(join(projectRoot, ...directory.split('/')), { recursive: true })
@@ -423,9 +414,12 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
   }
 
   documents['project.json'].projectId = snapshot.project.id
+  documents['project.json'].projectRulesId = snapshot.project.projectRulesId
   documents['project.json'].name = snapshot.project.title
   documents['rules.json'].projectId = snapshot.project.id
+  documents['rules.json'].projectRulesId = snapshot.project.projectRulesId
   documents['outline.json'].projectId = snapshot.project.id
+  documents['outline.json'].outlineDocumentId = snapshot.project.outlineDocumentId
   documents['pages/manifest.json'].projectId = snapshot.project.id
   documents['source-materials/manifest.json'].projectId = snapshot.project.id
   documents['assets/manifest.json'].projectId = snapshot.project.id
@@ -435,7 +429,7 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
 
   const preservedPages = new Map((documents['pages/manifest.json'].pages ?? []).map(page => [page.pageId, page]))
   const nextPageDocuments = {}
-  documents['pages/manifest.json'].pages = snapshot.pages.map((page, index) => {
+  documents['pages/manifest.json'].pages = [...snapshot.pages].sort((left, right) => left.order - right.order).map(page => {
     const { draft, titleBlockId } = updateDraft(page, snapshot.project.id)
     const draftPath = `pages/drafts/${page.id}.json`
     nextPageDocuments[draftPath] = draft
@@ -444,7 +438,7 @@ export async function writeStandardProject({ snapshot, exportRoot, openBlob } = 
       ...clone(original),
       pageId: page.id,
       outlineNodeId: page.outlineNodeId,
-      order: index,
+      order: page.order,
       titleBlockId,
       draftPath,
       sourceRefs: clone(original.sourceRefs ?? []),

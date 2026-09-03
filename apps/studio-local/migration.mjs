@@ -46,17 +46,17 @@ function mapLegacyState(legacy, migrationMap) {
     if (!value || typeof value !== 'object') return clone(value)
     return { ...clone(value), id: reference(value.id) }
   }
-  function outlineNode(node) {
+  function outlineNode(node, parentOutlineNodeId = null) {
     const nodeId = mapped(node.id, 'outlineNode')
     return {
       ...clone(node),
       id: nodeId,
       outlineNodeId: node.outlineNodeId ? mapped(node.outlineNodeId, 'outlineNode') : nodeId,
-      parentOutlineNodeId: node.parentOutlineNodeId === null || node.parentOutlineNodeId === undefined ? null : reference(node.parentOutlineNodeId),
+      parentOutlineNodeId: node.parentOutlineNodeId === null || node.parentOutlineNodeId === undefined ? parentOutlineNodeId : reference(node.parentOutlineNodeId),
       order: node.order ?? 0,
       sourceRefs: clone(node.sourceRefs ?? []),
       opaqueExtension: clone(node.opaqueExtension ?? null),
-      children: (node.children ?? []).map(outlineNode),
+      children: (node.children ?? []).map(child => outlineNode(child, nodeId)),
     }
   }
 
@@ -145,7 +145,7 @@ function mapLegacyState(legacy, migrationMap) {
   }
 
   mapped(legacy.project.id, 'project')
-  const outline = legacy.outline.map(outlineNode)
+  const outline = legacy.outline.map(node => outlineNode(node))
   for (const page of legacy.pages) {
     mapped(page.id, 'page')
     for (const asset of page.assets ?? []) mapped(asset.id, 'asset')
@@ -192,7 +192,7 @@ function mapLegacyState(legacy, migrationMap) {
     project: {
       ...clone(legacy.project),
       id: reference(legacy.project.id),
-      projectId: canonicalId(legacy.project.projectId, `${legacy.project.id}:projectId`, 'project'),
+      projectId: legacy.project.projectId ? canonicalId(legacy.project.projectId, `${legacy.project.id}:projectId`, 'project') : reference(legacy.project.id),
       projectRulesId: canonicalId(legacy.project.projectRulesId, `${legacy.project.id}:projectRules`, 'projectRules'),
       outlineDocumentId: canonicalId(legacy.project.outlineDocumentId, `${legacy.project.id}:outlineDocument`, 'outlineDocument'),
     },

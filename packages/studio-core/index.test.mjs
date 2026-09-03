@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialState, executeAction, submitReviewRound, createProposalFromAgent, acceptProposal, markSubmissionDispatch, retryReviewSubmission } from './index.mjs';
+import { createStudioId } from '../studio-contracts/index.mjs'
 
 test('outline nodes receive stable ids and draft page keeps source outline id', () => {
   let state = createInitialState();
@@ -95,6 +96,32 @@ test('draft.list.move reorders by list item identity while retaining every ident
   ;({ state } = executeAction(state, { type: 'draft.list.move', pageId, listItemId: originalIds[2], direction: 'up' }))
   const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
   assert.deepEqual(items.map(item => item.listItemId), [originalIds[0], originalIds[2], originalIds[1]])
+})
+
+test('draft.update edits list and script nodes by their stable ids and preserves empty content', () => {
+  let { state, pageId } = stateWithList()
+  ;({ state } = executeAction(state, { type: 'draft.update', pageId, patch: { body: '待清空正文' } }))
+  const page = state.pages[0]
+  const list = page.contentBlocks.find(block => block.type === 'list')
+  const firstScript = { scriptBlockId: createStudioId('scriptBlock'), order: 0, content: '第一段', estimatedDurationSeconds: null, referencedContentBlockIds: [page.titleBlockId], referencedAssetIds: [], sourceRefs: [] }
+  const secondScript = { ...structuredClone(firstScript), scriptBlockId: createStudioId('scriptBlock'), order: 1, content: '第二段' }
+  page.scriptBlocks = [firstScript, secondScript]
+  ;({ state } = executeAction(state, {
+    type: 'draft.update', pageId,
+    patch: {
+      body: '',
+      listBlockId: list.contentBlockId,
+      listItems: [
+        { ...list.items[2], content: '丙已编辑', order: 0 },
+        { ...list.items[0], content: '', order: 1 },
+      ],
+      scriptBlocks: [{ ...firstScript, content: '' }, { ...secondScript, content: '第二段已编辑' }],
+    },
+  }))
+  const updated = state.pages[0]
+  assert.equal(updated.contentBlocks.find(block => block.type === 'text' && block.role === 'body').content, '')
+  assert.deepEqual(updated.contentBlocks.find(block => block.contentBlockId === list.contentBlockId).items.map(item => [item.listItemId, item.content]), [[list.items[2].listItemId, '丙已编辑'], [list.items[0].listItemId, '']])
+  assert.deepEqual(updated.scriptBlocks.map(script => [script.scriptBlockId, script.content]), [[firstScript.scriptBlockId, ''], [secondScript.scriptBlockId, '第二段已编辑']])
 })
 
 test('deleting an outline parent removes descendant pages and repairs active page', () => {

@@ -34,6 +34,8 @@ test('standard fixture imports into the Studio canonical model without changing 
   assert.ok(seen.length > 0)
   assert.equal(JSON.stringify(imported.snapshot).includes('dataBase64'), false)
   assert.equal(JSON.stringify(imported.snapshot).includes('dataUrl'), false)
+  assert.equal(imported.snapshot.project.extensionPayload.standardArchive.pageDocuments, undefined)
+  assert.equal(imported.snapshot.pages[0].extensionPayload.standard.draft, undefined)
   assert.ok(imported.snapshot.project.extensionPayload.standardArchive.files.every(file => file.objectRef?.sha256 && !('dataBase64' in file)))
 })
 
@@ -48,6 +50,8 @@ test('standard round trip preserves unsupported blocks and managed source bytes'
     const draft = JSON.parse(await readFile(join(exported.projectRoot, 'pages', 'drafts', `${imported.snapshot.pages[0].id}.json`), 'utf8'))
     assert.equal(draft.contentBlocks.find(block => block.type === 'text' && block.role === 'body').content, '这是在 Report Studio 中修改后的正文。')
     assert.ok(draft.contentBlocks.some(block => block.type === 'metric_group'), 'unsupported metric block must survive')
+    const tableDraft = JSON.parse(await readFile(join(exported.projectRoot, 'pages', 'drafts', `${imported.snapshot.pages[1].id}.json`), 'utf8'))
+    assert.ok(tableDraft.contentBlocks.some(block => block.type === 'table'), 'unsupported table block must survive')
     const originalCsv = await readFile(new URL('source-materials/data/场地指标.csv', fixtureRoot))
     const exportedCsv = await readFile(join(exported.projectRoot, 'source-materials', 'data', '场地指标.csv'))
     assert.deepEqual(exportedCsv, originalCsv)
@@ -70,6 +74,10 @@ test('new Studio ObjectRef assets are materialized and declared by both manifest
       type: 'image/svg+xml',
       mimeType: 'image/svg+xml',
       objectRef: { sha256, sizeBytes: svg.length, mimeType: 'image/svg+xml', originalFileName: '新增示意图.svg' },
+    })
+    imported.snapshot.pages[0].pageAssets.push({
+      pageAssetId: createStableId('pageAsset'), assetId, role: 'supporting', caption: '',
+      order: imported.snapshot.pages[0].pageAssets.length, sourceRefs: [],
     })
 
     const exported = await writeStandardProject({ snapshot: imported.snapshot, exportRoot: target, openBlob: blobOptions.openBlob })
@@ -110,7 +118,7 @@ test('export omits archived draft files for pages removed in Studio', async () =
   }
 })
 
-test('a fresh Studio project exports as a Contract-valid standard directory', async () => {
+test('standard export rejects a snapshot that lacks persisted canonical identities', async () => {
   const target = await mkdtemp(join(tmpdir(), 'report-studio-standard-fresh-export-'))
   try {
     const snapshot = {
@@ -135,9 +143,10 @@ test('a fresh Studio project exports as a Contract-valid standard directory', as
       }],
     }
 
-    const exported = await writeStandardProject({ snapshot, exportRoot: target })
-    const validation = await validateProjectDirectoryWithAjv(exported.projectRoot, { allowGitKeep: true })
-    assert.equal(validation.valid, true, JSON.stringify(validation.errors, null, 2))
+    await assert.rejects(
+      writeStandardProject({ snapshot, exportRoot: target }),
+      error => error.code === 'invalid_reference',
+    )
   } finally {
     await rm(target, { recursive: true, force: true })
   }
@@ -191,6 +200,40 @@ test('fresh canonical project keeps document and content ids across repeated exp
     assert.deepEqual(secondDraft.contentBlocks.map(block => block.contentBlockId), firstDraft.contentBlocks.map(block => block.contentBlockId))
     assert.deepEqual(secondDraft.scriptBlocks.map(block => block.scriptBlockId), firstDraft.scriptBlocks.map(block => block.scriptBlockId))
     assert.equal(secondDraft.contentBlocks.find(block => block.type === 'text' && block.role === 'body').content, '已编辑正文')
+  } finally {
+    await rm(target, { recursive: true, force: true })
+  }
+})
+
+test('an unedited fresh canonical project exports every persisted formal id deterministically', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'report-studio-canonical-unchanged-'))
+  try {
+    let state = createInitialState()
+    state = executeAction(state, { type: 'outline.add', title: '稳定结构' }).state
+    state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }).state
+    state = executeAction(state, { type: 'draft.update', pageId: state.pages[0].id, patch: { heading: '标题', body: '正文', bullets: ['要点'], script: '讲解稿' } }).state
+    const snapshot = canonicalFromState(state)
+    const first = await writeStandardProject({ snapshot, exportRoot: join(target, 'first') })
+    const second = await writeStandardProject({ snapshot, exportRoot: join(target, 'second') })
+    const read = async result => Object.fromEntries(await Promise.all([
+      'project.json', 'rules.json', 'outline.json', 'pages/manifest.json', `pages/drafts/${snapshot.pages[0].id}.json`,
+    ].map(async path => [path, await readFile(join(result.projectRoot, ...path.split('/')), 'utf8')])))
+    const [firstFiles, secondFiles] = await Promise.all([read(first), read(second)])
+    assert.deepEqual(secondFiles, firstFiles)
+    const project = JSON.parse(firstFiles['project.json'])
+    const rules = JSON.parse(firstFiles['rules.json'])
+    const outline = JSON.parse(firstFiles['outline.json'])
+    const manifest = JSON.parse(firstFiles['pages/manifest.json'])
+    const draft = JSON.parse(firstFiles[`pages/drafts/${snapshot.pages[0].id}.json`])
+    assert.equal(project.projectId, snapshot.project.projectId)
+    assert.equal(rules.projectRulesId, snapshot.project.projectRulesId)
+    assert.equal(outline.outlineDocumentId, snapshot.project.outlineDocumentId)
+    assert.equal(outline.nodes[0].outlineNodeId, snapshot.outline[0].outlineNodeId)
+    assert.equal(manifest.pages[0].pageId, snapshot.pages[0].pageId)
+    assert.equal(draft.draftDocumentId, snapshot.pages[0].draftDocumentId)
+    assert.equal(draft.contentBlocks[0].contentBlockId, snapshot.pages[0].titleBlockId)
+    assert.equal(draft.contentBlocks.find(block => block.type === 'list').items[0].listItemId, snapshot.pages[0].contentBlocks.find(block => block.type === 'list').items[0].listItemId)
+    assert.equal(draft.scriptBlocks[0].scriptBlockId, snapshot.pages[0].scriptBlocks[0].scriptBlockId)
   } finally {
     await rm(target, { recursive: true, force: true })
   }

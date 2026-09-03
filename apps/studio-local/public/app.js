@@ -221,7 +221,7 @@ function renderAsset(asset, index) {
           <strong>${escapeHtml(asset.name || `素材 ${index + 1}`)}</strong>
           <small>${escapeHtml(asset.type || 'image')}</small>
         </div>
-        <button class="small-button" data-remove-asset="${index}" type="button">移出本页</button>
+        <button class="small-button" data-remove-asset="${escapeAttr(asset.pageAssetId || '')}" type="button">移出本页</button>
       </div>
     </article>
   `;
@@ -252,10 +252,14 @@ function renderDraft() {
   const bullets = bulletItems.map((item, index) => `
     <div class="bullet-row">
       <span class="bullet-index">${String(index + 1).padStart(2, '0')}</span>
-      <input data-bullet-index="${index}" value="${escapeAttr(item.content)}" aria-label="第 ${index + 1} 条要点">
+      <input data-bullet-index="${index}" data-list-item-id="${escapeAttr(item.listItemId || '')}" value="${escapeAttr(item.content)}" aria-label="第 ${index + 1} 条要点">
       ${item.listItemId ? `<button class="small-button" data-remove-bullet="${escapeAttr(item.listItemId)}" type="button">移除</button>` : ''}
     </div>
   `).join('');
+  const scripts = page.scriptBlocks?.length
+    ? [...page.scriptBlocks].sort((left, right) => left.order - right.order).map((block, index) => `
+      <textarea data-script-block-id="${escapeAttr(block.scriptBlockId)}" class="draft-textarea" rows="7" aria-label="第 ${index + 1} 段讲解稿">${escapeHtml(block.content)}</textarea>`).join('')
+    : `<textarea id="draft-script" class="draft-textarea" rows="7">${escapeHtml(page.script || '')}</textarea>`;
   const assets = (page.assets || []).map(renderAsset).join('');
 
   element.innerHTML = `
@@ -300,7 +304,7 @@ function renderDraft() {
 
             <div class="field-block">
               <div class="field-heading"><label for="draft-script">讲解稿</label><span>不进入页面展示正文</span></div>
-              <textarea id="draft-script" class="draft-textarea" rows="7">${escapeHtml(page.script || '')}</textarea>
+              ${scripts}
             </div>
 
             <div class="draft-actions"><button id="save-draft" class="primary-button" type="button">保存草案</button></div>
@@ -555,9 +559,15 @@ function render() {
 async function saveDraft() {
   const page = activePage();
   if (!page) return;
-  const bullets = queryAll('[data-bullet-index]')
-    .map(input => input.value)
-    .filter((value, index, list) => value.trim() || list.length === 1);
+  const list = page.contentBlocks?.find(block => block.type === 'list');
+  const listItems = list ? queryAll('[data-list-item-id]').map((input, index) => {
+    const current = list.items.find(item => item.listItemId === input.dataset.listItemId);
+    return { ...current, content: input.value, order: index };
+  }) : null;
+  const scriptBlocks = page.scriptBlocks?.length ? queryAll('[data-script-block-id]').map((input, index) => {
+    const current = page.scriptBlocks.find(block => block.scriptBlockId === input.dataset.scriptBlockId);
+    return { ...current, content: input.value, order: index };
+  }) : null;
 
   await action({
     type: 'draft.update',
@@ -565,9 +575,8 @@ async function saveDraft() {
     patch: {
       heading: query('#draft-heading').value,
       body: query('#draft-body').value,
-      bullets,
-      script: query('#draft-script').value,
-      assets: page.assets || [],
+      ...(list ? { listBlockId: list.contentBlockId, listItems } : {}),
+      ...(scriptBlocks ? { scriptBlocks } : { script: query('#draft-script').value }),
     },
   });
   toast('草案已保存');
@@ -881,8 +890,8 @@ document.addEventListener('click', async event => {
   const removeAsset = event.target.closest('[data-remove-asset]');
   if (removeAsset) {
     const page = activePage();
-    const assets = (page.assets || []).filter((_, index) => index !== Number(removeAsset.dataset.removeAsset));
-    await action({ type: 'draft.update', pageId: page.id, patch: { assets } });
+    const pageAssets = (page.pageAssets || []).filter(asset => asset.pageAssetId !== removeAsset.dataset.removeAsset);
+    await action({ type: 'draft.update', pageId: page.id, patch: { pageAssets } });
     toast('素材已移出本页');
   }
 });

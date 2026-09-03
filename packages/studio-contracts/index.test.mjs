@@ -18,10 +18,13 @@ test('new Studio ids use typed lowercase UUIDv7 values', () => {
 })
 
 test('canonical validation rejects a page whose outline node is missing', () => {
+  const projectId = createStudioId('project')
+  const pageId = createStudioId('page')
+  const titleBlockId = createStudioId('contentBlock')
   const snapshot = {
-    project: { id: createStudioId('project'), title: '孤立页测试', createdAt: '2026-09-03T00:00:00.000Z' },
+    project: { id: projectId, projectId, projectRulesId: createStudioId('projectRules'), outlineDocumentId: createStudioId('outlineDocument'), title: '孤立页测试', createdAt: '2026-09-03T00:00:00.000Z' },
     outline: [],
-    pages: [{ id: createStudioId('page'), outlineNodeId: createStudioId('outlineNode'), heading: '孤立页', body: '', bullets: [], script: '', assets: [] }],
+    pages: [{ id: pageId, pageId, outlineNodeId: createStudioId('outlineNode'), draftDocumentId: createStudioId('draftDocument'), titleBlockId, order: 0, contentBlocks: [{ contentBlockId: titleBlockId, type: 'heading', role: 'page_title', order: 0, content: '孤立页', sourceRefs: [] }], scriptBlocks: [], pageAssets: [] }],
   }
   assert.throws(
     () => assertCanonicalSnapshot(snapshot),
@@ -30,9 +33,10 @@ test('canonical validation rejects a page whose outline node is missing', () => 
 })
 
 test('canonical projection excludes operational and view records', () => {
+  const projectId = createStudioId('project')
   const state = {
     schemaVersion: 'report-studio.v0.1.1',
-    project: { id: createStudioId('project'), title: '分层测试', currentRevision: 3, createdAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T01:00:00.000Z' },
+    project: { id: projectId, projectId, projectRulesId: createStudioId('projectRules'), outlineDocumentId: createStudioId('outlineDocument'), title: '分层测试', currentRevision: 3, createdAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T01:00:00.000Z' },
     outline: [], pages: [], annotations: [{ id: 'annotation_private' }], proposals: [{ id: 'proposal_private' }],
     reviewRounds: [], reviewSubmissions: [], revisions: [], ui: { stage: 'draft', activePageId: null },
   }

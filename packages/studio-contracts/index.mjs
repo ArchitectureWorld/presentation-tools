@@ -1,4 +1,4 @@
-import { createStableId, createUuidV7 } from '../../contracts/presentation-standard-project/src/ids.mjs'
+import { createStableId, createUuidV7, isStableId } from '../../contracts/presentation-standard-project/src/ids.mjs'
 
 export const STUDIO_SCHEMA_VERSION = 'report-studio.v0.1.1'
 export const CONTROL_SCHEMA_VERSION = 'report-studio.control.v0.1.1'
@@ -71,14 +71,44 @@ function collectOutlineIds(nodes, ids) {
 }
 
 export function assertCanonicalSnapshot(snapshot) {
-  if (!snapshot?.project?.id || !Array.isArray(snapshot.outline) || !Array.isArray(snapshot.pages)) {
+  if (!snapshot?.project || !Array.isArray(snapshot.outline) || !Array.isArray(snapshot.pages)) {
     throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Canonical Snapshot 结构无效。')
   }
+  const requiredId = (kind, value, label, details = {}) => {
+    if (!isStableId(kind, value)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, `${label} 缺少有效的稳定 ID。`, { ...details, value: value ?? null })
+    return value
+  }
+  requiredId('project', snapshot.project.id, 'Project')
+  requiredId('project', snapshot.project.projectId, 'Project.projectId')
+  requiredId('projectRules', snapshot.project.projectRulesId, 'Project.projectRulesId')
+  requiredId('outlineDocument', snapshot.project.outlineDocumentId, 'Project.outlineDocumentId')
+  if (snapshot.project.id !== snapshot.project.projectId || typeof snapshot.project.title !== 'string' || typeof snapshot.project.createdAt !== 'string') {
+    throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Project Canonical 字段不完整。')
+  }
   const outlineIds = new Set()
-  collectOutlineIds(snapshot.outline, outlineIds)
+  const outlineNodeIds = new Set()
+  function checkOutline(nodes, parentOutlineNodeId = null) {
+    const orders = new Set()
+    for (const node of nodes) {
+      requiredId('outlineNode', node?.id, 'OutlineNode')
+      requiredId('outlineNode', node?.outlineNodeId, 'OutlineNode.outlineNodeId')
+      if (node.id !== node.outlineNodeId || node.parentOutlineNodeId !== parentOutlineNodeId || !Number.isInteger(node.order) || node.order < 0 || orders.has(node.order) || typeof node.title !== 'string' || !Array.isArray(node.sourceRefs) || !Object.hasOwn(node, 'opaqueExtension')) {
+        throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'OutlineNode Canonical 字段不完整。', { outlineNodeId: node.id })
+      }
+      if (outlineIds.has(node.id) || outlineNodeIds.has(node.outlineNodeId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '大纲节点 ID 重复。', { outlineNodeId: node.id })
+      outlineIds.add(node.id); outlineNodeIds.add(node.outlineNodeId); orders.add(node.order)
+      checkOutline(node.children ?? [], node.outlineNodeId)
+    }
+  }
+  checkOutline(snapshot.outline)
   const pageIds = new Set()
+  const draftIds = new Set(); const blockIds = new Set(); const listItemIds = new Set(); const scriptIds = new Set(); const pageAssetIds = new Set()
   for (const page of snapshot.pages) {
-    if (!page?.id || pageIds.has(page.id)) {
+    requiredId('page', page?.id, 'Page')
+    requiredId('page', page?.pageId, 'Page.pageId')
+    requiredId('draftDocument', page?.draftDocumentId, 'Page.draftDocumentId')
+    requiredId('contentBlock', page?.titleBlockId, 'Page.titleBlockId')
+    if (pageIds.has(page.id) || page.id !== page.pageId || draftIds.has(page.draftDocumentId) || !Number.isInteger(page.order) || page.order < 0 || !Array.isArray(page.contentBlocks) || !Array.isArray(page.scriptBlocks) || !Array.isArray(page.pageAssets)) {
       throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '页面 ID 缺失或重复。', { pageId: page?.id ?? null })
     }
     if (!outlineIds.has(page.outlineNodeId)) {
@@ -87,7 +117,37 @@ export function assertCanonicalSnapshot(snapshot) {
         outlineNodeId: page.outlineNodeId,
       })
     }
-    pageIds.add(page.id)
+    pageIds.add(page.id); draftIds.add(page.draftDocumentId)
+    const blockOrder = new Set(); const pageBlockIds = new Set()
+    for (const block of page.contentBlocks) {
+      requiredId('contentBlock', block?.contentBlockId, 'ContentBlock', { pageId: page.id })
+      if (blockIds.has(block.contentBlockId) || !Number.isInteger(block.order) || block.order < 0 || blockOrder.has(block.order) || typeof block.type !== 'string' || typeof block.role !== 'string' || !Array.isArray(block.sourceRefs)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ContentBlock Canonical 字段不完整。', { pageId: page.id, contentBlockId: block?.contentBlockId ?? null })
+      blockIds.add(block.contentBlockId); pageBlockIds.add(block.contentBlockId); blockOrder.add(block.order)
+      if (block.type === 'list') {
+        if (!Array.isArray(block.items)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'List ContentBlock 缺少 items。', { pageId: page.id, contentBlockId: block.contentBlockId })
+        const itemOrder = new Set()
+        for (const item of block.items) {
+          requiredId('listItem', item?.listItemId, 'ListItem', { pageId: page.id })
+          if (listItemIds.has(item.listItemId) || !Number.isInteger(item.order) || item.order < 0 || itemOrder.has(item.order) || typeof item.content !== 'string' || !Array.isArray(item.sourceRefs)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ListItem Canonical 字段不完整。', { pageId: page.id, listItemId: item?.listItemId ?? null })
+          listItemIds.add(item.listItemId); itemOrder.add(item.order)
+        }
+      }
+    }
+    if (!blockIds.has(page.titleBlockId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Page.titleBlockId 未引用 ContentBlock。', { pageId: page.id, titleBlockId: page.titleBlockId })
+    const scriptOrder = new Set()
+    for (const script of page.scriptBlocks) {
+      requiredId('scriptBlock', script?.scriptBlockId, 'ScriptBlock', { pageId: page.id })
+      if (scriptIds.has(script.scriptBlockId) || !Number.isInteger(script.order) || script.order < 0 || scriptOrder.has(script.order) || typeof script.content !== 'string' || !Array.isArray(script.referencedContentBlockIds) || !Array.isArray(script.referencedAssetIds) || !Array.isArray(script.sourceRefs)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ScriptBlock Canonical 字段不完整。', { pageId: page.id, scriptBlockId: script?.scriptBlockId ?? null })
+      for (const contentBlockId of script.referencedContentBlockIds) if (!pageBlockIds.has(contentBlockId)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'ScriptBlock 引用了不存在的 ContentBlock。', { pageId: page.id, scriptBlockId: script.scriptBlockId, contentBlockId })
+      for (const assetId of script.referencedAssetIds) requiredId('asset', assetId, 'ScriptBlock.referencedAssetId', { pageId: page.id, scriptBlockId: script.scriptBlockId })
+      scriptIds.add(script.scriptBlockId); scriptOrder.add(script.order)
+    }
+    const assetOrder = new Set(); const assetIds = new Set()
+    for (const asset of page.pageAssets) {
+      requiredId('pageAsset', asset?.pageAssetId, 'PageAsset', { pageId: page.id }); requiredId('asset', asset?.assetId, 'PageAsset.assetId', { pageId: page.id })
+      if (pageAssetIds.has(asset.pageAssetId) || !Number.isInteger(asset.order) || asset.order < 0 || assetOrder.has(asset.order) || typeof asset.role !== 'string' || typeof asset.caption !== 'string' || !Array.isArray(asset.sourceRefs)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'PageAsset Canonical 字段不完整。', { pageId: page.id, pageAssetId: asset?.pageAssetId ?? null })
+      pageAssetIds.add(asset.pageAssetId); assetOrder.add(asset.order); assetIds.add(asset.assetId)
+    }
   }
   return snapshot
 }
