@@ -130,6 +130,41 @@ test('ordinary content transactions reject recursive inline binary fields even w
   })
 })
 
+test('opaque extension JSON may use ordinary inline and bytes field names', async () => {
+  await withRepository(async ({ repository }) => {
+    const state = await repository.transactContent({ baseRevision: 0, source: 'human' }, current => {
+      current.project.extensionPayload = {
+        opaqueVendorData: {
+          inline: { label: '普通结构化值' },
+          bytes: { requested: 12, delivered: 8 },
+          binary: false,
+          rawdata: ['分类', '摘要'],
+        },
+      }
+      return current
+    })
+    assert.deepEqual(state.project.extensionPayload.opaqueVendorData.bytes, { requested: 12, delivered: 8 })
+  })
+})
+
+test('iterative guard rejects a deep large Buffer before any JSON serialization', async () => {
+  await withRepository(async ({ repository }) => {
+    const payload = Buffer.alloc(2 * 1024 * 1024, 0x5a)
+    payload.toJSON = () => { throw new Error('must not serialize Buffer') }
+    await assert.rejects(repository.transactContent({ baseRevision: 0, source: 'human' }, current => {
+      const opaqueVendorData = {}
+      let cursor = opaqueVendorData
+      for (let level = 0; level < 4096; level += 1) {
+        cursor.child = {}
+        cursor = cursor.child
+      }
+      cursor.value = payload
+      current.project.extensionPayload = { opaqueVendorData }
+      return current
+    }), error => error.code === 'invalid_command')
+  })
+})
+
 test('legacy page Data URLs remain readable until explicit migration replaces them with ObjectRefs', async () => {
   await withRepository(async ({ repository }) => {
     assert.match(repository.getState().pages[0].assets[0].dataUrl, /^data:/)

@@ -256,34 +256,40 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     await appendFile(orphanLogPath, `${JSON.stringify({ recordedAt: new Date().toISOString(), objectRef: clone(reference), detail: clone(detail) })}\n`, 'utf8')
   }
 
-  function assertNoNewInlineBinary(baseValue, candidateValue, path = '$') {
-    const same = canonicalJson(baseValue) === canonicalJson(candidateValue)
-    const reject = kind => {
-      if (!same) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL、Base64 或内联二进制载荷；请使用受控上传或显式迁移。', { path, kind }, 400)
+  function assertNoNewInlineBinary(baseValue, candidateValue) {
+    const seen = new WeakSet()
+    const queue = [{ base: baseValue, value: candidateValue, path: '$', scope: 'root' }]
+    const reject = (path, kind) => {
+      throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL、Base64 或内联二进制载荷；请使用受控上传或显式迁移。', { path, kind }, 400)
     }
-    if (candidateValue == null) return
-    if (typeof candidateValue === 'string') {
-      if (/^data:/iu.test(candidateValue)) reject('data_url')
-      return
-    }
-    if (Buffer.isBuffer(candidateValue) || ArrayBuffer.isView(candidateValue) || candidateValue instanceof ArrayBuffer) {
-      reject('binary_value')
-      return
-    }
-    if (Array.isArray(candidateValue)) {
-      for (let index = 0; index < candidateValue.length; index += 1) assertNoNewInlineBinary(baseValue?.[index], candidateValue[index], `${path}[${index}]`)
-      return
-    }
-    if (typeof candidateValue !== 'object') return
-    if (candidateValue.type === 'Buffer' && Array.isArray(candidateValue.data)) reject('buffer_object')
-    for (const [key, value] of Object.entries(candidateValue)) {
-      const lower = key.toLowerCase()
-      const baseChild = baseValue && typeof baseValue === 'object' ? baseValue[key] : undefined
-      const inlineField = lower === 'dataurl' || lower === 'data_base64' || lower.endsWith('base64') || ['binary', 'bytes', 'rawdata', 'inline'].includes(lower)
-      if (inlineField && value != null && canonicalJson(baseChild) !== canonicalJson(value)) {
-        throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL、Base64 或内联二进制载荷；请使用受控上传或显式迁移。', { path: `${path}.${key}`, kind: 'inline_field' }, 400)
+    const sameLegacyLeaf = (base, value) => typeof value === 'string' && value === base
+    const base64Bytes = value => typeof value === 'string' && value.length >= 16 && value.length % 4 === 0 && /^[a-z0-9+/]+={0,2}$/iu.test(value)
+    while (queue.length) {
+      const { base, value, path, scope } = queue.pop()
+      if (value == null) continue
+      if (typeof value === 'string') {
+        if (/^data:/iu.test(value) && !sameLegacyLeaf(base, value)) reject(path, 'data_url')
+        continue
       }
-      assertNoNewInlineBinary(baseChild, value, `${path}.${key}`)
+      if (Buffer.isBuffer(value) || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) reject(path, 'binary_value')
+      if (typeof value !== 'object') continue
+      if (seen.has(value)) reject(path, 'cyclic_value')
+      seen.add(value)
+      if (value.type === 'Buffer' && Array.isArray(value.data)) reject(path, 'buffer_object')
+      if (Array.isArray(value)) {
+        for (let index = value.length - 1; index >= 0; index -= 1) queue.push({ base: base?.[index], value: value[index], path: `${path}[${index}]`, scope })
+        continue
+      }
+      for (const key of Object.keys(value).reverse()) {
+        const child = value[key]
+        const baseChild = base && typeof base === 'object' ? base[key] : undefined
+        const lower = key.toLowerCase()
+        const binaryKey = lower === 'dataurl' || lower === 'database64' || lower === 'data_base64'
+        const scopedBytes = (scope === 'page_asset' || scope === 'archive_file') && (lower === 'data' || lower === 'bytes') && base64Bytes(child)
+        if ((binaryKey || scopedBytes) && child != null && !sameLegacyLeaf(baseChild, child)) reject(`${path}.${key}`, binaryKey ? 'binary_field' : 'scoped_base64_bytes')
+        const childScope = key === 'pages' ? 'page' : scope === 'page' && key === 'assets' ? 'page_asset' : scope === 'root' && key === 'project' ? 'project' : scope === 'project' && key === 'extensionPayload' ? 'project_extension' : scope === 'project_extension' && key === 'standardArchive' ? 'standard_archive' : scope === 'standard_archive' && key === 'files' ? 'archive_file' : scope
+        queue.push({ base: baseChild, value: child, path: `${path}.${key}`, scope: childScope })
+      }
     }
   }
 
