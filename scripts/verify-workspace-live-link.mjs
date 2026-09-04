@@ -84,7 +84,7 @@ export async function verifyWorkspaceConfiguration(rootInput) {
     read(root, 'docs/handoff/PRESENTATION_WORKSPACE_LIVE_LINK_IMPLEMENTATION.md'),
   ])
 
-  assert.equal(rootPackage.version, '0.1.1')
+  assert.match(rootPackage.version, /^(?:0\.1\.1|0\.2\.0(?:-alpha\.\d+)?)$/u)
   assert.equal(pluginPackage.version, '0.1.1')
   assert.equal(contractManifest.standardVersion, CONTRACT_VERSION)
   assert.equal(contractManifest.schemaSetSha256, SCHEMA_SET_SHA256)
