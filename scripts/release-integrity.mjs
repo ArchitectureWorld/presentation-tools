@@ -118,6 +118,18 @@ export async function verifyReleaseConfiguration(root) {
     'REPORT_STUDIO_PLUGIN_PACKAGE',
   ]) assertCondition(workflow.includes(command), `workflow is missing ${command}`)
 
+  const reportStudioPythonSetupIndex = workflow.indexOf("      - uses: actions/setup-python@v5\n        with:\n          python-version: '3.12'")
+  const reportStudioPythonInstallIndex = workflow.indexOf('python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0')
+  const reportStudioVerifyAllIndex = workflow.indexOf('npm run verify:all')
+  assertCondition(
+    reportStudioPythonSetupIndex >= 0 && reportStudioPythonSetupIndex < reportStudioVerifyAllIndex,
+    'Report Studio workflow must set up Python 3.12 before verify:all',
+  )
+  assertCondition(
+    reportStudioPythonInstallIndex >= 0 && reportStudioPythonInstallIndex < reportStudioVerifyAllIndex,
+    'Report Studio workflow must install pinned Python Contract dependencies before verify:all',
+  )
+
   const standardWorkflow = await readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8')
   const standardRootInstallIndex = standardWorkflow.indexOf('npm ci --ignore-scripts --no-audit --no-fund')
   const standardVerifyAllIndex = standardWorkflow.indexOf('npm run verify:all')

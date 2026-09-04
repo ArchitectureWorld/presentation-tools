@@ -83,6 +83,44 @@ if (integrity) {
     )
   })
 
+  test('release configuration requires the Report Studio workflow to prepare pinned Python Contract dependencies before verify:all', async t => {
+    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-python-workflow-test-'))
+    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
+      readFile(join(root, 'package.json'), 'utf8'),
+      readFile(join(root, 'package-lock.json'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
+    ])
+    const writeConfiguration = async workflow => {
+      await Promise.all([
+        writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+        writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+        writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), workflow, 'utf8'),
+        writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow, 'utf8'),
+      ])
+    }
+
+    await writeConfiguration(reportStudioWorkflow.replace(
+      /      - uses: actions\/setup-python@v5\r?\n        with:\r?\n          python-version: '3\.12'\r?\n/,
+      '',
+    ))
+    await assert.rejects(
+      integrity.verifyReleaseConfiguration(configurationRoot),
+      /Report Studio workflow must set up Python 3\.12 before verify:all/,
+    )
+
+    await writeConfiguration(reportStudioWorkflow.replace(
+      /^          python -m pip install --disable-pip-version-check --no-input jsonschema==4\.26\.0 referencing==0\.37\.0\r?\n/m,
+      '',
+    ))
+    await assert.rejects(
+      integrity.verifyReleaseConfiguration(configurationRoot),
+      /Report Studio workflow must install pinned Python Contract dependencies before verify:all/,
+    )
+  })
+
   test('smoke package resolution refuses implicit dist or source fallbacks', async () => {
     await assert.rejects(
       integrity.resolveRequiredPluginPackage('', root),

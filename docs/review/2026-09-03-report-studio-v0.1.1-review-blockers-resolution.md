@@ -16,7 +16,7 @@ updated_at: 2026-09-04
 
 | 问题 | 原问题 | 修复与文件范围 | 修复提交 | 自动化证据 | 状态 |
 |---|---|---|---|---|---|
-| P0-01 | clean install 缺 AJV、CI 和 smoke 未固定当前 tarball | 根 lockfile、v0.1.1 workflow、release integrity、fresh package smoke；Standard workflow 在 `verify:all` 前补根 `npm ci` | `627bb7f`, `3fa7312`, pending CI follow-up commit | `1676abd` clean checkout 169/169 + release integrity；Standard workflow root-install RED/GREEN | locally-verified：GitHub 新 run 待记录 |
+| P0-01 | clean install 缺 AJV、CI 和 smoke 未固定当前 tarball | 根 lockfile、v0.1.1 workflow、release integrity、fresh package smoke；Standard workflow 在 `verify:all` 前补根 `npm ci`；Report Studio workflow 补 Python 3.12 与固定合约依赖 | `627bb7f`, `3fa7312`, `32d25c2`, pending CI follow-up commit | `1676abd` clean checkout 169/169 + release integrity；两轮 CI workflow RED/GREEN，最新本地 171/171 | locally-verified：GitHub 新 run 待记录 |
 | P0-02 | 标准项目会跨 projectId 接到既有 Revision 链 | `initializeFromStandardProject()`、非空 Workspace 409、UI 提示 | `d883358` | `standard-project.test.mjs`、server import tests | fixed（代码）；宿主验收待记录 |
 | P0-03 | 附件字节可落入 Canonical / Agent context | Blob ObjectStore、受控 asset API、projection scrub | `7ef4cf5`, `de19cef`, `71294f7`, `7dc05e3` | 20MB、export hash、context scrub tests | fixed（代码）；GitHub 待记录 |
 | P0-04 | Canonical 中存在竞争副本和身份漂移 | Canonical projection、stable IDs、Adapter 轮转 | `18f9d2c`, `a0c8d03`, `b2e9aa9`, `2adca59` | canonical / adapter regression tests | fixed（代码）；GitHub 待记录 |
@@ -51,6 +51,6 @@ updated_at: 2026-09-04
 ## 2026-09-04 CI 跟进
 
 - Draft PR 的 Standard Project run `33848477459` 已确证失败于 `ERR_MODULE_NOT_FOUND: ajv`：它仅执行 Contract 的 `npm ci`，随后在仓库根运行 `verify:all`。修复前新增的 release configuration 回归按预期 RED；修复后要求 Standard workflow 在 `verify:all` 前运行根 `npm ci --ignore-scripts --no-audit --no-fund`，本地 170/170、Contract、E2E、UI、DSH、release gate 均已通过。新的远端 run 是唯一有效的确认来源。
-- 同一批旧 Report Studio v0.1.1 CI (`33848436859` 与 `33848477248`) 另有 Python `referencing` 未安装的失败；该项未混入本次 Standard workflow/AJV 最小修复，仍需单独授权和验证。
+- 同一批旧 Report Studio v0.1.1 CI (`33848436859` 与 `33848477248`) 另有 Python `referencing` 未安装的失败。第二轮回归要求 Report Studio workflow 在 `verify:all` 前通过 `actions/setup-python@v5` 固定 Python 3.12，并精确安装 `jsonschema==4.26.0 referencing==0.37.0`；修复后本地 171/171、Contract、E2E、UI、DSH、release gate 均通过。远端重跑仍是通过所需证据。
 
 详细命令、产物、真实宿主和 CI 结果写入 `.superpowers/sdd/2026-09-03-report-studio-v0.1.1-stabilization/task-10-report.md`；最终运维入口写入 handoff。
