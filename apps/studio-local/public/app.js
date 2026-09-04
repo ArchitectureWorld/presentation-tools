@@ -6,6 +6,9 @@ let commentFilter = 'all';
 let toastTimer = null;
 let migration = null;
 const revealedProposalIds = new Set();
+let draftEditBuffer = null;
+let draftAutosaveTimer = null;
+const DRAFT_AUTOSAVE_DELAY = 500;
 
 const query = selector => document.querySelector(selector);
 const queryAll = selector => [...document.querySelectorAll(selector)];
@@ -45,23 +48,16 @@ function toast(message, error = false) {
   toastTimer = window.setTimeout(() => { element.hidden = true; }, 2400);
 }
 
-async function action(payload) {
+async function action(payload, { renderAfter = true } = {}) {
   setSaveStatus('保存中…', true);
   try {
     const contentAction = ['project.', 'outline.', 'draft.'].some(prefix => String(payload.type).startsWith(prefix));
-    const request = contentAction ? { ...payload, baseRevision: state.project.currentRevision } : payload;
+    const request = contentAction ? { ...payload, baseRevision: payload.baseRevision ?? state.project.currentRevision } : payload;
     state = await api('/api/action', { method: 'POST', body: JSON.stringify(request) });
-    render();
+    if (renderAfter) render();
     setSaveStatus('已保存');
     return state;
   } catch (error) {
-    if (error.code === 'stale_revision') {
-      state = await api('/api/state');
-      render();
-      setSaveStatus('发生冲突');
-      toast('项目已被更新，已刷新到最新 Revision；请重新执行刚才的操作。', true);
-      return state;
-    }
     setSaveStatus('保存失败');
     throw error;
   }
@@ -85,6 +81,129 @@ function buildDraftUpdatePatch(page, { heading, body, listInputs = [], scriptInp
     ...(placeholderListContent ? { listCreateContent: placeholderListContent } : {}),
     ...(scriptBlocks ? { scriptBlocks } : { script }),
   };
+}
+
+function createDraftEditBuffer(page) {
+  const list = page.contentBlocks?.find(block => block.type === 'list');
+  return {
+    kind: 'DraftEditBuffer',
+    pageId: page.id,
+    baseRevision: state.project.currentRevision,
+    heading: page.heading ?? '',
+    body: page.body ?? '',
+    listItems: (list?.items ?? []).map(item => ({ listItemId: item.listItemId, value: item.content })),
+    placeholderListContent: list ? '' : (page.bullets?.[0] ?? ''),
+    scriptBlocks: (page.scriptBlocks ?? []).map(block => ({ scriptBlockId: block.scriptBlockId, value: block.content })),
+    script: page.script ?? '',
+    assetCaptions: (page.pageAssets ?? []).map(asset => ({ pageAssetId: asset.pageAssetId, caption: asset.caption })),
+    dirty: false,
+    saveState: 'saved',
+    conflict: null,
+  };
+}
+
+function bufferForPage(page = activePage()) {
+  if (!page) return null;
+  if (!draftEditBuffer || draftEditBuffer.pageId !== page.id) draftEditBuffer = createDraftEditBuffer(page);
+  return draftEditBuffer;
+}
+
+function updateDraftBufferFromInput(input) {
+  const page = activePage();
+  if (!page || !input) return false;
+  const buffer = bufferForPage(page);
+  if (input.id === 'draft-heading') buffer.heading = input.value;
+  else if (input.id === 'draft-body') buffer.body = input.value;
+  else if (input.id === 'draft-script') buffer.script = input.value;
+  else if (input.dataset?.listItemId !== undefined) {
+    const item = buffer.listItems.find(value => value.listItemId === input.dataset.listItemId);
+    if (item) item.value = input.value;
+    else buffer.placeholderListContent = input.value;
+  } else if (input.dataset?.scriptBlockId) {
+    const block = buffer.scriptBlocks.find(value => value.scriptBlockId === input.dataset.scriptBlockId);
+    if (!block) return false;
+    block.value = input.value;
+  } else return false;
+  buffer.dirty = true;
+  buffer.saveState = 'dirty';
+  buffer.conflict = null;
+  scheduleDraftAutosave();
+  setSaveStatus('未保存');
+  return true;
+}
+
+function scheduleDraftAutosave() {
+  window.clearTimeout(draftAutosaveTimer);
+  draftAutosaveTimer = window.setTimeout(() => {
+    flushDraftBuffer({ reason: '自动保存' }).catch(() => undefined);
+  }, DRAFT_AUTOSAVE_DELAY);
+}
+
+function draftPatchFromBuffer(page, buffer) {
+  return buildDraftUpdatePatch(page, {
+    heading: buffer.heading,
+    body: buffer.body,
+    listInputs: buffer.listItems.length
+      ? buffer.listItems
+      : [{ listItemId: '', value: buffer.placeholderListContent }],
+    scriptInputs: buffer.scriptBlocks,
+    script: buffer.script,
+  });
+}
+
+async function flushDraftBuffer({ reason = '保存草案' } = {}) {
+  const buffer = draftEditBuffer;
+  if (!buffer?.dirty) return true;
+  const page = state.pages.find(item => item.id === buffer.pageId);
+  if (!page) {
+    buffer.saveState = 'failed';
+    setSaveStatus('保存失败');
+    toast('草案页面已不存在，本地编辑仍被保留；可放弃本地修改。', true);
+    render();
+    return false;
+  }
+
+  window.clearTimeout(draftAutosaveTimer);
+  buffer.saveState = 'saving';
+  try {
+    await action({ type: 'draft.update', pageId: page.id, baseRevision: buffer.baseRevision, patch: draftPatchFromBuffer(page, buffer) }, { renderAfter: false });
+    buffer.baseRevision = state.project.currentRevision;
+    buffer.dirty = false;
+    buffer.saveState = 'saved';
+    buffer.conflict = null;
+    render();
+    setSaveStatus('已保存');
+    return true;
+  } catch (error) {
+    if (error.code === 'stale_revision') {
+      const latest = await api('/api/state').catch(() => null);
+      if (latest) state = latest;
+      const serverPage = latest?.pages?.find(item => item.id === buffer.pageId) ?? null;
+      buffer.saveState = 'conflict';
+      buffer.conflict = { reason, local: structuredClone(buffer), serverRevision: latest?.project?.currentRevision ?? error.details?.currentRevision ?? null, serverPage };
+      setSaveStatus('发生冲突');
+      toast('草案保存发生冲突；本地输入已保留，可重试或放弃本地修改。', true);
+    } else {
+      buffer.saveState = 'failed';
+      buffer.conflict = { reason, message: error.message };
+      setSaveStatus('保存失败');
+      toast('草案未保存，本地输入已保留；可重试或放弃本地修改。', true);
+    }
+    render();
+    return false;
+  }
+}
+
+async function runAfterDraftFlush(reason, operation) {
+  if (!await flushDraftBuffer({ reason })) return null;
+  return operation();
+}
+
+function discardDraftBuffer() {
+  window.clearTimeout(draftAutosaveTimer);
+  draftEditBuffer = null;
+  setSaveStatus('已放弃本地修改');
+  render();
 }
 
 function createBrowserUuidV7() {
@@ -264,10 +383,11 @@ function renderDraft() {
     return;
   }
 
+  const buffer = bufferForPage(page);
   const pageIndex = state.pages.findIndex(item => item.id === page.id);
   const canonicalList = page.contentBlocks?.find(block => block.type === 'list');
   const bulletItems = canonicalList?.items?.length
-    ? [...canonicalList.items].sort((left, right) => left.order - right.order)
+    ? [...canonicalList.items].sort((left, right) => left.order - right.order).map(item => ({ ...item, content: buffer.listItems.find(value => value.listItemId === item.listItemId)?.value ?? item.content }))
     : (page.bullets?.length ? page.bullets : ['']).map(content => ({ content, listItemId: null }));
   const bullets = bulletItems.map((item, index) => `
     <div class="bullet-row">
@@ -278,8 +398,8 @@ function renderDraft() {
   `).join('');
   const scripts = page.scriptBlocks?.length
     ? [...page.scriptBlocks].sort((left, right) => left.order - right.order).map((block, index) => `
-      <textarea data-script-block-id="${escapeAttr(block.scriptBlockId)}" class="draft-textarea" rows="7" aria-label="第 ${index + 1} 段讲解稿">${escapeHtml(block.content)}</textarea>`).join('')
-    : `<textarea id="draft-script" class="draft-textarea" rows="7">${escapeHtml(page.script || '')}</textarea>`;
+      <textarea data-script-block-id="${escapeAttr(block.scriptBlockId)}" class="draft-textarea" rows="7" aria-label="第 ${index + 1} 段讲解稿">${escapeHtml(buffer.scriptBlocks.find(value => value.scriptBlockId === block.scriptBlockId)?.value ?? block.content)}</textarea>`).join('')
+    : `<textarea id="draft-script" class="draft-textarea" rows="7">${escapeHtml(buffer.script)}</textarea>`;
   const assets = (page.assets || []).map(renderAsset).join('');
 
   element.innerHTML = `
@@ -301,19 +421,19 @@ function renderDraft() {
             <div class="page-content-header">
               <div class="page-content-title">
                 <span class="page-number">${String(pageIndex + 1).padStart(2, '0')}</span>
-                <div><strong>${escapeHtml(page.heading || '未命名页面')}</strong><span>来源节点 ${escapeHtml(page.outlineNodeId)}</span></div>
+                <div><strong>${escapeHtml(buffer.heading || '未命名页面')}</strong><span>来源节点 ${escapeHtml(page.outlineNodeId)}</span></div>
               </div>
               <span class="version-chip">Revision ${state.project.currentRevision}</span>
             </div>
 
             <div class="field-block">
               <div class="field-heading"><label for="draft-heading">页面标题</label><span>本页核心结论</span></div>
-              <input id="draft-heading" class="draft-input" value="${escapeAttr(page.heading)}">
+              <input id="draft-heading" class="draft-input" value="${escapeAttr(buffer.heading)}">
             </div>
 
             <div class="field-block">
               <div class="field-heading"><label for="draft-body">正文</label><span>页面展示内容</span></div>
-              <textarea id="draft-body" class="draft-textarea" rows="8">${escapeHtml(page.body)}</textarea>
+              <textarea id="draft-body" class="draft-textarea" rows="8">${escapeHtml(buffer.body)}</textarea>
             </div>
 
             <div class="field-block">
@@ -327,7 +447,10 @@ function renderDraft() {
               ${scripts}
             </div>
 
-            <div class="draft-actions"><button id="save-draft" class="primary-button" type="button">保存草案</button></div>
+            <div class="draft-actions">
+              <button id="save-draft" class="primary-button" type="button">保存草案</button>
+              ${buffer.saveState === 'failed' || buffer.saveState === 'conflict' ? '<button class="small-button" data-retry-draft-buffer type="button">重试保存</button><button class="small-button danger" data-discard-draft-buffer type="button">放弃本地修改</button>' : ''}
+            </div>
           </section>
 
           <aside class="asset-card">
@@ -577,24 +700,12 @@ function render() {
 }
 
 async function saveDraft() {
-  const page = activePage();
-  if (!page) return;
-
-  await action({
-    type: 'draft.update',
-    pageId: page.id,
-    patch: buildDraftUpdatePatch(page, {
-      heading: query('#draft-heading').value,
-      body: query('#draft-body').value,
-      listInputs: queryAll('[data-list-item-id]').map(input => ({ listItemId: input.dataset.listItemId, value: input.value })),
-      scriptInputs: queryAll('[data-script-block-id]').map(input => ({ scriptBlockId: input.dataset.scriptBlockId, value: input.value })),
-      script: query('#draft-script')?.value ?? '',
-    }),
-  });
-  toast('草案已保存');
+  const saved = await flushDraftBuffer({ reason: '显式保存' });
+  if (saved) toast('草案已保存');
 }
 
 async function submitReview(reviewRoundId = selectedRoundId) {
+  if (!await flushDraftBuffer({ reason: '提交 ReviewSubmission' })) return;
   try {
     setSaveStatus('提交中…', true);
     const result = await api('/api/review/submit', {
@@ -629,17 +740,21 @@ function closeAgent() {
 document.addEventListener('click', async event => {
   const stage = event.target.closest('[data-stage]:not(:disabled)');
   if (stage) {
-    selectedTarget = null;
-    selectedRoundId = null;
-    await action({ type: 'ui.setStage', stage: stage.dataset.stage });
+    await runAfterDraftFlush('切换阶段', async () => {
+      selectedTarget = null;
+      selectedRoundId = null;
+      await action({ type: 'ui.setStage', stage: stage.dataset.stage });
+    });
     return;
   }
 
   const pageTab = event.target.closest('[data-page-id]');
   if (pageTab) {
-    selectedTarget = null;
-    selectedRoundId = null;
-    await action({ type: 'ui.setPage', pageId: pageTab.dataset.pageId });
+    await runAfterDraftFlush('切换页面', async () => {
+      selectedTarget = null;
+      selectedRoundId = null;
+      await action({ type: 'ui.setPage', pageId: pageTab.dataset.pageId });
+    });
     return;
   }
 
@@ -657,33 +772,41 @@ document.addEventListener('click', async event => {
   }
 
   if (event.target.id === 'add-root') {
-    await action({ type: 'outline.add', parentId: null, title: '新章节' });
+    await runAfterDraftFlush('结构操作', () => action({ type: 'outline.add', parentId: null, title: '新章节' }));
     return;
   }
 
   const addChild = event.target.closest('[data-add-child]');
   if (addChild) {
-    await action({ type: 'outline.add', parentId: addChild.dataset.addChild, title: '新子章节' });
+    await runAfterDraftFlush('结构操作', () => action({ type: 'outline.add', parentId: addChild.dataset.addChild, title: '新子章节' }));
     return;
   }
 
   const createPage = event.target.closest('[data-create-page]');
   if (createPage) {
-    selectedTarget = null;
-    selectedRoundId = null;
-    await action({ type: 'draft.ensurePage', outlineNodeId: createPage.dataset.createPage });
+    await runAfterDraftFlush('打开或生成草案', async () => {
+      selectedTarget = null;
+      selectedRoundId = null;
+      const existingPage = state.pages.find(page => page.outlineNodeId === createPage.dataset.createPage);
+      if (existingPage) {
+        await action({ type: 'ui.setPage', pageId: existingPage.id });
+        await action({ type: 'ui.setStage', stage: 'draft' });
+      } else {
+        await action({ type: 'draft.ensurePage', outlineNodeId: createPage.dataset.createPage });
+      }
+    });
     return;
   }
 
   const move = event.target.closest('[data-move-node]');
   if (move) {
-    await action({ type: 'outline.move', nodeId: move.dataset.moveNode, direction: move.dataset.direction });
+    await runAfterDraftFlush('结构操作', () => action({ type: 'outline.move', nodeId: move.dataset.moveNode, direction: move.dataset.direction }));
     return;
   }
 
   const deleteNode = event.target.closest('[data-delete-node]');
   if (deleteNode && window.confirm('删除该章节、全部子章节及其关联草案页？此操作会生成新的 Revision。')) {
-    await action({ type: 'outline.delete', nodeId: deleteNode.dataset.deleteNode });
+    await runAfterDraftFlush('结构操作', () => action({ type: 'outline.delete', nodeId: deleteNode.dataset.deleteNode }));
     return;
   }
 
@@ -692,17 +815,32 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  if (event.target.closest('[data-retry-draft-buffer]')) {
+    if (draftEditBuffer) {
+      draftEditBuffer.baseRevision = state.project.currentRevision;
+      draftEditBuffer.dirty = true;
+      draftEditBuffer.saveState = 'dirty';
+    }
+    await flushDraftBuffer({ reason: '重试草案保存' });
+    return;
+  }
+
+  if (event.target.closest('[data-discard-draft-buffer]')) {
+    discardDraftBuffer();
+    return;
+  }
+
   if (event.target.id === 'add-bullet') {
     const page = activePage();
     const items = page.contentBlocks?.find(block => block.type === 'list')?.items ?? [];
-    await action({ type: 'draft.list.insert', pageId: page.id, afterListItemId: items.at(-1)?.listItemId ?? null, content: '' });
+    await runAfterDraftFlush('编辑要点结构', () => action({ type: 'draft.list.insert', pageId: page.id, afterListItemId: items.at(-1)?.listItemId ?? null, content: '' }));
     return;
   }
 
   const removeBullet = event.target.closest('[data-remove-bullet]');
   if (removeBullet) {
     const page = activePage();
-    await action({ type: 'draft.list.delete', pageId: page.id, listItemId: removeBullet.dataset.removeBullet });
+    await runAfterDraftFlush('编辑要点结构', () => action({ type: 'draft.list.delete', pageId: page.id, listItemId: removeBullet.dataset.removeBullet }));
     return;
   }
 
@@ -756,6 +894,7 @@ document.addEventListener('click', async event => {
 
   const acceptProposal = event.target.closest('[data-accept-proposal]');
   if (acceptProposal) {
+    if (!await flushDraftBuffer({ reason: '应用 Proposal' })) return;
     try {
       setSaveStatus('应用中…', true);
       const result = await api(`/api/proposal/${acceptProposal.dataset.acceptProposal}/accept`, {
@@ -775,6 +914,7 @@ document.addEventListener('click', async event => {
 
   const retrySubmission = event.target.closest('[data-retry-submission]');
   if (retrySubmission) {
+    if (!await flushDraftBuffer({ reason: '刷新 Proposal' })) return;
     try {
       setSaveStatus('重新投递中…', true);
       const result = await api(`/api/review/${retrySubmission.dataset.retrySubmission}/retry`, { method: 'POST', body: '{}' });
@@ -804,6 +944,7 @@ document.addEventListener('click', async event => {
   if (event.target.id === 'standard-import') {
     const projectRoot = query('#standard-import-path').value.trim();
     if (!projectRoot) return toast('请输入标准项目绝对路径。', true);
+    if (!await flushDraftBuffer({ reason: '导入标准项目' })) return;
     try {
       const result = await api('/api/standard/import', { method: 'POST', body: JSON.stringify({ projectRoot }) });
       state = result.state;
@@ -818,6 +959,7 @@ document.addEventListener('click', async event => {
   }
 
   if (event.target.id === 'standard-export') {
+    if (!await flushDraftBuffer({ reason: '导出标准项目' })) return;
     try {
       const result = await api('/api/standard/export', { method: 'POST', body: '{}' });
       query('#standard-project-result').textContent = `导出完成 · Revision ${result.revision} · ${result.projectRoot}`;
@@ -850,6 +992,7 @@ document.addEventListener('click', async event => {
     const text = query('#annotation-input').value.trim();
     if (!text) return;
     try {
+      if (!await flushDraftBuffer({ reason: '创建批注' })) return;
       await action({
         type: 'annotation.add',
         scopeKey: currentScopeKey(),
@@ -903,7 +1046,7 @@ document.addEventListener('click', async event => {
   if (removeAsset) {
     const page = activePage();
     const pageAssets = (page.pageAssets || []).filter(asset => asset.pageAssetId !== removeAsset.dataset.removeAsset);
-    await action({ type: 'draft.update', pageId: page.id, patch: { pageAssets } });
+    await runAfterDraftFlush('移除素材', () => action({ type: 'draft.update', pageId: page.id, patch: { pageAssets } }));
     toast('素材已移出本页');
   }
 });
@@ -912,7 +1055,7 @@ document.addEventListener('change', async event => {
   const renameNode = event.target.closest('[data-rename-node]');
   if (renameNode) {
     try {
-      await action({ type: 'outline.rename', nodeId: renameNode.dataset.renameNode, title: renameNode.value });
+      await runAfterDraftFlush('结构操作', () => action({ type: 'outline.rename', nodeId: renameNode.dataset.renameNode, title: renameNode.value }));
     } catch (error) {
       toast(error.message, true);
     }
@@ -921,7 +1064,7 @@ document.addEventListener('change', async event => {
 
   if (event.target.id === 'project-title') {
     try {
-      await action({ type: 'project.rename', title: event.target.value });
+      await runAfterDraftFlush('修改项目名称', () => action({ type: 'project.rename', title: event.target.value }));
     } catch (error) {
       toast(error.message, true);
     }
@@ -936,6 +1079,7 @@ document.addEventListener('change', async event => {
     }
     const page = activePage();
     try {
+      if (!await flushDraftBuffer({ reason: '上传素材' })) return;
       setSaveStatus('上传素材中…', true);
       await api(`/api/assets/ingest?pageId=${encodeURIComponent(page.id)}`, { method: 'POST', headers: { 'content-type': file.type, 'x-file-name': file.name }, body: file });
       state = await api('/api/state');
@@ -944,6 +1088,17 @@ document.addEventListener('change', async event => {
       render();
     } catch (error) { setSaveStatus('上传失败'); toast(error.message, true); }
   }
+});
+
+document.addEventListener('input', event => {
+  updateDraftBufferFromInput(event.target);
+});
+
+window.addEventListener?.('beforeunload', event => {
+  if (!draftEditBuffer?.dirty) return undefined;
+  event.preventDefault?.();
+  event.returnValue = '草案尚未保存。';
+  return event.returnValue;
 });
 
 document.addEventListener('keydown', async event => {

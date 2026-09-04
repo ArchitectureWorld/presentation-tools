@@ -421,7 +421,14 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       const candidate = await mutator(clone(baseState))
       if (!candidate || typeof candidate !== 'object') throw new StudioError(ERROR_CODES.INVALID_COMMAND, '内容事务必须返回完整项目状态。')
       assertNoNewInlineBinary(baseState, candidate)
+      const baseSnapshot = canonicalFromState(baseState)
       const snapshot = canonicalFromState(candidate)
+      if (canonicalJson(snapshot) === canonicalJson(baseSnapshot)) {
+        return publish({
+          ...fresh,
+          ui: clone(candidate.ui ?? fresh.ui),
+        })
+      }
       const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
       const revisionNumber = currentRevision + 1
       const revision = {

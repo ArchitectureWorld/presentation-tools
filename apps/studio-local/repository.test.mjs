@@ -221,6 +221,64 @@ test('operational transaction does not advance content revision', async () => {
   })
 })
 
+test('canonical no-op content transaction keeps Head, revisions and Proposal state unchanged', async () => {
+  await withRepository(async ({ dir, repository }) => {
+    const seeded = await repository.transactContent(
+      { baseRevision: 0, source: 'human', detail: { actionType: 'outline.add' } },
+      state => executeAction(state, { type: 'outline.add', parentId: null, title: '保持不变的章节' }).state,
+    )
+    const proposal = { id: 'proposal_test', status: 'pending', baseRevision: seeded.project.currentRevision }
+    await repository.transactOperational(state => ({ ...state, proposals: [proposal] }))
+    const beforeControl = await readFile(join(dir, 'control.json'), 'utf8')
+    const before = repository.getState()
+
+    const after = await repository.transactContent(
+      { baseRevision: before.project.currentRevision, source: 'human', detail: { actionType: 'outline.rename' } },
+      state => executeAction(state, { type: 'outline.rename', nodeId: state.outline[0].id, title: '保持不变的章节' }).state,
+    )
+
+    assert.equal(after.project.currentRevision, before.project.currentRevision)
+    assert.equal(after.revisions.length, before.revisions.length)
+    assert.equal(after.proposals[0].status, 'pending')
+    assert.equal(await readFile(join(dir, 'control.json'), 'utf8'), beforeControl)
+  })
+})
+
+test('invalid boundary move is a canonical no-op and does not create a Revision', async () => {
+  await withRepository(async ({ repository }) => {
+    let state = await repository.transactContent(
+      { baseRevision: 0, source: 'human', detail: { actionType: 'outline.add' } },
+      current => executeAction(current, { type: 'outline.add', parentId: null, title: '唯一章节' }).state,
+    )
+    const before = state.project.currentRevision
+    state = await repository.transactContent(
+      { baseRevision: before, source: 'human', detail: { actionType: 'outline.move' } },
+      current => executeAction(current, { type: 'outline.move', nodeId: current.outline[0].id, direction: 'up' }).state,
+    )
+    assert.equal(state.project.currentRevision, before)
+    assert.equal(state.revisions.at(-1).number, before)
+  })
+})
+
+test('View stage and page changes stay operational without advancing the content Revision', async () => {
+  await withRepository(async ({ repository }) => {
+    let state = await repository.transactContent(
+      { baseRevision: 0, source: 'human', detail: { actionType: 'outline.add' } },
+      current => executeAction(current, { type: 'outline.add', parentId: null, title: '查看页' }).state,
+    )
+    state = await repository.transactContent(
+      { baseRevision: state.project.currentRevision, source: 'human', detail: { actionType: 'draft.ensurePage' } },
+      current => executeAction(current, { type: 'draft.ensurePage', outlineNodeId: current.outline[0].id }).state,
+    )
+    const before = state.project.currentRevision
+    state = await repository.transactOperational(current => executeAction(current, { type: 'ui.setStage', stage: 'outline' }).state)
+    state = await repository.transactOperational(current => executeAction(current, { type: 'ui.setPage', pageId: current.pages[0].id }).state)
+    assert.equal(state.project.currentRevision, before)
+    assert.equal(state.ui.stage, 'outline')
+    assert.equal(state.ui.activePageId, state.pages[0].id)
+  })
+})
+
 test('failure before Head publication leaves the prior Revision visible', async () => {
   let injected = false
   await withRepository(async ({ repository }) => {
