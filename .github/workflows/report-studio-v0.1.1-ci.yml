@@ -8,22 +8,35 @@ on:
       - 'packages/studio-core/**'
       - 'packages/studio-standard-adapter/**'
       - 'packages/studio-dsh-plugin/**'
+      - 'packages/studio-layout-contracts/**'
+      - 'packages/studio-layout-core/**'
+      - 'packages/studio-layout-adapter/**'
+      - 'packages/studio-layout-integration/**'
+      - 'packages/studio-layout-engine-binding/**'
+      - 'packages/studio-layout-openpencil/**'
+      - 'tools/layout-spike/**'
       - 'contracts/presentation-standard-project/**'
       - 'scripts/verify-v0.1.1.mjs'
       - 'scripts/verify-e2e-v0.1.1.mjs'
       - 'scripts/verify-responsive-ui.mjs'
       - 'scripts/verify-dsh-plugin.mjs'
+      - 'scripts/verify-layout-v0.2.0.mjs'
+      - 'scripts/verify-layout-openpencil-v0.2.0.mjs'
+      - 'scripts/verify-layout-spike.mjs'
+      - 'scripts/verify-v0.2.0-convergence.test.mjs'
       - 'scripts/build-dsh-plugin-vendor.mjs'
       - 'scripts/dsh-plugin-vendor-manifest.mjs'
       - 'scripts/release-integrity.mjs'
       - 'scripts/release-integrity.test.mjs'
       - 'scripts/smoke-dsh-native.mjs'
+      - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'package.json'
       - 'package-lock.json'
       - 'README.md'
       - 'DSH_INSTALL.md'
       - '.gitattributes'
       - '.github/workflows/report-studio-v0.1.1-ci.yml'
+      - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
   pull_request:
 
 permissions:
@@ -49,7 +62,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24.11.0'
           cache: npm
 
       - uses: pnpm/action-setup@v4
@@ -66,7 +79,7 @@ jobs:
           python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0
           npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 
-      - name: Run the complete v0.1.1 verification gate
+      - name: Run the complete v0.2.0 convergence gate
         run: npm run verify:all
 
       - name: Regenerate vendor and reject drift

@@ -15,11 +15,15 @@ on:
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
       - 'scripts/verify-layout-openpencil-v0.2.0.mjs'
+      - 'scripts/verify-v0.2.0-convergence.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
       - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-layout-foundation-design.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-openpencil-adapter-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-openpencil-adapter.md'
+      - 'docs/superpowers/plans/2026-09-04-report-studio-v0.1.1-to-v0.2.0-convergence.md'
       - 'docs/acceptance/report-studio-v0.2.0-openpencil-adapter-verification.md'
       - 'docs/handoff/2026-09-03-report-studio-v0.2.0-openpencil-adapter-handoff.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
@@ -35,11 +39,15 @@ on:
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
       - 'scripts/verify-layout-openpencil-v0.2.0.mjs'
+      - 'scripts/verify-v0.2.0-convergence.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
       - 'docs/architecture/report-studio-v0.2.0-layout-integration-contract.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-layout-foundation-design.md'
       - 'docs/superpowers/specs/2026-09-03-report-studio-v0.2.0-openpencil-adapter-design.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-layout-foundation.md'
       - 'docs/superpowers/plans/2026-09-03-report-studio-v0.2.0-openpencil-adapter.md'
+      - 'docs/superpowers/plans/2026-09-04-report-studio-v0.1.1-to-v0.2.0-convergence.md'
       - 'docs/acceptance/report-studio-v0.2.0-openpencil-adapter-verification.md'
       - 'docs/handoff/2026-09-03-report-studio-v0.2.0-openpencil-adapter-handoff.md'
       - '.github/workflows/report-studio-v0.2.0-layout-ci.yml'
@@ -55,9 +63,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: Run layout foundation, adapter, OpenPencil and spike model tests
-        run: node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs packages/studio-layout-engine-binding/*.test.mjs packages/studio-layout-openpencil/*.test.mjs tools/layout-spike/*.test.mjs
+          node-version: '24.11.0'
+      - name: Run convergence, layout foundation, adapter, OpenPencil and spike model tests
+        run: node --test scripts/verify-v0.2.0-convergence.test.mjs packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs packages/studio-layout-engine-binding/*.test.mjs packages/studio-layout-openpencil/*.test.mjs tools/layout-spike/*.test.mjs
       - name: Run deterministic layout verification
         run: node scripts/verify-layout-v0.2.0.mjs
       - name: Run deterministic OpenPencil adapter verification
