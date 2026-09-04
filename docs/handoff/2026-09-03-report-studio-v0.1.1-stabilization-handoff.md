@@ -8,6 +8,9 @@ report_studio_version: 0.1.1
 presentation_standard_version: 0.1.0
 contract_commit: 974668d308728386ea005c9e77d58ebff9372f0a
 schema_set_sha256: 5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc
+final_code_commit: 2ebe7e43bad1bb1d0de1e5fc037aa15184c05585
+verification_status: verified
+release_approval: pending-human-acceptance
 updated_at: 2026-09-04
 ---
 
@@ -15,9 +18,9 @@ updated_at: 2026-09-04
 
 ## 已交接状态
 
-Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `feat/report-studio-v0.1.1-hardening`。Review 起点为 `9d18fcb03b889d2db5002665d7c18362cc7399ed`，main 基线为 `804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`。本 handoff 随所在提交一起更新；部署来源 SHA、tarball SHA-256、测试、宿主和 CI 的实际结果见同一次 Task 10 报告，不能由本文件的候选状态推导为发布许可。
+Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `feat/report-studio-v0.1.1-hardening`。Review 起点为 `9d18fcb03b889d2db5002665d7c18362cc7399ed`，main 基线为 `804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`，最终代码 SHA 为 `2ebe7e43bad1bb1d0de1e5fc037aa15184c05585`。技术门禁已取得当前证据；`candidate` 只表示 PR #6 仍为 Draft，合并与发布必须等待人工验收。
 
-已部署插件源码截至 `1676abd3737e6fda53bd97918c5b7c2d746bc178`；对应现场 tarball 是 39 files / 88,476 bytes / SHA-256 `f6b4fc6a81dcf01df51dd66d071c0969d930a4a605d5764af890d9ff2ad24748`。最终门禁提交 `6b93b1262f9fd636ea1fbe5df1da258857325851` 的 Linux artifact 为 39 files / 87,894 bytes / SHA-256 `1de7d5aabe7518126c5c3198738fd0e8b395e7fcb59e0c5a640328702c94750d`；逐文件差异仅为 CRLF/LF。GitHub push/PR Linux/Windows 已全绿，main required checks 已启用；真实 Provider 闭环仍是独立门槛。
+真实 `web` Profile 已安装最终代码 SHA 的现场 tarball：39 files / 89,201 bytes / SHA-256 `322A13CCC0E0F7D76216EBB1DA67F60AF5C0F167425265256CB0EAEC9B2B8271`。同一 SHA 的 Linux CI artifact 为 39 files / 88,175 bytes / SHA-256 `A8782935C9C08BD70A4CC8269A8181E6C035A8B38933E5694FEAF2D561A58D7A`；二者分别通过内容清单、release-integrity 与 DSH smoke。GitHub push/PR Linux/Windows、真实 Provider 闭环和 main required checks 均已验证。
 
 ## 架构与兼容性
 
@@ -36,11 +39,27 @@ Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `f
 
 ## 部署顺序
 
-1. 只在当前支线、无历史 `node_modules` 的 checkout 执行 `npm ci`、Contract `npm ci`、`npm run verify:all`、vendor zero-diff、现场 pack 和 smoke。
+1. 只在当前支线、无历史 `node_modules` 的 checkout 执行根 `npm ci`、Contract `npm ci`、`npm run verify:all`、vendor zero-diff、现场 pack 和显式 tarball smoke。
 2. 对 `C:\Users\2899\.dsh\profiles\web` 和 Report Studio 数据根做带 SHA-256 清单的精确备份；不触碰 `@architectureworld/dsh-preplanning-agent`、`dsh-openai-codex-login` 或用户数据。
 3. 核验已解析的 `@architectureworld/report-studio-dsh/package.json` 不再指向旧 `link:` 来源；仅移除该目标插件，再添加本次现场生成 tgz。
 4. 重启真实 Web Profile，在 `http://127.0.0.1:3080/` 从当前 DSH Session 进入 Report Studio；4173 不得充当部署入口。
-5. 记录 health、原生壳、iframe、FAB、同 Session 消息、长批注 Proposal、控制台与重启持久化。Provider 有 `TRANSPORT/fetch failed` 时记录为外部阻断。
+5. 记录 health、原生壳、iframe、FAB、同 Session 消息、长批注 Proposal、控制台与重启持久化。真实 Provider 必须形成 Proposal，且只能在人工确认后产生新 Revision。
+
+现场命令（POSIX shell）：
+
+```bash
+npm ci
+npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+npm run verify:all
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+```
+
+当前 Windows 现场包完整路径：`C:\pt-rvw-804dbd4\.tmp\report-studio-pack-2ebe7e4\architectureworld-report-studio-dsh-0.1.1.tgz`。部署前备份：`C:\Users\2899\.dsh\backups\report-studio-pre-2ebe7e4-20260904-173102`。
 
 ## 回滚边界
 
@@ -48,4 +67,6 @@ Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `f
 
 ## 下一位执行者入口与合并判定
 
-先读 [review resolution](../review/2026-09-03-report-studio-v0.1.1-review-blockers-resolution.md)、Task 10 报告和 CI run。禁止新增分支、禁止 force push、禁止合并 main。当前合并判定仍为 **否**：GitHub Linux/Windows 与 main required checks 已关闭，真实 Provider 闭环及人工验收尚未关闭。自动化测试总数、失败数、最终 SHA、Actions Run、tarball 清单及 DSH Shell 结果必须以 Task 10 的现场输出为准。
+先读 [review resolution](../review/2026-09-03-report-studio-v0.1.1-review-blockers-resolution.md)、本 handoff 和当前 CI run。禁止新增分支、禁止 force push。自动化为 176/176、失败 0；push run `33858374268`、PR run `33858377994` 和 Standard run `33858377996` 均 success。真实 Provider 使用 Session `session-d8666c4f-f5e3-4028-89ae-d592e53bf06d` 完成 Proposal、人工接受、Revision `3 → 4` 与重启恢复；当前 health 为 `v0.1.1 / dsh-native / agentConfigured=true / migrationStatus=ready`，控制台新增错误为 0。
+
+main 保护规则已启用 strict required checks、PR 必经和 `enforce_admins=true`；force push 与删除禁用。**合并判定：技术前置条件已满足，但治理决定仍为否**——PR #6 必须保持 Draft，等待用户人工验收后再决定是否转 Ready、合并或发布。

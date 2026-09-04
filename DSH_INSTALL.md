@@ -1,6 +1,6 @@
 # Report Studio v0.1.1 — DSH 原生安装、升级与回滚
 
-本文件是候选版本的部署入口。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。在 GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 未同时取得当前证据前，`v0.1.1` 仅可作为 stabilization candidate，不得视作可发布、可合并或生产可用。
+本文件是候选版本的部署入口。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。当前支线的 GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均已取得证据；PR 仍保持 Draft，未经人工验收不得合并 `main` 或发布 Release。
 
 ## 固定基线
 
@@ -23,6 +23,7 @@ git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
 node --version
 dsh --version
+npm ci
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
 ```
@@ -63,8 +64,13 @@ Get-ChildItem -LiteralPath $backup -Recurse -File | Get-FileHash -Algorithm SHA2
 
 ```bash
 dsh plugin --profile web remove @architectureworld/report-studio-dsh
-npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
-dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+dsh plugin --profile web add ./.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
@@ -123,7 +129,12 @@ objects/sha256/*.json
 
 ```bash
 npm run verify:all
-npm run smoke:dsh
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
 正式环境至少验收：
@@ -137,7 +148,7 @@ npm run smoke:dsh
 - `studio_get_context` 和 `studio_apply_commands` 已注册；
 - 原有 DSH 插件仍在，且没有把独立 `4173` 服务作为正式入口。
 
-自动化验证不等同于真实模型质量验收；模型是否能按业务意图生成满意建议、并完成 ReviewSubmission → Proposal → 接受 → 新 Revision 的真实闭环，需要在目标账号、目标模型和真实项目资料中另行确认。此前 `TRANSPORT / fetch failed` 不构成通过证据。
+真实目标 Provider 已在当前 DSH Session 中完成 `ReviewSubmission → studio_get_context → studio_apply_commands → Proposal → 人工接受 → 新 Revision → 重启恢复`。该闭环证明集成链路与人工确认边界有效，但不替代具体项目对模型建议质量的业务验收。
 
 ## 6. 回滚
 

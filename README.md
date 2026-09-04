@@ -1,6 +1,6 @@
 # Presentation Tools — Report Studio v0.1.1
 
-Report Studio `v0.1.1` 是处于收口验证中的“大纲 + 草案”候选工作台：代码包含 A1.1 旧数据升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均未同时具备当前证据前，不能将此分支视作可发布、可合并或生产可用。正式排版、分页和 PPTX/PDF/HTML 成品导出属于后续范围，当前界面会明确显示为未开放能力。
+Report Studio `v0.1.1` 是已完成稳定化验证、等待人工验收合并的“大纲 + 草案”候选工作台：代码包含 A1.1 旧数据升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。当前支线的双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均已有证据；PR 仍保持 Draft，未经人工验收不得合并 `main` 或发布 Release。正式排版、分页和 PPTX/PDF/HTML 成品导出属于后续范围，当前界面会明确显示为未开放能力。
 
 ## 产品边界
 
@@ -30,10 +30,15 @@ git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
 git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
+npm ci
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
-npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
-dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+dsh plugin --profile web add ./.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
@@ -73,10 +78,15 @@ studio_apply_commands       幂等生成待确认 Proposal
 
 ```bash
 npm run verify:all
-npm run smoke:dsh
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
-`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 使用隔离的 DSH Home 安装 `dist` 中的发布 tarball、启动 Web Profile 并检查正式路由。真实模型生成质量仍需在实际 DSH 账号/模型环境中验收。
+`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 只安装 `REPORT_STUDIO_PLUGIN_PACKAGE` 明确指定的当前 checkout 新打 tarball，不会自动读取 `dist`。真实目标 Provider 已完成一次 `ReviewSubmission → Proposal → 人工接受 → 新 Revision → 重启恢复` 闭环；具体业务内容质量仍由实际项目验收决定。
 
 ## 独立调试
 

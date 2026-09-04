@@ -3,10 +3,10 @@ document_id: report-studio-architecture
 name: 通用汇报工作台架构开发文档
 status: candidate
 version: 1.1.1
-review_status: stabilization-required
+review_status: verified
 review_method: user-approved-adversarial-self-review
 approved_for: report-studio-v0.1.1-stabilization-only
-updated_at: 2026-09-03
+updated_at: 2026-09-04
 language: zh-CN
 owners:
   - product
@@ -44,22 +44,22 @@ scope:
 
 > 本文件是本项目唯一的架构母文件。后续确认的架构、数据、交互和技术决策持续更新到本文件，不另建平行的“v2 / v3 架构文件”。文档头记录当前版本，末尾保留变更记录。
 
-> **当前状态：Report Studio `v0.1.1` 候选收口中，不是生产基线。** `1.0.0` 是开发前冻结版；`1.1.0` 保留当时的设计与实施记录。`1.1.1` 只纠正验收状态、术语和部署边界：在 GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环及 main required checks 均有当前证据前，本文件不得被解读为可发布、可合并或生产可用的声明。
+> **当前状态：Report Studio `v0.1.1` 已完成稳定化技术验证，仍是等待人工验收的候选版本。** `1.0.0` 是开发前冻结版；`1.1.0` 保留当时的设计与实施记录。`1.1.1` 只纠正验收状态、术语和部署边界。GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环及 main required checks 已有当前证据；PR #6 仍为 Draft，未经人工决定不得合并或发布。
 
 ### v0.1.1 能力矩阵
 
 | 能力 | 长期目标架构 | v0.1.1 已实现 | 当前暂缓 / 未验收 |
 |---|---|---|---|
-| Canonical 内容与 Revision | 稳定 ID、不可变 Snapshot、ProjectHead CAS | 已实现并有本地自动化覆盖 | GitHub 双平台当前 run 仍待取得 |
+| Canonical 内容与 Revision | 稳定 ID、不可变 Snapshot、ProjectHead CAS | 已实现并通过本地与 GitHub 双平台验证 | 无技术阻断；合并等待人工验收 |
 | 标准项目 Adapter | 空白工作区初始化、稳定 ID 往返、staging 导出 | 已实现并有本地自动化覆盖 | 真实用户项目导入导出仍需人工验收 |
 | 二进制素材 | 内容寻址 Blob、受控读取、无 Base64 Canonical | 已实现并有本地自动化覆盖 | 完整正式 Asset Ingestion 工作流暂缓 |
 | 编辑器 | 页面 Draft Buffer、flush、冲突与 no-op 控制 | 已实现并有本地自动化覆盖 | 完整 React / TypeScript 重写暂缓 |
-| Review 与 Agent Command | Submission 冻结、严格命令、Proposal、ReviewRun | 已实现并有本地自动化覆盖 | 完整 ChangeSet 与正式风险策略暂缓；真实 Provider 闭环待验收 |
-| DSH 宿主 | `conversation.view`、同 Session 悬浮 Agent、原生外壳 | 插件集成和隔离 smoke 已实现 | 真实 DSH Web Shell 人工验收待记录 |
+| Review 与 Agent Command | Submission 冻结、严格命令、Proposal、ReviewRun | 已实现，并通过自动化与真实 Provider 闭环 | 完整 ChangeSet 与正式风险策略暂缓 |
+| DSH 宿主 | `conversation.view`、同 Session 悬浮 Agent、原生外壳 | 插件集成、隔离 smoke 与真实 Web Shell 已验证 | 无技术阻断；业务体验等待人工验收 |
 | 安全与网络 | 可验证的服务端 Session Capability | 本版本仅 `local-single-user-only`、`127.0.0.1` | 多人 / 网络共享安全暂缓 |
 | 排版与成品导出 | 正式 Layout、分页、冻结成品导出 | 不在 v0.1.1 范围 | 暂缓至后续版本 |
 
-上述“已实现”仅陈述代码范围和自动化覆盖，不替代当前 GitHub、真实 DSH 宿主、真实 Provider 或 main 保护规则的验收证据。
+上述“已实现”对应代码与自动化范围；当前证据索引见 `docs/acceptance/report-studio-v0.1.1-verification.md`。它不替代用户对实际项目内容质量和最终合并/发布的人工决定。
 
 ## 0. 文档使用规则
 
@@ -2310,7 +2310,7 @@ DshHarnessIntegration
 
 ### 15.1 开发冻结结论
 
-本版本的自检结论为 **PASS**，允许进入 MVP 开发。允许开发并不等于所有 Provider 已验证：DSH UI Slot、ReviewBatch 投递接口、OpenPencil 嵌入和跨平台 ObjectStore 仍需按第 14.1 节完成实现级 Spike；这些失败时只能替换 Adapter / Provider，不得倒置已冻结的 Canonical、稳定 ID、批注、Command、Proposal、Revision 和 ProjectHead 语义。
+本节保留 2026-09-02 开发冻结时的结论：当时自检为 **PASS**，允许进入 MVP 开发，DSH UI Slot、ReviewBatch 投递接口、OpenPencil 嵌入和跨平台 ObjectStore 仍需按第 14.1 节完成实现级 Spike。当前 v0.1.1 的实际实现与验收状态以文首能力矩阵和验收记录为准；历史待验证项不得覆盖当前证据，也不得倒置已冻结的 Canonical、稳定 ID、批注、Command、Proposal、Revision 和 ProjectHead 语义。
 
 进入开发后，以下情况必须阻断合并：
 
