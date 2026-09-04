@@ -35,10 +35,38 @@
       <div class="top-actions">
         <span id="dsh-agent-guidance" class="dsh-agent-guidance" hidden>Agent：请使用 DSH 原生对话框</span>
         <span id="save-status" class="save-status">已保存</span>
+        <button id="workspace-sync-toggle" class="workspace-sync-toggle" type="button" aria-controls="workspace-sync-panel" aria-expanded="false">
+          <span class="workspace-sync-dot" aria-hidden="true"></span>
+          <span id="workspace-sync-label">检查 Workspace…</span>
+        </button>
         <button id="standard-project-open" class="small-button" type="button">标准项目</button>
         <span class="version-chip">v0.1.1</span>
         <span class="revision-pill">Revision <b id="revision-number">0</b></span>
       </div>
+
+      <section id="workspace-sync-panel" class="workspace-sync-panel" aria-label="Workspace 同步详情" hidden>
+        <header>
+          <div><span class="stage-eyebrow">WORKSPACE LIVE LINK</span><h2>同步详情</h2></div>
+          <button class="icon-button" data-workspace-close-panel type="button" aria-label="关闭同步详情">×</button>
+        </header>
+        <div id="workspace-sync-details" class="workspace-sync-details">正在读取当前 DSH Workspace…</div>
+        <footer>
+          <button class="secondary-button" data-workspace-reload type="button">重新读取 Workspace</button>
+        </footer>
+      </section>
+
+      <aside id="workspace-conflict-banner" class="workspace-conflict-banner" role="alert" hidden>
+        <div>
+          <strong>上游 Pre 内容已更新，但当前 Presentation 存在未保存修改。</strong>
+          <span id="workspace-update-summary">等待查看更新摘要</span>
+        </div>
+        <div class="workspace-conflict-actions">
+          <button class="small-button" data-workspace-view-update type="button">查看更新摘要</button>
+          <button class="small-button" data-workspace-save-reload type="button">保存后重新加载</button>
+          <button class="small-button danger" data-workspace-discard-reload type="button">放弃后重新加载</button>
+          <button class="text-button" data-workspace-keep-current type="button">暂时保留</button>
+        </div>
+      </aside>
     </header>
 
     <nav id="page-strip" class="page-strip" aria-label="草案页面" hidden></nav>

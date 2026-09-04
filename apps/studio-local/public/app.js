@@ -9,7 +9,12 @@ const revealedProposalIds = new Set();
 let draftEditBuffer = null;
 let draftAutosaveTimer = null;
 let draftFlushPromise = null;
+let workspaceSyncState = null;
+let ignoredWorkspaceCandidateFingerprint = null;
+let workspaceAppliedNotice = null;
+let workspaceRefreshPromise = null;
 const DRAFT_AUTOSAVE_DELAY = 500;
+const WORKSPACE_POLL_DELAY = 2500;
 
 const query = selector => document.querySelector(selector);
 const queryAll = selector => [...document.querySelectorAll(selector)];
@@ -257,6 +262,191 @@ function escapeHtml(value = '') {
 
 function escapeAttr(value = '') {
   return escapeHtml(value).replaceAll("'", '&#39;');
+}
+
+function workspaceHasDirtyEdits() {
+  return Boolean(draftEditBuffer?.dirty || draftFlushPromise || draftEditBuffer?.saveState === 'saving');
+}
+
+function workspaceCandidateRevision(status = workspaceSyncState) {
+  return status?.candidateSourceRevision ?? status?.sourceRevision ?? null;
+}
+
+function workspaceStatusView(status = workspaceSyncState) {
+  const code = status?.status || 'watcher_disconnected';
+  const candidateRevision = workspaceCandidateRevision(status);
+  if (code === 'connected' && workspaceAppliedNotice && status?.appliedFingerprint === workspaceAppliedNotice.fingerprint) {
+    return { label: workspaceAppliedNotice.label, tone: 'connected' };
+  }
+  if (status?.hasUpstreamCandidate && workspaceHasDirtyEdits()) return { label: '本地存在未保存修改', tone: 'dirty' };
+  if (code === 'connected') return { label: '已连接', tone: 'connected' };
+  if (code === 'validating') return { label: '正在验证', tone: 'validating' };
+  if (code === 'upstream_update_available') return { label: candidateRevision == null ? '上游有更新' : `上游有更新 · Pre Revision ${candidateRevision}`, tone: 'upstream' };
+  if (code === 'local_dirty_conflict') return { label: '本地存在未保存修改', tone: 'dirty' };
+  if (code === 'workspace_contract_invalid') return { label: 'Contract 校验失败', tone: 'error' };
+  if (code === 'workspace_project_missing') return { label: 'Workspace 不包含标准项目', tone: 'disconnected' };
+  if (code === 'workspace_unavailable') return { label: 'Workspace 不可用', tone: 'disconnected' };
+  if (code === 'watcher_disconnected' || code === 'request_failed') return { label: '监听不可用', tone: 'disconnected' };
+  return { label: '上游写入尚未完成', tone: 'error' };
+}
+
+function shortWorkspaceFingerprint(value) {
+  return typeof value === 'string' && value ? value.slice(0, 12) : '—';
+}
+
+function workspaceSourceRevisionHtml(status) {
+  const revisions = Array.isArray(status?.sourceRevisions) ? status.sourceRevisions : [];
+  if (!revisions.length) return '—';
+  return revisions.map(item => `${escapeHtml(item.provider || 'unknown')} · ${escapeHtml(item.sourceProjectId || 'unknown')} · Revision ${escapeHtml(item.sourceRevision ?? '—')}`).join('<br>');
+}
+
+function workspaceValidationHtml(status) {
+  const errors = Array.isArray(status?.validation?.errors) ? status.validation.errors : [];
+  if (!errors.length) return '<span>无</span>';
+  return `<ul class="workspace-sync-errors">${errors.map(error => {
+    const location = [error.filePath, error.instancePath].filter(Boolean).join(' ');
+    return `<li><strong>${escapeHtml(error.code || 'validation_error')}</strong>${location ? ` · ${escapeHtml(location)}` : ''}<br>${escapeHtml(error.message || '校验失败')}</li>`;
+  }).join('')}</ul>`;
+}
+
+function renderWorkspaceStatus(status = workspaceSyncState) {
+  const toggle = query('#workspace-sync-toggle');
+  const label = query('#workspace-sync-label');
+  const details = query('#workspace-sync-details');
+  const conflict = query('#workspace-conflict-banner');
+  const summary = query('#workspace-update-summary');
+  if (!toggle && !label && !details && !conflict) return;
+
+  const view = workspaceStatusView(status);
+  if (label) label.textContent = view.label;
+  if (toggle) {
+    toggle.dataset.status = view.tone;
+    toggle.setAttribute('title', view.label);
+  }
+
+  const candidateFingerprint = status?.candidateFingerprint ?? null;
+  const candidateRevision = workspaceCandidateRevision(status);
+  const hasUnignoredDirtyConflict = Boolean(
+    status?.hasUpstreamCandidate
+    && workspaceHasDirtyEdits()
+    && candidateFingerprint
+    && ignoredWorkspaceCandidateFingerprint !== candidateFingerprint
+  );
+  if (conflict) conflict.hidden = !hasUnignoredDirtyConflict;
+  if (summary) summary.textContent = candidateRevision == null
+    ? `候选快照 ${shortWorkspaceFingerprint(candidateFingerprint)}`
+    : `检测到 Pre Revision ${candidateRevision} · 候选快照 ${shortWorkspaceFingerprint(candidateFingerprint)}`;
+
+  if (!details) return;
+  const watcherActive = !['watcher_disconnected', 'workspace_unavailable', 'request_failed'].includes(status?.status);
+  details.innerHTML = `
+    <div class="workspace-sync-row"><span>Workspace</span><span>${escapeHtml(status?.workspaceRoot || '当前页面未绑定 DSH Workspace')}</span></div>
+    <div class="workspace-sync-row"><span>Project ID</span><span>${escapeHtml(status?.projectId || '—')}</span></div>
+    <div class="workspace-sync-row"><span>标准版本</span><span>${escapeHtml(status?.standardVersion || '0.1.0')}</span></div>
+    <div class="workspace-sync-row"><span>当前快照指纹</span><span>${escapeHtml(shortWorkspaceFingerprint(status?.appliedFingerprint ?? status?.fingerprint))}</span></div>
+    <div class="workspace-sync-row"><span>候选快照指纹</span><span>${escapeHtml(shortWorkspaceFingerprint(candidateFingerprint))}</span></div>
+    <div class="workspace-sync-row"><span>上游 Pre Revision</span><span>${escapeHtml(candidateRevision ?? '—')}</span></div>
+    <div class="workspace-sync-row"><span>来源明细</span><span>${workspaceSourceRevisionHtml(status)}</span></div>
+    <div class="workspace-sync-row"><span>最近读取时间</span><span>${escapeHtml(status?.readAt || '—')}</span></div>
+    <div class="workspace-sync-row"><span>Watcher</span><span>${watcherActive ? '监听中' : '监听已断开'}</span></div>
+    <div class="workspace-sync-row"><span>Contract 错误</span><span>${workspaceValidationHtml(status)}</span></div>
+  `;
+}
+
+function setWorkspacePanel(open) {
+  const panel = query('#workspace-sync-panel');
+  const toggle = query('#workspace-sync-toggle');
+  if (panel) panel.hidden = !open;
+  if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(open)));
+}
+
+function captureWorkspaceViewport() {
+  return {
+    pageStripLeft: query('#page-strip')?.scrollLeft ?? 0,
+    stageScrollTop: query('#stage-workspace')?.scrollTop ?? 0,
+    reviewScrollTop: query('#review-history')?.scrollTop ?? 0,
+    annotationScrollTop: query('#annotation-panel')?.scrollTop ?? 0,
+  };
+}
+
+function restoreWorkspaceViewport(viewport) {
+  const restore = () => {
+    const strip = query('#page-strip');
+    const stage = query('#stage-workspace');
+    const review = query('#review-history');
+    const annotation = query('#annotation-panel');
+    if (strip) strip.scrollLeft = viewport.pageStripLeft;
+    if (stage) stage.scrollTop = viewport.stageScrollTop;
+    if (review) review.scrollTop = viewport.reviewScrollTop;
+    if (annotation) annotation.scrollTop = viewport.annotationScrollTop;
+  };
+  if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(restore);
+  else restore();
+}
+
+async function adoptWorkspaceResult(result, { revision = workspaceCandidateRevision(workspaceSyncState), label = null } = {}) {
+  const viewport = captureWorkspaceViewport();
+  state = await api('/api/state');
+  draftEditBuffer = null;
+  workspaceSyncState = result;
+  ignoredWorkspaceCandidateFingerprint = null;
+  const fingerprint = result?.appliedFingerprint ?? result?.fingerprint ?? null;
+  workspaceAppliedNotice = fingerprint ? {
+    fingerprint,
+    label: label || (revision == null ? 'Workspace 已更新' : `已更新至 Pre Revision ${revision}`),
+  } : null;
+  render();
+  restoreWorkspaceViewport(viewport);
+  return result;
+}
+
+async function applyWorkspaceUpdate({ endpoint = '/api/workspace/apply', body = {}, label = null } = {}) {
+  const revision = workspaceCandidateRevision(workspaceSyncState);
+  setSaveStatus('同步中…', true);
+  const result = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
+  await adoptWorkspaceResult(result, { revision, label });
+  setSaveStatus('已保存');
+  return result;
+}
+
+async function refreshWorkspaceStatusNow({ allowAutoApply = true } = {}) {
+  try {
+    const status = await api('/api/workspace/status');
+    workspaceSyncState = status;
+    if (workspaceAppliedNotice && status?.appliedFingerprint !== workspaceAppliedNotice.fingerprint) workspaceAppliedNotice = null;
+    const mayAutoApply = allowAutoApply
+      && status?.status === 'upstream_update_available'
+      && status?.hasUpstreamCandidate
+      && !workspaceHasDirtyEdits();
+    if (mayAutoApply) return await applyWorkspaceUpdate();
+    renderWorkspaceStatus(status);
+    return status;
+  } catch (error) {
+    workspaceSyncState = {
+      status: error.code === 'request_failed' ? 'watcher_disconnected' : error.code,
+      workspaceRoot: null,
+      projectId: null,
+      standardVersion: '0.1.0',
+      validation: {
+        valid: false,
+        errors: [{ code: error.code || 'request_failed', filePath: '', instancePath: '', message: error.message }],
+        warnings: [],
+      },
+      hasUpstreamCandidate: false,
+    };
+    renderWorkspaceStatus(workspaceSyncState);
+    return workspaceSyncState;
+  }
+}
+
+async function refreshWorkspaceStatus(options = {}) {
+  if (workspaceRefreshPromise) return workspaceRefreshPromise;
+  workspaceRefreshPromise = refreshWorkspaceStatusNow(options);
+  try {
+    return await workspaceRefreshPromise;
+  } finally {
+    workspaceRefreshPromise = null;
+  }
 }
 
 function stageLabel(stage = state?.ui?.stage) {
@@ -761,6 +951,7 @@ function render() {
   renderDraft();
   renderAnnotations();
   renderAgent();
+  renderWorkspaceStatus();
 }
 
 async function saveDraft() {
@@ -830,6 +1021,75 @@ function closeAgent() {
 }
 
 document.addEventListener('click', async event => {
+  if (event.target.closest('#workspace-sync-toggle')) {
+    setWorkspacePanel(query('#workspace-sync-panel')?.hidden !== false);
+    return;
+  }
+
+  if (event.target.closest('[data-workspace-close-panel]')) {
+    setWorkspacePanel(false);
+    return;
+  }
+
+  if (event.target.closest('[data-workspace-view-update]')) {
+    setWorkspacePanel(true);
+    return;
+  }
+
+  if (event.target.closest('[data-workspace-keep-current]')) {
+    ignoredWorkspaceCandidateFingerprint = workspaceSyncState?.candidateFingerprint ?? null;
+    renderWorkspaceStatus();
+    toast('已暂时保留当前版本；新的上游快照仍会再次提示。');
+    return;
+  }
+
+  if (event.target.closest('[data-workspace-save-reload]')) {
+    if (!await flushDraftBuffer({ reason: '保存后重新加载 Workspace' })) return;
+    try {
+      await applyWorkspaceUpdate({ endpoint: '/api/workspace/reload', body: { dirty: false } });
+      toast('本地编辑已保存，Workspace 已重新加载。');
+    } catch (error) {
+      setSaveStatus('同步失败');
+      toast(error.message, true);
+      await refreshWorkspaceStatus({ allowAutoApply: false });
+    }
+    return;
+  }
+
+  if (event.target.closest('[data-workspace-discard-reload]')) {
+    window.clearTimeout(draftAutosaveTimer);
+    draftEditBuffer = null;
+    try {
+      await applyWorkspaceUpdate();
+      toast('本地未保存修改已放弃，Workspace 已重新加载。');
+    } catch (error) {
+      setSaveStatus('同步失败');
+      toast(error.message, true);
+      await refreshWorkspaceStatus({ allowAutoApply: false });
+    }
+    return;
+  }
+
+  if (event.target.closest('[data-workspace-reload]')) {
+    try {
+      const dirty = workspaceHasDirtyEdits();
+      if (dirty) {
+        workspaceSyncState = await api('/api/workspace/reload', { method: 'POST', body: JSON.stringify({ dirty: true }) });
+        workspaceAppliedNotice = null;
+        renderWorkspaceStatus();
+        toast(workspaceSyncState.hasUpstreamCandidate ? '检测到上游更新，请先处理未保存修改。' : 'Workspace 已重新读取。');
+      } else {
+        await applyWorkspaceUpdate({ endpoint: '/api/workspace/reload', body: { dirty: false }, label: 'Workspace 已重新读取' });
+        toast('Workspace 已重新读取。');
+      }
+    } catch (error) {
+      setSaveStatus('同步失败');
+      toast(error.message, true);
+      await refreshWorkspaceStatus({ allowAutoApply: false });
+    }
+    return;
+  }
+
   const stage = event.target.closest('[data-stage]:not(:disabled)');
   if (stage) {
     await runAfterDraftFlush('切换阶段', async () => {
@@ -1264,6 +1524,9 @@ async function load() {
   }
   render();
   setSaveStatus(migration.status === 'migration_required' ? '等待升级' : '已保存');
+  await refreshWorkspaceStatus();
 }
 
-load().catch(error => toast(`启动失败：${error.message}`, true));
+load()
+  .then(() => window.setInterval?.(() => { void refreshWorkspaceStatus(); }, WORKSPACE_POLL_DELAY))
+  .catch(error => toast(`启动失败：${error.message}`, true));

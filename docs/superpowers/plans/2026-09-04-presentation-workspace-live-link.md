@@ -87,11 +87,11 @@
 **Interfaces:**
 - UI 周期读取 `/api/workspace/status`；按钮调用 `/api/workspace/reload` 和 `/api/workspace/apply`。
 
-- [ ] **Step 1: 写状态字段、自动刷新、dirty 固定提示、四个冲突动作、activePage/滚动恢复和结构化错误的失败测试。**
-- [ ] **Step 2: 运行 UI 目标测试并确认正确失败。**
-- [ ] **Step 3: 实现顶部状态按钮、详情面板、更新摘要、自动/显式应用和可访问交互。**
-- [ ] **Step 4: 跑 UI 单测及 6 视口验证，确认未增加第二套模型或 Agent Runtime。**
-- [ ] **Step 5: 提交 `feat(ui): surface workspace live sync conflicts`。**
+- [x] **Step 1: 写状态字段、自动刷新、dirty 固定提示、四个冲突动作、activePage/滚动恢复和结构化错误的失败测试。**
+- [x] **Step 2: 运行 UI 目标测试并确认正确失败。**
+- [x] **Step 3: 实现顶部状态按钮、详情面板、更新摘要、自动/显式应用和可访问交互。**
+- [x] **Step 4: 跑 UI 单测及 6 视口验证，确认未增加第二套模型或 Agent Runtime。**
+- [x] **Step 5: 提交 `feat(ui): surface workspace live sync conflicts`。**
 
 ### Task 5: 门禁、文档、打包和真实宿主
 

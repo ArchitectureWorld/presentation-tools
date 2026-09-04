@@ -22,6 +22,8 @@ test('production shell preserves the approved prototype hierarchy', async () => 
     'comment-composer',
     'agent-chat-card',
     'agent-context-stage',
+    'workspace-sync-toggle',
+    'workspace-conflict-banner',
   ]) {
     assert.ok(html.includes(token), `missing prototype shell token: ${token}`);
   }
