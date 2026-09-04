@@ -47,11 +47,11 @@
 **Interfaces:**
 - `createWorkspaceWatcher({workspaceRoot, debounceMs=750, onCandidate, onStatus, ...injections})` 返回 `{start(), rescan(), status(), close()}`。
 
-- [ ] **Step 1: 写连续事件单次刷新、Windows rename/目录替换、draft 增删改、asset manifest、无效中间态、恢复和 close 的失败测试。**
-- [ ] **Step 2: 运行目标测试并确认正确失败。**
-- [ ] **Step 3: 实现多目录 watcher、750ms 项目级防抖、完整重扫、最后合法快照保留、重建 watcher 和幂等释放。**
-- [ ] **Step 4: 使用真实临时目录跑测试并确认全部通过。**
-- [ ] **Step 5: 提交 `feat(workspace): watch stable upstream snapshots`。**
+- [x] **Step 1: 写连续事件单次刷新、Windows rename/目录替换、draft 增删改、asset manifest、无效中间态、恢复和 close 的失败测试。**
+- [x] **Step 2: 运行目标测试并确认正确失败。**
+- [x] **Step 3: 实现多目录 watcher、750ms 项目级防抖、完整重扫、最后合法快照保留、重建 watcher和幂等释放。**
+- [x] **Step 4: 使用真实临时目录跑测试并确认全部通过。**
+- [x] **Step 5: 提交 `feat(workspace): watch stable upstream snapshots`。**
 
 ### Task 3: Repository 上游发布与 DSH Workspace 绑定
 

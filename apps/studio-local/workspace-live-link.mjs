@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { isAbsolute, join, resolve } from 'node:path'
-import { lstat, realpath } from 'node:fs/promises'
+import { watch as fsWatch } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, readdir, realpath } from 'node:fs/promises'
 import { validateProjectDirectoryWithAjv } from '../../contracts/presentation-standard-project/src/index.mjs'
 import { readStandardProject } from '../../packages/studio-standard-adapter/index.mjs'
 import { StudioError } from '../../packages/studio-contracts/index.mjs'
@@ -128,5 +129,195 @@ export async function readWorkspaceSnapshot(workspaceRoot, { putBlob } = {}) {
       })
     }
     throw error
+  }
+}
+
+const MANAGED_ROOT_ENTRIES = new Set(['project.json', 'rules.json', 'outline.json', 'pages', 'source-materials', 'assets'])
+
+function normalizedRelativePath(root, value) {
+  return relative(root, value).split(sep).join('/')
+}
+
+async function collectDirectories(root) {
+  const directories = []
+  const visit = async current => {
+    try {
+      const entries = await readdir(current, { withFileTypes: true })
+      directories.push(current)
+      for (const entry of entries) {
+        if (entry.isDirectory()) await visit(join(current, entry.name))
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error
+    }
+  }
+  await visit(root)
+  return directories
+}
+
+function managedArchivePaths(snapshot) {
+  return new Set((snapshot?.project?.extensionPayload?.standardArchive?.files ?? [])
+    .map(file => String(file?.relativePath ?? '').replaceAll('\\', '/'))
+    .filter(path => path.startsWith('source-materials/') || path.startsWith('assets/')))
+}
+
+export function createWorkspaceWatcher({
+  workspaceRoot,
+  putBlob,
+  debounceMs = 750,
+  watchFactory = fsWatch,
+  onCandidate = () => {},
+  onStatus = () => {},
+} = {}) {
+  let closed = false
+  let started = false
+  let debounceTimer = null
+  let scanQueue = Promise.resolve()
+  let activeWatches = []
+  let allowedManagedFiles = new Set()
+  let current = {
+    status: 'watcher_disconnected',
+    workspaceRoot: workspaceRoot ?? null,
+    projectId: null,
+    standardVersion: '0.1.0',
+    fingerprint: null,
+    lastValidFingerprint: null,
+    sourceRevision: null,
+    sourceRevisions: [],
+    readAt: null,
+    validation: { valid: false, errors: [], warnings: [] },
+  }
+
+  const publishStatus = async next => {
+    current = clone(next)
+    await onStatus(clone(current))
+  }
+
+  const closeWatches = () => {
+    const watches = activeWatches
+    activeWatches = []
+    for (const watcher of watches) {
+      try {
+        watcher.close()
+      } catch {
+        // A watcher invalidated by an atomic directory replacement is already closed.
+      }
+    }
+  }
+
+  const isManagedEvent = (root, watchedDirectory, filename) => {
+    if (filename === null || filename === undefined) return true
+    const name = String(filename).replaceAll('\\', '/')
+    const absolute = resolve(watchedDirectory, name)
+    const path = normalizedRelativePath(root, absolute)
+    if (!path || path.startsWith('../')) return false
+    if (!path.includes('/')) return MANAGED_ROOT_ENTRIES.has(path)
+    if (path === 'pages/manifest.json' || path === 'pages/drafts') return true
+    if (path.startsWith('pages/drafts/')) return path.endsWith('.json') || !path.slice('pages/drafts/'.length).includes('.')
+    if (path === 'source-materials/manifest.json' || path === 'assets/manifest.json') return true
+    return allowedManagedFiles.has(path)
+  }
+
+  const scheduleRescan = () => {
+    if (closed) return
+    if (debounceTimer) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null
+      void rescan()
+    }, debounceMs)
+  }
+
+  const rebuildWatches = async (root, snapshot) => {
+    closeWatches()
+    if (closed) return
+
+    allowedManagedFiles = managedArchivePaths(snapshot)
+    const directories = new Set([root, join(root, 'pages'), join(root, 'source-materials'), join(root, 'assets')])
+    for (const directory of await collectDirectories(join(root, 'pages', 'drafts'))) directories.add(directory)
+    for (const relativePath of allowedManagedFiles) directories.add(dirname(join(root, ...relativePath.split('/'))))
+
+    for (const directory of directories) {
+      try {
+        const watcher = watchFactory(directory, { persistent: true }, (_eventType, filename) => {
+          if (isManagedEvent(root, directory, filename)) scheduleRescan()
+        })
+        activeWatches.push(watcher)
+      } catch (error) {
+        if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error
+      }
+    }
+  }
+
+  const performRescan = async () => {
+    if (closed) return clone(current)
+    await publishStatus({ ...current, status: 'validating', readAt: new Date().toISOString() })
+    try {
+      const result = await readWorkspaceSnapshot(workspaceRoot, { putBlob })
+      if (closed) return clone(current)
+      await rebuildWatches(result.workspaceRoot, result.snapshot)
+      if (closed) return clone(current)
+
+      if (result.status === 'connected') {
+        const changed = result.fingerprint !== current.lastValidFingerprint
+        const next = { ...result, lastValidFingerprint: result.fingerprint }
+        if (changed) await onCandidate(clone(result))
+        if (!closed) await publishStatus(next)
+        return clone(next)
+      }
+
+      const next = { ...result, lastValidFingerprint: current.lastValidFingerprint }
+      await publishStatus(next)
+      return clone(next)
+    } catch (error) {
+      if (closed) return clone(current)
+      closeWatches()
+      const next = {
+        ...current,
+        status: error?.code ?? 'watcher_error',
+        readAt: new Date().toISOString(),
+        validation: {
+          valid: false,
+          errors: [{
+            code: error?.code ?? 'watcher_error',
+            filePath: '',
+            instancePath: '',
+            message: error?.message ?? String(error),
+          }],
+          warnings: [],
+        },
+      }
+      await publishStatus(next)
+      return clone(next)
+    }
+  }
+
+  function rescan() {
+    if (closed) return Promise.resolve(clone(current))
+    const pending = scanQueue.then(performRescan, performRescan)
+    scanQueue = pending.catch(() => {})
+    return pending
+  }
+
+  return {
+    async start() {
+      if (closed || started) return clone(current)
+      started = true
+      return rescan()
+    },
+    rescan,
+    status() {
+      return clone(current)
+    },
+    async close() {
+      if (closed) return clone(current)
+      closed = true
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = null
+      closeWatches()
+      await scanQueue
+      current = { ...current, status: 'watcher_disconnected' }
+      await onStatus(clone(current))
+      return clone(current)
+    },
   }
 }

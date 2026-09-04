@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
@@ -28,6 +28,33 @@ function memoryBlobStore() {
         mimeType: input.mimeType,
         originalFileName: input.originalFileName,
       }
+    },
+  }
+}
+
+const delay = ms => new Promise(resolveDelay => setTimeout(resolveDelay, ms))
+
+async function waitFor(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for Workspace watcher state')
+    await delay(10)
+  }
+}
+
+function fakeWatchHarness() {
+  const registrations = []
+  const watchFactory = (path, options, listener) => {
+    const callback = typeof options === 'function' ? options : listener
+    const registration = { path, callback, closed: false }
+    registrations.push(registration)
+    return { close() { registration.closed = true } }
+  }
+  return {
+    registrations,
+    watchFactory,
+    emit(eventType = 'change', filename = 'outline.json') {
+      for (const registration of registrations.filter(item => !item.closed)) registration.callback(eventType, filename)
     },
   }
 }
@@ -117,4 +144,159 @@ test('memory blob test helper accepts async byte streams', async () => {
   const store = memoryBlobStore()
   const descriptor = await store.putBlob(Readable.from([Buffer.from('abc')]), { originalFileName: 'a.txt', mimeType: 'text/plain' })
   assert.equal(descriptor.sizeBytes, 3)
+})
+
+test('Workspace watcher debounces consecutive managed-file events into one validated candidate', async () => {
+  assert.equal(typeof liveLink.createWorkspaceWatcher, 'function')
+  const workspaceRoot = await makeWorkspace('presentation-live-debounce-')
+  const harness = fakeWatchHarness()
+  const candidates = []
+  const statuses = []
+  const watcher = liveLink.createWorkspaceWatcher({
+    workspaceRoot,
+    putBlob: memoryBlobStore().putBlob,
+    debounceMs: 30,
+    watchFactory: harness.watchFactory,
+    onCandidate: candidate => candidates.push(candidate),
+    onStatus: status => statuses.push(status),
+  })
+  try {
+    await watcher.start()
+    assert.equal(candidates.length, 1)
+    const outlinePath = join(workspaceRoot, 'outline.json')
+    const rulesPath = join(workspaceRoot, 'rules.json')
+    const outline = JSON.parse(await readFile(outlinePath, 'utf8'))
+    const rules = JSON.parse(await readFile(rulesPath, 'utf8'))
+    outline.nodes[0].title = '防抖后的合法标题'
+    rules.visualIntent = ['保持克制']
+    await writeFile(outlinePath, `${JSON.stringify(outline, null, 2)}\n`, 'utf8')
+    harness.emit('change', 'outline.json')
+    await writeFile(rulesPath, `${JSON.stringify(rules, null, 2)}\n`, 'utf8')
+    harness.emit('rename', 'rules.json')
+    harness.emit('change', 'rules.json')
+    await waitFor(() => candidates.length >= 2)
+    await delay(100)
+    assert.equal(candidates.length, 2)
+    assert.notEqual(candidates[1].fingerprint, candidates[0].fingerprint)
+    assert.equal(statuses.at(-1).status, 'connected')
+  } finally {
+    await watcher.close()
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('Workspace watcher retains the last legal snapshot through invalid atomic writes and recovers', async () => {
+  assert.equal(typeof liveLink.createWorkspaceWatcher, 'function')
+  const workspaceRoot = await makeWorkspace('presentation-live-recovery-')
+  const harness = fakeWatchHarness()
+  const candidates = []
+  const statuses = []
+  const watcher = liveLink.createWorkspaceWatcher({
+    workspaceRoot,
+    putBlob: memoryBlobStore().putBlob,
+    debounceMs: 25,
+    watchFactory: harness.watchFactory,
+    onCandidate: candidate => candidates.push(candidate),
+    onStatus: status => statuses.push(status),
+  })
+  try {
+    await watcher.start()
+    const outlinePath = join(workspaceRoot, 'outline.json')
+    const valid = await readFile(outlinePath, 'utf8')
+    await writeFile(outlinePath, '{"partial":', 'utf8')
+    harness.emit('rename', 'outline.json')
+    await waitFor(() => statuses.at(-1)?.status === 'workspace_contract_invalid')
+    assert.equal(candidates.length, 1)
+    assert.equal(statuses.at(-1).status, 'workspace_contract_invalid')
+    assert.equal(statuses.at(-1).lastValidFingerprint, candidates[0].fingerprint)
+
+    const replacement = `${outlinePath}.replacement`
+    const restored = JSON.parse(valid)
+    restored.nodes[0].summary = '原子替换后恢复'
+    await writeFile(replacement, `${JSON.stringify(restored, null, 2)}\n`, 'utf8')
+    await rm(outlinePath, { force: true })
+    await rename(replacement, outlinePath)
+    harness.emit('rename', 'outline.json')
+    await waitFor(() => candidates.length >= 2)
+    assert.equal(candidates.length, 2)
+    assert.equal(statuses.at(-1).status, 'connected')
+    assert.ok(harness.registrations.some(item => item.path.endsWith('pages')))
+    assert.ok(harness.registrations.some(item => item.path.endsWith(join('pages', 'drafts'))))
+  } finally {
+    await watcher.close()
+    assert.ok(harness.registrations.every(item => item.closed))
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('Workspace watcher observes a real Windows atomic replacement and publishes the stable project', async () => {
+  assert.equal(typeof liveLink.createWorkspaceWatcher, 'function')
+  const workspaceRoot = await makeWorkspace('presentation-live-real-watch-')
+  const candidates = []
+  const watcher = liveLink.createWorkspaceWatcher({
+    workspaceRoot,
+    putBlob: memoryBlobStore().putBlob,
+    debounceMs: 40,
+    onCandidate: candidate => candidates.push(candidate),
+  })
+  try {
+    await watcher.start()
+    const outlinePath = join(workspaceRoot, 'outline.json')
+    const outline = JSON.parse(await readFile(outlinePath, 'utf8'))
+    outline.nodes[0].title = '真实 Windows 原子替换后的标题'
+    const replacement = `${outlinePath}.replacement`
+    await writeFile(replacement, `${JSON.stringify(outline, null, 2)}\n`, 'utf8')
+    await rm(outlinePath, { force: true })
+    await rename(replacement, outlinePath)
+    await waitFor(() => candidates.length >= 2, 5000)
+    assert.equal(candidates.length, 2)
+    assert.equal(candidates[1].snapshot.project.extensionPayload.standardArchive.documents['outline.json'].nodes[0].title, '真实 Windows 原子替换后的标题')
+    assert.equal(watcher.status().status, 'connected')
+  } finally {
+    await watcher.close()
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
+test('Workspace watcher detects draft and asset-manifest changes and stops after close', async () => {
+  assert.equal(typeof liveLink.createWorkspaceWatcher, 'function')
+  const workspaceRoot = await makeWorkspace('presentation-live-managed-events-')
+  const harness = fakeWatchHarness()
+  const candidates = []
+  const statuses = []
+  const watcher = liveLink.createWorkspaceWatcher({
+    workspaceRoot,
+    putBlob: memoryBlobStore().putBlob,
+    debounceMs: 20,
+    watchFactory: harness.watchFactory,
+    onCandidate: candidate => candidates.push(candidate),
+    onStatus: status => statuses.push(status),
+  })
+  try {
+    await watcher.start()
+    const draftPath = join(workspaceRoot, 'pages', 'drafts', 'page_01992a80-0000-7000-8000-000000000111.json')
+    const draft = JSON.parse(await readFile(draftPath, 'utf8'))
+    draft.contentBlocks.find(block => block.role === 'key_message').content = 'Pre 更新后的正文'
+    await writeFile(draftPath, `${JSON.stringify(draft, null, 2)}\n`, 'utf8')
+    harness.emit('change', 'page.json')
+    await waitFor(() => candidates.length >= 2)
+    assert.equal(candidates.length, 2)
+
+    const assetPath = join(workspaceRoot, 'assets', 'manifest.json')
+    const assets = JSON.parse(await readFile(assetPath, 'utf8'))
+    assets.assets[0].displayName = 'Pre 更新后的图表名称'
+    await writeFile(assetPath, `${JSON.stringify(assets, null, 2)}\n`, 'utf8')
+    harness.emit('change', 'manifest.json')
+    await waitFor(() => candidates.length >= 3)
+    assert.equal(candidates.length, 3)
+
+    await watcher.close()
+    harness.emit('change', 'manifest.json')
+    await delay(60)
+    assert.equal(candidates.length, 3)
+    assert.equal(statuses.at(-1).status, 'watcher_disconnected')
+  } finally {
+    await watcher.close()
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
 })
