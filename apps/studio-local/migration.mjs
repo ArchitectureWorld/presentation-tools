@@ -1,9 +1,21 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { ERROR_CODES, STUDIO_SCHEMA_VERSION, StudioError, createStudioId } from '../../packages/studio-contracts/index.mjs'
 
 const clone = value => structuredClone(value)
+const HYDRATABLE_DERIVED_ID_KINDS = new Set(['projectRules', 'outlineDocument', 'draftDocument', 'contentBlock', 'listItem', 'scriptBlock', 'pageAsset'])
+
+function deriveHistoricalHydrationId(kind, oldId, projectId) {
+  const digest = createHash('sha256').update(`report-studio.v0.1.1:historical-hydration:${projectId}:${kind}:${oldId}`).digest()
+  return createStudioId(kind, {
+    now: digest.readUIntBE(0, 6),
+    randomBytes(size) {
+      if (size !== 10) throw new Error('历史迁移派生 ID 仅支持 UUIDv7 随机段。')
+      return digest.subarray(6, 16)
+    },
+  })
+}
 
 async function exists(path) {
   try { await stat(path); return true } catch (error) { if (error?.code === 'ENOENT') return false; throw error }
@@ -26,11 +38,16 @@ export async function inspectLegacyState(dataDir) {
   return { exists: true, path, bytes, state }
 }
 
-export function mapLegacyState(legacy, migrationMap, { requireExistingIds = false } = {}) {
+export function mapLegacyState(legacy, migrationMap, { requireExistingIds = false, deriveMissingIds = false } = {}) {
   const ids = migrationMap.ids
+  const projectId = ids[legacy.project.id] ?? legacy.project.id
   function mapped(oldId, kind) {
     if (oldId === null || oldId === undefined) return oldId
     if (!ids[oldId]) {
+      if (deriveMissingIds && HYDRATABLE_DERIVED_ID_KINDS.has(kind)) {
+        ids[oldId] = deriveHistoricalHydrationId(kind, oldId, projectId)
+        return ids[oldId]
+      }
       if (requireExistingIds) {
         throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '历史迁移映射缺少稳定 ID。', { oldId, kind }, 500)
       }

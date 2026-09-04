@@ -129,8 +129,14 @@ test('reopens a simplified historical canonical snapshot from its immutable lega
     })
     control.projectHead.currentRevisionRef = await replaceContentAddressedObject(dir, revision)
     await writeFile(controlPath, `${JSON.stringify(control, null, 2)}\n`, 'utf8')
+    const migrationMapPath = join(dir, 'migration-map.json')
+    const historicalMap = JSON.parse(await readFile(migrationMapPath, 'utf8'))
+    for (const key of Object.keys(historicalMap.ids)) {
+      if (key.startsWith(`${legacy.pages[0].id}:`)) delete historicalMap.ids[key]
+    }
+    await writeFile(migrationMapPath, `${JSON.stringify(historicalMap, null, 2)}\n`, 'utf8')
     const controlBeforeOpen = await readFile(controlPath, 'utf8')
-    const migrationMapBeforeOpen = await readFile(join(dir, 'migration-map.json'), 'utf8')
+    const migrationMapBeforeOpen = await readFile(migrationMapPath, 'utf8')
 
     repository = await createRepository(dir)
     const state = repository.getState()
@@ -141,7 +147,22 @@ test('reopens a simplified historical canonical snapshot from its immutable lega
     assert.match(page.contentBlocks[0].contentBlockId, /^content_block_[0-9a-f-]{36}$/)
     assert.match(page.scriptBlocks[0].scriptBlockId, /^script_block_[0-9a-f-]{36}$/)
     assert.equal(await readFile(controlPath, 'utf8'), controlBeforeOpen)
-    assert.equal(await readFile(join(dir, 'migration-map.json'), 'utf8'), migrationMapBeforeOpen)
+    assert.equal(await readFile(migrationMapPath, 'utf8'), migrationMapBeforeOpen)
+    const identities = {
+      outlineNodeId: state.outline[0].outlineNodeId,
+      draftDocumentId: page.draftDocumentId,
+      contentBlockId: page.contentBlocks[0].contentBlockId,
+      scriptBlockId: page.scriptBlocks[0].scriptBlockId,
+    }
+    await repository.close()
+    repository = await createRepository(dir)
+    const reopened = repository.getState()
+    assert.deepEqual({
+      outlineNodeId: reopened.outline[0].outlineNodeId,
+      draftDocumentId: reopened.pages[0].draftDocumentId,
+      contentBlockId: reopened.pages[0].contentBlocks[0].contentBlockId,
+      scriptBlockId: reopened.pages[0].scriptBlocks[0].scriptBlockId,
+    }, identities)
   } finally {
     await repository?.close?.()
     await rm(dir, { recursive: true, force: true })

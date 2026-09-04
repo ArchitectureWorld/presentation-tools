@@ -216,7 +216,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       if (!migrationMap?.ids || typeof migrationMap.ids !== 'object' || Array.isArray(migrationMap.ids)) {
         throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '历史迁移映射结构无效。', undefined, 500)
       }
-      return canonicalFromState(mapLegacyState(legacy.value, migrationMap, { requireExistingIds: true }))
+      return canonicalFromState(mapLegacyState(legacy.value, migrationMap, { requireExistingIds: true, deriveMissingIds: true }))
     }
   }
 
