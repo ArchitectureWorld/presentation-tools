@@ -17,6 +17,8 @@ updated_at: 2026-09-04
 
 Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `feat/report-studio-v0.1.1-hardening`。Review 起点为 `9d18fcb03b889d2db5002665d7c18362cc7399ed`，main 基线为 `804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`。本 handoff 随所在提交一起更新；部署来源 SHA、tarball SHA-256、测试、宿主和 CI 的实际结果见同一次 Task 10 报告，不能由本文件的候选状态推导为发布许可。
 
+当前可部署代码提交为 `1676abd3737e6fda53bd97918c5b7c2d746bc178`；对应现场 tarball 是 39 files / 88,476 bytes / SHA-256 `f6b4fc6a81dcf01df51dd66d071c0969d930a4a605d5764af890d9ff2ad24748`。它已在真实 Web Profile 部署；代码、完整验证与宿主迁移读取证据见 Task 10 报告，GitHub Actions、main required checks 和真实 Provider 闭环仍是独立门槛。
+
 ## 架构与兼容性
 
 - Canonical 只保存可编辑项目内容及 ObjectRef；Operational 保存 Annotation、ReviewRound、ReviewSubmission、ReviewRun、Proposal 与迁移审计；Workspace View 不进入内容 Revision。

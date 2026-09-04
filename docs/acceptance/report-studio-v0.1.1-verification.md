@@ -1,4 +1,6 @@
-# Report Studio v0.1.1 发布验收记录
+# Report Studio v0.1.1 发布验收记录（历史参考）
+
+> 本文件记录 2026-09-03 的历史验收快照；其中 tarball 规格不代表当前部署件。当前 `1676abd` 的代码、tarball SHA-256、真实宿主和外部阻断项以 `docs/review/2026-09-03-report-studio-v0.1.1-review-blockers-resolution.md` 与 Task 10 报告为准。
 
 验收日期：2026-09-03（Asia/Shanghai）
 
