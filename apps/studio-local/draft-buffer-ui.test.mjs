@@ -147,3 +147,46 @@ test('autosave and a protected operation share one in-flight flush instead of cr
   assert.equal(operationRan, 1)
   assert.equal(app.requests.length, 1)
 })
+
+test('a successful in-flight save does not discard a newer input and queues its own fresh payload', async () => {
+  const releases = []
+  const app = await loadBrowser({ onAction: async () => new Promise(resolve => { releases.push(() => resolve(null)) }) })
+  const body = app.elements.get('#draft-body')
+  body.value = '第一版'; await app.emit('input', { target: body })
+  const firstFlush = app.context.flushDraftBuffer({ reason: '首次保存' })
+  await new Promise(resolve => setImmediate(resolve))
+  body.value = '第二版'; await app.emit('input', { target: body })
+  releases.shift()()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(app.requests.length, 2)
+  assert.equal(app.requests[1].patch.body, '第二版')
+  releases.shift()()
+  await firstFlush
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(await app.context.flushDraftBuffer({ reason: '确认已清空' }), true)
+  assert.equal(app.getState().pages[0].body, '第二版')
+})
+
+test('a stale in-flight save keeps a newer input dirty for a retry payload', async () => {
+  let release; let calls = 0
+  const app = await loadBrowser({ onAction: async ({ serverState, setState }) => {
+    calls += 1
+    if (calls > 1) return null
+    return new Promise(resolve => {
+    release = () => {
+      setState(executeAction(serverState, { type: 'project.rename', title: '远端更新' }).state)
+      resolve({ ok: false, body: { error: { code: 'stale_revision', message: '已过期' } } })
+    }
+    })
+  } })
+  const body = app.elements.get('#draft-body')
+  body.value = '旧输入'; await app.emit('input', { target: body })
+  const firstFlush = app.context.flushDraftBuffer({ reason: '会冲突的保存' })
+  await new Promise(resolve => setImmediate(resolve))
+  body.value = '新输入'; await app.emit('input', { target: body })
+  release()
+  assert.equal(await firstFlush, false)
+  assert.match(app.elements.get('#draft-stage').innerHTML, /新输入/)
+  await app.context.flushDraftBuffer({ reason: '重试保存' })
+  assert.equal(app.requests.at(-1).patch.body, '新输入')
+})

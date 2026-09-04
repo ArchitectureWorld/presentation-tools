@@ -97,6 +97,7 @@ function createDraftEditBuffer(page) {
     scriptBlocks: (page.scriptBlocks ?? []).map(block => ({ scriptBlockId: block.scriptBlockId, value: block.content })),
     script: page.script ?? '',
     assetCaptions: (page.pageAssets ?? []).map(asset => ({ pageAssetId: asset.pageAssetId, caption: asset.caption })),
+    editGeneration: 0,
     dirty: false,
     saveState: 'saved',
     conflict: null,
@@ -129,6 +130,7 @@ function updateDraftBufferFromInput(input) {
     if (!asset) return false;
     asset.caption = input.value;
   } else return false;
+  buffer.editGeneration += 1;
   buffer.dirty = true;
   buffer.saveState = 'dirty';
   buffer.conflict = null;
@@ -187,9 +189,16 @@ async function flushDraftBufferNow(buffer, reason) {
 
   window.clearTimeout(draftAutosaveTimer);
   buffer.saveState = 'saving';
+  const submittedGeneration = buffer.editGeneration;
+  const patch = draftPatchFromBuffer(page, buffer);
   try {
-    await action({ type: 'draft.update', pageId: page.id, baseRevision: buffer.baseRevision, patch: draftPatchFromBuffer(page, buffer) }, { renderAfter: false });
+    await action({ type: 'draft.update', pageId: page.id, baseRevision: buffer.baseRevision, patch }, { renderAfter: false });
     buffer.baseRevision = state.project.currentRevision;
+    if (buffer.editGeneration !== submittedGeneration) {
+      buffer.dirty = true;
+      buffer.saveState = 'dirty';
+      return flushDraftBufferNow(buffer, reason);
+    }
     buffer.dirty = false;
     buffer.saveState = 'saved';
     buffer.conflict = null;
