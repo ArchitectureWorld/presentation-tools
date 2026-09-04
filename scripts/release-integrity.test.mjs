@@ -134,8 +134,8 @@ if (integrity) {
     await Promise.all([
       writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
       writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), reportStudioWorkflow.replace(/\n/g, '\r\n'), 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow.replace(/\n/g, '\r\n'), 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), reportStudioWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'), 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'), 'utf8'),
     ])
 
     const result = await integrity.verifyReleaseConfiguration(configurationRoot)
