@@ -41,7 +41,7 @@ if (integrity) {
       readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
     ])
     const manifestPathLine = "      - 'scripts/dsh-plugin-vendor-manifest.mjs'"
-    const workflowMissingPushPath = workflow.replace(`${manifestPathLine}\n`, '')
+    const workflowMissingPushPath = workflow.replace(new RegExp(`${manifestPathLine.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}\\r?\\n`), '')
     assert.notEqual(workflowMissingPushPath, workflow, 'fixture must remove the push path filter')
     assert.ok(workflowMissingPushPath.includes(manifestPathLine), 'fixture must retain the pull_request path filter')
     await Promise.all([

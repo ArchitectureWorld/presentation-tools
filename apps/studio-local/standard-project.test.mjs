@@ -186,9 +186,13 @@ test('standard exports retain UUID uniqueness when the clock is fixed to one mil
       clock: () => new Date('2026-09-03T08:00:00.000Z'),
       randomUUID: () => ids.shift(),
     })
-    const [left, right] = await Promise.all([service.exportProject(), service.exportProject()])
-    assert.match(left.projectRoot, new RegExp(`${dir.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]exports[\\\\/]2026-09-03T08-00-00.000Z-uuid-a`))
-    assert.match(right.projectRoot, new RegExp(`${dir.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]exports[\\\\/]2026-09-03T08-00-00.000Z-uuid-b`))
+    const results = await Promise.all([service.exportProject(), service.exportProject()])
+    const roots = results.map(result => result.projectRoot).sort()
+    const rootPattern = new RegExp(`^${dir.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}[\\\\/]exports[\\\\/]2026-09-03T08-00-00.000Z-uuid-[ab]`)
+    assert.equal(new Set(roots).size, 2)
+    assert.ok(roots.every(projectRoot => rootPattern.test(projectRoot)))
+    assert.ok(roots.some(projectRoot => projectRoot.includes('2026-09-03T08-00-00.000Z-uuid-a')))
+    assert.ok(roots.some(projectRoot => projectRoot.includes('2026-09-03T08-00-00.000Z-uuid-b')))
   })
 })
 
