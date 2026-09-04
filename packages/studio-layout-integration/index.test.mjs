@@ -199,7 +199,7 @@ test('buildLayoutSourceProjection projects every supported stable source identit
     `content-item:${IDS.table}:table-cell:${IDS.tableCell}`,
     `page-asset:${IDS.pageAsset}`,
     `script-block:${IDS.script}`,
-  ])
+  ].sort())
 
   assert.deepEqual(sources[sourceRefKey({ kind: 'content-block', contentBlockId: IDS.title })], {
     kind: 'text',
