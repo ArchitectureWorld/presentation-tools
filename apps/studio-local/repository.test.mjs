@@ -21,6 +21,22 @@ const importedSnapshot = () => ({
   pages: [],
 })
 
+function canonicalJson(value) {
+  const sortValue = entry => Array.isArray(entry)
+    ? entry.map(sortValue)
+    : (!entry || typeof entry !== 'object')
+      ? entry
+      : Object.fromEntries(Object.keys(entry).sort().map(key => [key, sortValue(entry[key])]))
+  return JSON.stringify(sortValue(value))
+}
+
+async function replaceContentAddressedObject(directory, value) {
+  const payload = canonicalJson(value)
+  const sha256 = createHash('sha256').update(payload).digest('hex')
+  await writeFile(join(directory, 'objects', 'sha256', `${sha256}.json`), payload, 'utf8')
+  return { sha256 }
+}
+
 async function withRepository(run, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-repository-'))
   let repository
@@ -55,6 +71,36 @@ test('content transaction persists an immutable snapshot that reloads through Pr
       await reopened.close()
     }
   })
+})
+
+test('reopens a legacy canonical snapshot by deriving required project identities from its stable project id', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-legacy-canonical-'))
+  let repository = await createRepository(dir)
+  try {
+    const initialProjectId = repository.getState().project.projectId
+    await repository.close()
+    repository = null
+    const control = JSON.parse(await readFile(join(dir, 'control.json'), 'utf8'))
+    const revisionPath = join(dir, 'objects', 'sha256', `${control.projectHead.currentRevisionRef.sha256}.json`)
+    const revision = JSON.parse(await readFile(revisionPath, 'utf8'))
+    const snapshotPath = join(dir, 'objects', 'sha256', `${revision.snapshotRef.sha256}.json`)
+    const storedSnapshot = JSON.parse(await readFile(snapshotPath, 'utf8'))
+    delete storedSnapshot.value.project.projectId
+    delete storedSnapshot.value.project.projectRulesId
+    delete storedSnapshot.value.project.outlineDocumentId
+    revision.snapshotRef = await replaceContentAddressedObject(dir, storedSnapshot)
+    control.projectHead.currentRevisionRef = await replaceContentAddressedObject(dir, revision)
+    await writeFile(join(dir, 'control.json'), `${JSON.stringify(control, null, 2)}\n`, 'utf8')
+
+    repository = await createRepository(dir)
+    const state = repository.getState()
+    assert.equal(state.project.projectId, initialProjectId)
+    assert.match(state.project.projectRulesId, /^project_rules_[0-9a-f-]{36}$/)
+    assert.match(state.project.outlineDocumentId, /^outline_[0-9a-f-]{36}$/)
+  } finally {
+    await repository?.close?.()
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('pending ReviewRun and immutable Submission persist across repository restart', async () => {
