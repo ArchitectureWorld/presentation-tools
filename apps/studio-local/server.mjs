@@ -9,6 +9,8 @@ import { ERROR_CODES, StudioError, errorPayload } from '../../packages/studio-co
 import { createStandardProjectService } from './standard-project.mjs';
 import { projectAgentContext, reviewSubmissionContext } from './agent-context.mjs';
 import { ingestAsset, serveReferencedAsset } from './asset-service.mjs';
+import { createLayoutService } from './layout-service.mjs';
+import { executeLayoutApi, layoutApiErrorPayload, matchLayoutApiPath } from './layout-api.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
@@ -42,6 +44,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   requireLoopback(host);
   const repository = await createRepository(dataDir);
   const standardProject = createStandardProjectService(repository);
+  const layoutService = createLayoutService({ repository, layoutRoot: join(dataDir, 'layouts') });
   const bridge = agentBridge === undefined ? createAgentBridge() : agentBridge;
   let actualPort = port;
   let server;
@@ -118,7 +121,10 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, {
       ok: true,
       version: 'v0.1.1',
+      productVersion: '0.2.0-beta.1',
+      layoutStage: true,
       dataPath: repository.statePath,
+      layoutPath: layoutService.root,
       migrationStatus: repository.migrationStatus().status,
       agentConfigured: Boolean(bridge?.configured),
       securityMode: SECURITY_MODE,
@@ -133,6 +139,16 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
       return sendJson(res, 200, await standardProject.importProject(input.projectRoot));
     }
     if (req.method === 'POST' && url.pathname === '/api/standard/export') return sendJson(res, 200, await standardProject.exportProject());
+    const layoutMatch = matchLayoutApiPath(url.pathname);
+    if (layoutMatch) {
+      try {
+        const body = req.method === 'POST' ? await readJson(req) : {};
+        return sendJson(res, 200, await executeLayoutApi({ service: layoutService, method: req.method, match: layoutMatch, body }));
+      } catch (error) {
+        const response = layoutApiErrorPayload(error);
+        return sendJson(res, response.status, response.payload);
+      }
+    }
     if (req.method === 'GET' && url.pathname === '/api/state') return sendJson(res, 200, await recoverExpiredDispatches());
     if (req.method === 'POST' && url.pathname === '/api/assets/ingest') {
       const pageId = url.searchParams.get('pageId');
@@ -273,6 +289,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
 
   return {
     repository,
+    layoutService,
     get port() { return actualPort; },
     async start() {
       await new Promise((resolve, reject) => {
@@ -290,6 +307,6 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const app = await createStudioServer(); await app.start();
-  console.log(`Report Studio v0.1.1 running at http://${process.env.HOST || '127.0.0.1'}:${app.port}`);
+  console.log(`Report Studio v0.2.0-beta.1 running at http://${process.env.HOST || '127.0.0.1'}:${app.port}`);
   console.log(`Data: ${app.repository.statePath}`);
 }
