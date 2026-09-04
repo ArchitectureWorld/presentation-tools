@@ -1,4 +1,5 @@
-import { createStableId, createUuidV7, isStableId } from '../../contracts/presentation-standard-project/src/ids.mjs'
+import Ajv from 'ajv'
+import { createStableId, createUuidV7, isStableId, stableIdPattern, UUID_V7_PATTERN } from '../../contracts/presentation-standard-project/src/ids.mjs'
 
 export const STUDIO_SCHEMA_VERSION = 'report-studio.v0.1.1'
 export const CONTROL_SCHEMA_VERSION = 'report-studio.control.v0.1.1'
@@ -50,6 +51,8 @@ const STUDIO_PREFIXES = Object.freeze({
   reviewRound: 'review_round',
   reviewSubmission: 'review_submission',
   proposal: 'proposal',
+  command: 'command',
+  changeSet: 'change_set',
 })
 
 export function createStudioId(kind, options = {}) {
@@ -57,6 +60,97 @@ export function createStudioId(kind, options = {}) {
   const prefix = STUDIO_PREFIXES[kind]
   if (!prefix) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, `未知 Studio ID 类型：${kind}`, { kind })
   return `${prefix}_${createUuidV7(options)}`
+}
+
+const idSchema = kind => ({ type: 'string', pattern: stableIdPattern(kind).source })
+const studioIdSchema = kind => ({ type: 'string', pattern: `^${STUDIO_PREFIXES[kind]}_${UUID_V7_PATTERN}$` })
+const scopeKeySchema = {
+  type: 'string',
+  pattern: `^(?:outline:root|draft:page_${UUID_V7_PATTERN})$`,
+}
+const riskLevelSchema = {
+  type: 'string',
+  enum: ['ordinary_reversible', 'structural_review_required', 'protected_or_deferred'],
+}
+const commonCommandProperties = {
+  commandId: studioIdSchema('command'),
+  scopeKey: scopeKeySchema,
+  baseRevision: { type: 'integer', minimum: 0 },
+  riskLevel: riskLevelSchema,
+  sourceAnnotationIds: {
+    type: 'array',
+    minItems: 1,
+    uniqueItems: true,
+    items: studioIdSchema('annotation'),
+  },
+}
+const commandBranch = (type, properties, required) => ({
+  type: 'object',
+  properties: {
+    ...commonCommandProperties,
+    type: { const: type },
+    ...properties,
+  },
+  required: ['commandId', 'type', 'scopeKey', 'baseRevision', 'riskLevel', 'sourceAnnotationIds', ...required],
+  additionalProperties: false,
+})
+
+const scalarDraftPatchSchema = {
+  oneOf: ['heading', 'body', 'script'].map(field => ({
+    type: 'object',
+    properties: { [field]: { type: 'string' } },
+    required: [field],
+    additionalProperties: false,
+  })),
+}
+
+export const STUDIO_COMMAND_SCHEMA = Object.freeze({
+  oneOf: [
+    commandBranch('project.rename', { projectId: idSchema('project'), title: { type: 'string', minLength: 1 } }, ['projectId', 'title']),
+    commandBranch('outline.add', { nodeId: idSchema('outlineNode'), parentId: { anyOf: [{ type: 'null' }, idSchema('outlineNode')] }, title: { type: 'string', minLength: 1 } }, ['nodeId', 'parentId', 'title']),
+    commandBranch('outline.rename', { nodeId: idSchema('outlineNode'), title: { type: 'string', minLength: 1 } }, ['nodeId', 'title']),
+    commandBranch('outline.move', { nodeId: idSchema('outlineNode'), direction: { type: 'string', enum: ['up', 'down'] } }, ['nodeId', 'direction']),
+    commandBranch('draft.ensurePage', { outlineNodeId: idSchema('outlineNode'), pageId: idSchema('page') }, ['outlineNodeId', 'pageId']),
+    commandBranch('draft.update', { pageId: idSchema('page'), patch: scalarDraftPatchSchema }, ['pageId', 'patch']),
+    commandBranch('draft.list.insert', { pageId: idSchema('page'), listItemId: idSchema('listItem'), afterListItemId: { anyOf: [{ type: 'null' }, idSchema('listItem')] }, content: { type: 'string' } }, ['pageId', 'listItemId', 'afterListItemId', 'content']),
+    commandBranch('draft.list.delete', { pageId: idSchema('page'), listItemId: idSchema('listItem') }, ['pageId', 'listItemId']),
+    commandBranch('draft.list.move', { pageId: idSchema('page'), listItemId: idSchema('listItem'), direction: { type: 'string', enum: ['up', 'down'] } }, ['pageId', 'listItemId', 'direction']),
+  ],
+})
+
+export const STUDIO_APPLY_COMMANDS_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: {
+    submissionId: studioIdSchema('reviewSubmission'),
+    projectId: idSchema('project'),
+    baseRevision: { type: 'integer', minimum: 0 },
+    scopeKey: scopeKeySchema,
+    idempotencyKey: { type: 'string', minLength: 1 },
+    message: { type: 'string', minLength: 1 },
+    commands: { type: 'array', minItems: 1, items: STUDIO_COMMAND_SCHEMA },
+  },
+  required: ['submissionId', 'projectId', 'baseRevision', 'scopeKey', 'message', 'commands'],
+  additionalProperties: false,
+})
+
+const ajv = new Ajv({ allErrors: true, strict: false })
+const validateStudioCommand = ajv.compile(STUDIO_COMMAND_SCHEMA)
+const validateStudioApplyCommands = ajv.compile(STUDIO_APPLY_COMMANDS_SCHEMA)
+
+function schemaError(message, errors) {
+  throw new StudioError(ERROR_CODES.INVALID_COMMAND, message, {
+    validationErrors: clone(errors ?? []),
+  }, 400)
+}
+
+export function assertStudioCommand(command) {
+  if (!validateStudioCommand(command)) schemaError('Agent Command Schema 校验失败。', validateStudioCommand.errors)
+  return clone(command)
+}
+
+export function assertStudioApplyCommands(input) {
+  if (!validateStudioApplyCommands(input)) schemaError('Agent ChangeSet Schema 校验失败。', validateStudioApplyCommands.errors)
+  return clone(input)
 }
 
 const clone = value => structuredClone(value)

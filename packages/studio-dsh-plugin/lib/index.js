@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createStudioDshRuntime } from './runtime.js'
-import { errorPayload } from '../vendor/packages/studio-contracts/index.mjs'
+import { STUDIO_APPLY_COMMANDS_SCHEMA, errorPayload } from '../vendor/packages/studio-contracts/index.mjs'
 import { createStandardProjectService } from '../vendor/apps/studio-local/standard-project.mjs'
 import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/asset-service.mjs'
 
@@ -89,37 +89,7 @@ function registerTools(ctx, runtime) {
   ctx.tools.register({
     name: 'studio_apply_commands',
     description: '根据一个不可变 ReviewSubmission 提交结构化修改命令并创建 Proposal。该工具不会直接覆盖正式内容，仍需用户在 Report Studio 中确认。',
-    parameters: {
-      type: 'object',
-      properties: {
-        submissionId: {
-          type: 'string',
-          description: 'ReviewSubmission 提示中提供的稳定 ID。',
-        },
-        idempotencyKey: {
-          type: 'string',
-          description: '可选；默认使用 ReviewSubmission 固定的幂等键。',
-        },
-        message: {
-          type: 'string',
-          description: '面向用户的修改说明。',
-        },
-        commands: {
-          type: 'array',
-          description: 'Report Studio 受控结构化命令数组。',
-          items: {
-            type: 'object',
-            properties: {
-              type: { type: 'string' },
-            },
-            required: ['type'],
-            additionalProperties: true,
-          },
-        },
-      },
-      required: ['submissionId', 'message', 'commands'],
-      additionalProperties: false,
-    },
+    parameters: structuredClone(STUDIO_APPLY_COMMANDS_SCHEMA),
     output: toolOutput(),
     async execute(args, exec) {
       return outputJson(await runtime.applyCommands(sessionIdOf(exec), args))
@@ -204,6 +174,13 @@ function createRoute(runtime) {
         const match = url.pathname.match(/^\/report-studio\/api\/proposal\/([^/]+)\/accept$/)
         if (request.method === 'POST' && match) {
           return sendJson(response, 200, await runtime.acceptProposal(sessionId, decodeURIComponent(match[1])))
+        }
+        const proposalActionMatch = url.pathname.match(/^\/report-studio\/api\/proposal\/([^/]+)\/(reject|return)$/)
+        if (request.method === 'POST' && proposalActionMatch) {
+          const proposalId = decodeURIComponent(proposalActionMatch[1])
+          return sendJson(response, 200, proposalActionMatch[2] === 'reject'
+            ? await runtime.rejectProposal(sessionId, proposalId)
+            : await runtime.returnProposal(sessionId, proposalId))
         }
         return sendJson(response, 404, { error: 'not_found' })
       }

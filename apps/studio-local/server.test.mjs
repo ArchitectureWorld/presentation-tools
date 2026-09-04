@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRepository } from './repository.mjs';
 import { createStudioServer } from './server.mjs';
+import { createStudioId } from '../../packages/studio-contracts/index.mjs';
 
 const png = (width = 1, height = 1) => Buffer.from([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,(width >>> 24)&255,(width >>> 16)&255,(width >>> 8)&255,width&255,(height >>> 24)&255,(height >>> 16)&255,(height >>> 8)&255,height&255,8,2,0,0,0]);
 
@@ -38,17 +39,63 @@ test('HTTP API exposes health, state and persisted actions', async () => {
 
 test('review submission through configured bridge creates a persisted proposal', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-agent-'));
+  let receivedContext;
   const bridge = { configured: true, async submit({ submission }) { return { message: '建议修改标题', commands: [{ type: 'outline.rename', nodeId: 'placeholder', title: '新标题' }], submissionId: submission.id }; }, async chat() { return { message: 'ok', commands: [] }; } };
   const app = await createStudioServer({ dataDir: dir, port: 0, agentBridge: bridge }); await app.start();
   try {
     const base = `http://127.0.0.1:${app.port}`;
     let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'第一章', baseRevision:0 }) }).then(r=>r.json());
     const nodeId = state.outline[0].id;
-    bridge.submit = async ({ submission }) => ({ message:'建议修改标题', commands:[{ type:'outline.rename', nodeId, title:'第一章：目标' }], submissionId:submission.id });
+    bridge.submit = async ({ submission, context }) => {
+      receivedContext = context;
+      return ({
+      submissionId: submission.id,
+      projectId: submission.projectId,
+      baseRevision: submission.baseRevision,
+      scopeKey: submission.scopeKey,
+      message: '建议修改标题',
+      commands: [{
+        commandId: createStudioId('command'), type: 'outline.rename', nodeId, title: '第一章：目标',
+        scopeKey: submission.scopeKey, baseRevision: submission.baseRevision, riskLevel: 'ordinary_reversible',
+        sourceAnnotationIds: [submission.annotationSnapshots[0].annotationId],
+      }],
+      });
+    };
     state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'annotation.add', scopeKey:'outline:root', target:{type:'outline-node',id:nodeId,label:'第一章'}, instruction:'标题更具体' }) }).then(r=>r.json());
     const review = await fetch(`${base}/api/review/submit`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ scopeKey:'outline:root' }) }).then(r=>r.json());
     assert.equal(review.bridgeResult.message, '建议修改标题'); assert.ok(review.bridgeResult.proposalId); assert.equal(review.state.proposals.length, 1); assert.equal(review.state.outline[0].title, '第一章');
     assert.equal(review.state.reviewSubmissions[0].status, 'proposal_created');
+    assert.equal(receivedContext.submission.reviewSubmissionId, review.submission.id);
+    assert.equal(receivedContext.taskScope.allowedCommands.includes('outline.delete'), false);
+    assert.equal('pages' in receivedContext, false);
+  } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('HTTP Proposal reject and return actions are persisted without creating a Revision', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-proposal-actions-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const state = app.repository.getState();
+    await app.repository.transactOperational(current => ({
+      ...current,
+      reviewSubmissions: [
+        { id: 'submission_reject', status: 'proposal_created' },
+        { id: 'submission_return', status: 'proposal_created' },
+      ],
+      proposals: [
+        { id: 'proposal_reject', submissionId: 'submission_reject', status: 'pending', baseRevision: state.project.currentRevision },
+        { id: 'proposal_return', submissionId: 'submission_return', status: 'pending', baseRevision: state.project.currentRevision },
+      ],
+    }));
+    const base = `http://127.0.0.1:${app.port}`;
+    const rejectedResponse = await fetch(`${base}/api/proposal/proposal_reject/reject`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(rejectedResponse.status, 200, await rejectedResponse.text());
+    const returnedResponse = await fetch(`${base}/api/proposal/proposal_return/return`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(returnedResponse.status, 200, await returnedResponse.text());
+    const after = app.repository.getState();
+    assert.equal(after.proposals.find(item => item.id === 'proposal_reject').status, 'rejected');
+    assert.equal(after.proposals.find(item => item.id === 'proposal_return').status, 'returned_to_agent');
+    assert.equal(after.project.currentRevision, state.project.currentRevision);
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
 });
 

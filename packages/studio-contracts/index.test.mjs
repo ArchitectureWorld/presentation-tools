@@ -43,6 +43,7 @@ test('new Studio ids use typed lowercase UUIDv7 values', () => {
     'page_01992a80-0000-7000-8000-000000000000',
   )
   assert.match(createStudioId('reviewSubmission'), /^review_submission_[0-9a-f-]{36}$/)
+  assert.match(createStudioId('command'), /^command_[0-9a-f-]{36}$/)
 })
 
 test('canonical validation rejects a page whose outline node is missing', () => {
@@ -106,4 +107,33 @@ test('canonical projection excludes operational and view records', () => {
   const restored = projectStateFromParts({ snapshot, currentRevision: 3, operational: state, ui: state.ui })
   assert.equal(restored.annotations[0].id, 'annotation_private')
   assert.equal(restored.project.currentRevision, 3)
+})
+
+test('Agent Command schema is a closed discriminated union with typed stable ids', async () => {
+  const contracts = await import('./index.mjs')
+  assert.equal(typeof contracts.assertStudioCommand, 'function')
+  assert.ok(Array.isArray(contracts.STUDIO_COMMAND_SCHEMA.oneOf))
+  assert.ok(contracts.STUDIO_COMMAND_SCHEMA.oneOf.length >= 8)
+  assert.ok(contracts.STUDIO_COMMAND_SCHEMA.oneOf.every(branch => branch.additionalProperties === false))
+
+  const command = {
+    commandId: createStudioId('command'),
+    type: 'outline.rename',
+    scopeKey: 'outline:root',
+    baseRevision: 4,
+    riskLevel: 'ordinary_reversible',
+    sourceAnnotationIds: [createStudioId('annotation')],
+    nodeId: createStudioId('outlineNode'),
+    title: '新标题',
+  }
+  assert.deepEqual(contracts.assertStudioCommand(command), command)
+
+  for (const invalid of [
+    { ...command, type: 'unknown.command' },
+    { ...command, extra: true },
+    { ...command, nodeId: 42 },
+    { ...command, commandId: 'command_not-stable' },
+  ]) {
+    assert.throws(() => contracts.assertStudioCommand(invalid), error => error.code === ERROR_CODES.INVALID_COMMAND)
+  }
 })

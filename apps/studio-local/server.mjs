@@ -4,10 +4,10 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRepository } from './repository.mjs';
 import { createAgentBridge } from './agent-bridge.mjs';
-import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent, markSubmissionDispatch, retryReviewSubmission } from '../../packages/studio-core/index.mjs';
+import { executeAction, submitReviewRound, acceptProposal, createProposalFromAgent, markSubmissionDispatch, rejectProposal, retryReviewSubmission, returnProposalToAgent } from '../../packages/studio-core/index.mjs';
 import { ERROR_CODES, StudioError, errorPayload } from '../../packages/studio-contracts/index.mjs';
 import { createStandardProjectService } from './standard-project.mjs';
-import { projectAgentContext } from './agent-context.mjs';
+import { projectAgentContext, reviewSubmissionContext } from './agent-context.mjs';
 import { ingestAsset, serveReferencedAsset } from './asset-service.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
@@ -45,17 +45,25 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     const before = repository.getState();
     const submission = before.reviewSubmissions.find(item => item.id === submissionId);
     if (!submission) throw new Error('未找到 ReviewSubmission');
-    const round = before.reviewRounds.find(item => item.id === submission.reviewRoundId);
     try {
+      const snapshot = await repository.getSnapshotAt(submission.baseRevision);
       const agentResult = await bridge.submit({
         submission,
-        context: { ...projectAgentContext(before, { stage: before.ui?.stage, pageId: before.ui?.activePageId }), scopeKey: round?.scopeKey ?? null },
+        context: reviewSubmissionContext(snapshot, submission),
       });
       let proposal = null;
       await repository.transactOperational(state => {
         let next = markSubmissionDispatch(state, submissionId, { status: 'dispatched' }).state;
         if (agentResult.commands.length) {
-          const proposed = createProposalFromAgent(next, submissionId, { ...agentResult, idempotencyKey: submission.idempotencyKey });
+          const proposed = createProposalFromAgent(next, submissionId, {
+            submissionId: agentResult.submissionId,
+            projectId: agentResult.projectId,
+            baseRevision: agentResult.baseRevision,
+            scopeKey: agentResult.scopeKey,
+            idempotencyKey: agentResult.idempotencyKey ?? submission.idempotencyKey,
+            message: agentResult.message,
+            commands: agentResult.commands,
+          });
           next = proposed.state;
           proposal = proposed.proposal;
         } else {
@@ -165,6 +173,16 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
         current => acceptProposal(current, proposalId).state,
       );
       return sendJson(res, 200, { state, revision: state.revisions.at(-1) });
+    }
+    const proposalActionMatch = url.pathname.match(/^\/api\/proposal\/([^/]+)\/(reject|return)$/);
+    if (req.method === 'POST' && proposalActionMatch) {
+      const proposalId = decodeURIComponent(proposalActionMatch[1]);
+      let result;
+      const state = await repository.transactOperational(current => {
+        result = proposalActionMatch[2] === 'reject' ? rejectProposal(current, proposalId) : returnProposalToAgent(current, proposalId);
+        return result.state;
+      });
+      return sendJson(res, 200, { state, proposal: result.proposal });
     }
     return false;
   }

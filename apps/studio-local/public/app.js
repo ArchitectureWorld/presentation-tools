@@ -526,6 +526,7 @@ function submissionHtml(submission) {
   const labels = {
     pending_dispatch: '等待投递', dispatched: '已投递', dispatch_failed: '投递失败',
     proposal_created: 'Proposal 已返回', accepted: '已接受', stale: '已过期',
+    rejected: '已拒绝', returned_to_agent: '已返回 Agent',
   };
   return `
     <div class="submission-card">
@@ -550,15 +551,28 @@ function assetContentUrl(assetId) {
 
 function proposalHtml(proposal) {
   const stale = proposal.status === 'pending' && proposal.baseRevision !== state.project.currentRevision;
-  const statusLabel = stale ? '已过期' : proposal.status === 'pending' ? '待确认' : proposal.status === 'accepted' ? '已应用' : proposal.status;
+  const statusLabel = stale ? '已过期' : ({ pending: '待确认', accepted: '已应用', rejected: '已拒绝', returned_to_agent: '已返回 Agent' })[proposal.status] || proposal.status;
+  const riskLabel = ({ ordinary_reversible: '普通可逆', structural_review_required: '结构性变更', protected_or_deferred: '受保护或暂缓' })[proposal.aggregateRiskLevel] || proposal.aggregateRiskLevel || '未标注';
+  const affectedObjectIds = proposal.affectedObjectIds ?? [];
+  const before = proposal.diff?.before ?? [];
+  const after = proposal.diff?.after ?? [];
   return `
     <article class="proposal-card ${proposal.status === 'accepted' ? 'proposal-card-accepted' : ''}" data-proposal-id="${escapeAttr(proposal.id)}" data-proposal-status="${escapeAttr(stale ? 'stale' : proposal.status)}">
       <header><strong>Agent 修改建议</strong><span class="batch-status ${proposal.status === 'accepted' ? 'batch-status-completed' : 'batch-status-review'}">${escapeHtml(statusLabel)}</span></header>
       <p>${escapeHtml(proposal.message || 'Agent 已返回结构化修改建议。')}</p>
+      <dl class="proposal-metadata">
+        <div><dt>风险</dt><dd>${escapeHtml(riskLabel)}</dd></div>
+        <div><dt>影响对象</dt><dd>${affectedObjectIds.length ? affectedObjectIds.map(escapeHtml).join('、') : '无'}</dd></div>
+      </dl>
+      ${proposal.hasDeletion ? '<p class="proposal-deletion-warning">包含删除：接受前请确认对象移除范围。</p>' : ''}
+      <div class="proposal-diff">
+        <section><strong>Before</strong><pre>${escapeHtml(JSON.stringify(before, null, 2))}</pre></section>
+        <section><strong>After</strong><pre>${escapeHtml(JSON.stringify(after, null, 2))}</pre></section>
+      </div>
       <details><summary>查看 Command</summary><pre>${escapeHtml(JSON.stringify(proposal.commands, null, 2))}</pre></details>
       <small class="proposal-revision">基于 Revision ${proposal.baseRevision}${stale ? ' · 当前项目已前进，不能应用' : ''}</small>
       ${proposal.status === 'pending'
-        ? `<div class="proposal-actions"><button class="primary-button batch-submit" data-accept-proposal="${escapeAttr(proposal.id)}" type="button" ${stale ? 'disabled' : ''}>${stale ? 'Proposal 已过期' : '确认应用'}</button></div>`
+        ? `<div class="proposal-actions"><button class="primary-button batch-submit" data-accept-proposal="${escapeAttr(proposal.id)}" type="button" ${stale ? 'disabled' : ''}>${stale ? 'Proposal 已过期' : '确认应用'}</button><button class="small-button danger" data-reject-proposal="${escapeAttr(proposal.id)}" type="button">拒绝</button><button class="small-button" data-return-proposal="${escapeAttr(proposal.id)}" type="button">返回 Agent 调整</button></div>`
         : ''}
     </article>
   `;
@@ -960,6 +974,26 @@ document.addEventListener('click', async event => {
       setSaveStatus('投递失败');
       toast(error.message, true);
       render();
+    }
+    return;
+  }
+
+  const rejectProposal = event.target.closest('[data-reject-proposal]');
+  const returnProposal = event.target.closest('[data-return-proposal]');
+  if (rejectProposal || returnProposal) {
+    if (!await flushDraftBuffer({ reason: rejectProposal ? '拒绝 Proposal' : '返回 Agent 调整' })) return;
+    const proposalId = (rejectProposal || returnProposal).dataset[rejectProposal ? 'rejectProposal' : 'returnProposal'];
+    const operation = rejectProposal ? 'reject' : 'return';
+    try {
+      setSaveStatus('处理中…', true);
+      const result = await api(`/api/proposal/${proposalId}/${operation}`, { method: 'POST', body: '{}' });
+      state = result.state;
+      setSaveStatus('已保存');
+      toast(rejectProposal ? '已拒绝 Proposal' : '已返回 Agent 调整');
+      render();
+    } catch (error) {
+      setSaveStatus('处理失败');
+      toast(error.message, true);
     }
     return;
   }

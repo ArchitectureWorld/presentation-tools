@@ -1,7 +1,16 @@
 function validateResult(value) {
   if (!value || typeof value !== 'object' || typeof value.message !== 'string' || !Array.isArray(value.commands)) throw new Error('DSH Bridge 返回格式无效');
   for (const command of value.commands) if (!command || typeof command !== 'object' || typeof command.type !== 'string') throw new Error('DSH Bridge 返回格式无效');
-  return { message: value.message, commands: structuredClone(value.commands), sessionRef: value.sessionRef ?? null };
+  return {
+    submissionId: value.submissionId,
+    projectId: value.projectId,
+    baseRevision: value.baseRevision,
+    scopeKey: value.scopeKey,
+    idempotencyKey: value.idempotencyKey,
+    message: value.message,
+    commands: structuredClone(value.commands),
+    sessionRef: value.sessionRef ?? null,
+  };
 }
 
 export function createAgentBridge({ url = process.env.REPORT_STUDIO_AGENT_URL || '', fetchImpl = fetch, timeoutMs = Number(process.env.REPORT_STUDIO_AGENT_TIMEOUT_MS || 60000) } = {}) {

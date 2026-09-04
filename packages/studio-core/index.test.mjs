@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import { createInitialState, executeAction, submitReviewRound, createProposalFromAgent, acceptProposal, markSubmissionDispatch, retryReviewSubmission } from './index.mjs';
 import { createStudioId } from '../studio-contracts/index.mjs'
 
+function agentCommandInput(state, submission, command) {
+  const common = {
+    commandId: createStudioId('command'), scopeKey: submission.scopeKey, baseRevision: submission.baseRevision,
+    riskLevel: 'ordinary_reversible', sourceAnnotationIds: [submission.annotationSnapshots[0].annotationId],
+  }
+  return {
+    submissionId: submission.id, projectId: state.project.id, baseRevision: submission.baseRevision,
+    scopeKey: submission.scopeKey, idempotencyKey: submission.idempotencyKey, message: '结构化修改建议',
+    commands: [{ ...common, ...command }],
+  }
+}
+
 test('outline nodes receive stable ids and draft page keeps source outline id', () => {
   let state = createInitialState();
   ({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '项目背景' }));
@@ -44,7 +56,7 @@ test('agent proposal is explicit and acceptance creates revision without auto re
   ({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: 'A' })); const nodeId = state.outline[0].id;
   ({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', target: { type: 'outline-node', id: nodeId, label: 'A' }, instruction: '标题更明确' }));
   const submitted = submitReviewRound(state, { scopeKey: 'outline:root' }); state = submitted.state;
-  const proposalResult = createProposalFromAgent(state, submitted.submission.id, { message: '建议修改标题', commands: [{ type: 'outline.rename', nodeId, title: 'A：明确目标' }] });
+  const proposalResult = createProposalFromAgent(state, submitted.submission.id, agentCommandInput(state, submitted.submission, { type: 'outline.rename', nodeId, title: 'A：明确目标' }));
   state = proposalResult.state; assert.equal(state.outline[0].title, 'A'); const before = state.project.currentRevision;
   const accepted = acceptProposal(state, proposalResult.proposal.id);
   assert.equal(accepted.state.outline[0].title, 'A：明确目标'); assert.equal(accepted.state.project.currentRevision, before + 1); assert.equal(accepted.state.annotations[0].resolution, 'open');
@@ -155,7 +167,7 @@ test('repeating Agent commands for one submission returns the existing Proposal'
   let state = createInitialState()
   ;({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '幂等意见' }))
   const submitted = submitReviewRound(state, { scopeKey: 'outline:root' })
-  const input = { message: '同一结果', commands: [{ type: 'project.rename', title: '幂等项目' }], idempotencyKey: submitted.submission.idempotencyKey }
+  const input = agentCommandInput(submitted.state, submitted.submission, { type: 'project.rename', projectId: submitted.state.project.id, title: '幂等项目' })
   const first = createProposalFromAgent(submitted.state, submitted.submission.id, input)
   const repeated = createProposalFromAgent(first.state, submitted.submission.id, input)
   assert.equal(repeated.proposal.id, first.proposal.id)

@@ -7,11 +7,13 @@ import {
   createProposalFromAgent,
   executeAction as executeCoreAction,
   markSubmissionDispatch,
+  rejectProposal as rejectCoreProposal,
   retryReviewSubmission,
+  returnProposalToAgent as returnCoreProposalToAgent,
   submitReviewRound,
 } from '../vendor/packages/studio-core/index.mjs'
 import { ERROR_CODES, StudioError } from '../vendor/packages/studio-contracts/index.mjs'
-import { projectAgentContext } from '../vendor/apps/studio-local/agent-context.mjs'
+import { reviewSubmissionContext } from '../vendor/apps/studio-local/agent-context.mjs'
 
 const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
 const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))
@@ -148,6 +150,16 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     return { state, revision: structuredClone(state.revisions.at(-1)) }
   }
 
+  async function updateProposal(sessionId, proposalId, action) {
+    const repository = await repositoryFor(sessionId)
+    let result
+    const state = await repository.transactOperational(current => {
+      result = action === 'reject' ? rejectCoreProposal(current, proposalId) : returnCoreProposalToAgent(current, proposalId)
+      return result.state
+    })
+    return { state, proposal: result.proposal }
+  }
+
   async function getContext(sessionId, submissionId) {
     const id = cleanSessionId(sessionId)
     const repository = await repositoryFor(id)
@@ -164,22 +176,10 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
       }, 409)
     }
     const snapshot = await repository.getSnapshotAt(submission.baseRevision)
-    const projection = projectAgentContext(snapshot, { stage: state.ui?.stage, pageId: state.ui?.activePageId })
+    const projection = reviewSubmissionContext(snapshot, submission)
     return {
-      contractVersion: 'report-studio.v0.1.1',
       sessionId: id,
       ...projection,
-      submission: structuredClone(submission),
-      annotations: structuredClone(submission.annotations),
-      writableCommands: [
-        'project.rename',
-        'outline.add',
-        'outline.rename',
-        'outline.move',
-        'outline.delete',
-        'draft.ensurePage',
-        'draft.update',
-      ],
     }
   }
 
@@ -187,26 +187,11 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     const id = cleanSessionId(sessionId)
     const repository = await repositoryFor(id)
     const submissionId = String(input?.submissionId ?? '').trim()
-    if (!submissionId) throw new Error('submissionId 必填；请使用 ReviewSubmission 提示中的稳定 ID。')
-    const message = String(input?.message ?? '').trim()
-    if (!message) throw new Error('message 必填。')
-    if (!Array.isArray(input?.commands) || input.commands.length === 0) throw new Error('commands 必须至少包含一条结构化修改命令。')
     let proposed
     let submission
     await repository.transactOperational(state => {
       submission = state.reviewSubmissions.find(item => item.id === submissionId)
-      if (!submission) throw new Error(`ReviewSubmission '${submissionId}' 不存在于当前 DSH Session。`)
-      if (state.project.currentRevision !== submission.baseRevision) {
-        throw new StudioError(ERROR_CODES.STALE_REVIEW_SUBMISSION, 'ReviewSubmission 的基线已经过期，请重新提交批注。', {
-          submissionId, baseRevision: submission.baseRevision, currentRevision: state.project.currentRevision,
-        }, 409)
-      }
-      proposed = createProposalFromAgent(state, submissionId, {
-        message,
-        commands: structuredClone(input.commands),
-        sessionRef: id,
-        idempotencyKey: input.idempotencyKey ?? submission.idempotencyKey,
-      })
+      proposed = createProposalFromAgent(state, submissionId, structuredClone(input))
       return proposed.state
     })
     return {
@@ -253,6 +238,8 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     submitReview,
     prepareChat,
     acceptProposal,
+    rejectProposal(sessionId, proposalId) { return updateProposal(sessionId, proposalId, 'reject') },
+    returnProposal(sessionId, proposalId) { return updateProposal(sessionId, proposalId, 'return') },
     getContext,
     applyCommands,
     updateDispatch,

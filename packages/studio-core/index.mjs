@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, StudioError, createStudioId } from '../studio-contracts/index.mjs';
+import {
+  ERROR_CODES,
+  StudioError,
+  assertCanonicalSnapshot,
+  assertStudioApplyCommands,
+  assertStudioCommand,
+  canonicalFromState,
+  createStudioId,
+  projectStateFromParts,
+} from '../studio-contracts/index.mjs';
 
 const now = () => new Date().toISOString();
 const ID_KINDS = Object.freeze({
@@ -154,6 +163,146 @@ function collectOutlineSubtreeIds(node, ids = new Set()) {
   return ids;
 }
 
+function collectOutlineNodeIds(nodes, ids = []) {
+  for (const node of nodes ?? []) {
+    ids.push(node.id)
+    collectOutlineNodeIds(node.children, ids)
+  }
+  return ids
+}
+
+const DEFAULT_COMMANDS = Object.freeze({
+  outline: Object.freeze(['project.rename', 'outline.add', 'outline.rename', 'outline.move', 'draft.ensurePage']),
+  draft: Object.freeze(['draft.update', 'draft.list.insert', 'draft.list.delete', 'draft.list.move']),
+})
+
+const COMMAND_RISK = Object.freeze({
+  'project.rename': 'ordinary_reversible',
+  'outline.add': 'structural_review_required',
+  'outline.rename': 'ordinary_reversible',
+  'outline.move': 'structural_review_required',
+  'draft.ensurePage': 'structural_review_required',
+  'draft.update': 'ordinary_reversible',
+  'draft.list.insert': 'structural_review_required',
+  'draft.list.delete': 'structural_review_required',
+  'draft.list.move': 'structural_review_required',
+})
+
+function invalidCommand(message, details = undefined) {
+  throw new StudioError(ERROR_CODES.INVALID_COMMAND, message, details, 400)
+}
+
+function scopeFromInput(state, input) {
+  const scopeKey = String(input?.scopeKey ?? '').trim()
+  if (!scopeKey) invalidCommand('缺少 scopeKey。')
+  let scopeStage
+  let pageId = null
+  if (scopeKey === 'outline:root') scopeStage = 'outline'
+  else if (scopeKey.startsWith('draft:')) {
+    scopeStage = 'draft'
+    pageId = scopeKey.slice('draft:'.length)
+    if (!state.pages.some(page => page.id === pageId)) invalidCommand('ReviewSubmission 引用了不存在的页面。', { scopeKey, pageId })
+  } else invalidCommand('不支持的 ReviewSubmission scopeKey。', { scopeKey })
+  const stage = input?.stage ?? state.ui?.stage ?? scopeStage
+  if (stage !== scopeStage) invalidCommand('ReviewSubmission 的 stage 与 scopeKey 不一致。', { stage, scopeKey })
+  const requestedPageId = input?.pageId === undefined ? (scopeStage === 'draft' ? state.ui?.activePageId ?? null : null) : input.pageId
+  if (requestedPageId !== pageId) invalidCommand('ReviewSubmission 的 pageId 与 scopeKey 不一致。', { pageId: requestedPageId, scopeKey })
+  return { scopeKey, stage, pageId }
+}
+
+function writableIdsForScope(state, { stage, pageId }) {
+  if (stage === 'outline') return [state.project.id, state.project.outlineDocumentId, ...collectOutlineNodeIds(state.outline)].filter(Boolean)
+  const page = state.pages.find(item => item.id === pageId)
+  if (!page) return []
+  return [
+    page.id,
+    page.pageId,
+    page.draftDocumentId,
+    ...page.contentBlocks.flatMap(block => [block.contentBlockId, ...(block.items ?? []).map(item => item.listItemId)]),
+    ...page.scriptBlocks.map(block => block.scriptBlockId),
+    ...page.pageAssets.map(asset => asset.pageAssetId),
+  ].filter(Boolean)
+}
+
+function commandWritableIds(state, command) {
+  switch (command.type) {
+    case 'project.rename': return [command.projectId]
+    case 'outline.add': return [command.parentId ?? state.project.outlineDocumentId]
+    case 'outline.rename':
+    case 'outline.move': return [command.nodeId]
+    case 'draft.ensurePage': return [command.outlineNodeId]
+    case 'draft.update': return [command.pageId]
+    case 'draft.list.insert': return [command.pageId, command.afterListItemId].filter(Boolean)
+    case 'draft.list.delete':
+    case 'draft.list.move': return [command.pageId, command.listItemId]
+    default: return []
+  }
+}
+
+function objectMap(state) {
+  const snapshot = canonicalFromState(state)
+  const entries = new Map()
+  entries.set(snapshot.project.id, clone(snapshot.project))
+  const visitOutline = nodes => {
+    for (const node of nodes ?? []) {
+      const { children = [], ...value } = node
+      entries.set(node.id, { ...clone(value), childOutlineNodeIds: children.map(child => child.id) })
+      visitOutline(children)
+    }
+  }
+  visitOutline(snapshot.outline)
+  for (const page of snapshot.pages) {
+    const { contentBlocks = [], scriptBlocks = [], pageAssets = [], ...value } = page
+    entries.set(page.id, {
+      ...clone(value),
+      contentBlockIds: contentBlocks.map(block => block.contentBlockId),
+      scriptBlockIds: scriptBlocks.map(block => block.scriptBlockId),
+      pageAssetIds: pageAssets.map(asset => asset.pageAssetId),
+    })
+    for (const block of contentBlocks) {
+      const { items = [], ...blockValue } = block
+      entries.set(block.contentBlockId, { ...clone(blockValue), listItemIds: items.map(item => item.listItemId) })
+      for (const item of items) entries.set(item.listItemId, clone(item))
+    }
+    for (const script of scriptBlocks) entries.set(script.scriptBlockId, clone(script))
+    for (const asset of pageAssets) entries.set(asset.pageAssetId, clone(asset))
+  }
+  return entries
+}
+
+function structuredDiff(beforeState, afterState) {
+  const beforeObjects = objectMap(beforeState)
+  const afterObjects = objectMap(afterState)
+  const ids = [...new Set([...beforeObjects.keys(), ...afterObjects.keys()])].sort()
+  const changes = []
+  for (const objectId of ids) {
+    const before = beforeObjects.get(objectId) ?? null
+    const after = afterObjects.get(objectId) ?? null
+    if (JSON.stringify(before) === JSON.stringify(after)) continue
+    changes.push({
+      objectId,
+      changeType: before === null ? 'added' : after === null ? 'deleted' : 'modified',
+      before: clone(before),
+      after: clone(after),
+    })
+  }
+  return {
+    before: changes.map(change => ({ objectId: change.objectId, value: clone(change.before) })),
+    after: changes.map(change => ({ objectId: change.objectId, value: clone(change.after) })),
+    changes,
+  }
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  return JSON.stringify(value)
+}
+
+function requestHash(input) {
+  return createHash('sha256').update(canonicalJson(input)).digest('hex')
+}
+
 function applyContentAction(state, action, { commit = true, source = 'human' } = {}) {
   let next = clone(state);
   switch (action.type) {
@@ -165,7 +314,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
     }
     case 'outline.add': {
       const title = String(action.title || '新章节').trim() || '新章节';
-      const node = { id: id('outline'), outlineNodeId: null, parentOutlineNodeId: action.parentId ?? null, title, order: 0, sourceRefs: [], opaqueExtension: null, children: [], createdAt: now() };
+      const node = { id: action.nodeId ?? id('outline'), outlineNodeId: null, parentOutlineNodeId: action.parentId ?? null, title, order: 0, sourceRefs: [], opaqueExtension: null, children: [], createdAt: now() };
       node.outlineNodeId = node.id;
       if (action.parentId) {
         const parent = findOutlineNode(next.outline, action.parentId);
@@ -210,7 +359,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       if (!node) throw new Error('未找到对应大纲节点');
       let page = next.pages.find(item => item.outlineNodeId === action.outlineNodeId);
       if (!page) {
-        page = { id: id('page'), pageId: null, outlineNodeId: action.outlineNodeId, draftDocumentId: null, titleBlockId: null, order: next.pages.length, heading: node.title, body: '', bullets: [''], script: '', assets: [], createdAt: now(), updatedAt: now() };
+        page = { id: action.pageId ?? id('page'), pageId: null, outlineNodeId: action.outlineNodeId, draftDocumentId: null, titleBlockId: null, order: next.pages.length, heading: node.title, body: '', bullets: [''], script: '', assets: [], createdAt: now(), updatedAt: now() };
         synchronizePageCanonical(page);
         next.pages.push(page);
       }
@@ -267,7 +416,7 @@ function applyContentAction(state, action, { commit = true, source = 'human' } =
       const afterIndex = action.afterListItemId == null ? -1 : list.items.findIndex(item => item.listItemId === action.afterListItemId)
       if (afterIndex < -1) throw new Error('未找到列表项')
       if (action.afterListItemId != null && afterIndex < 0) throw new Error('未找到列表项')
-      list.items.splice(afterIndex + 1, 0, { listItemId: id('listItem'), content: String(action.content ?? ''), order: 0, sourceRefs: [] })
+      list.items.splice(afterIndex + 1, 0, { listItemId: action.listItemId ?? id('listItem'), content: String(action.content ?? ''), order: 0, sourceRefs: [] })
       normalizeListItems(list)
       page.bullets = list.items.map(item => item.content)
       synchronizePageCanonical(page)
@@ -344,33 +493,140 @@ export function executeAction(state, action) {
 
 export function submitReviewRound(state, input) {
   const next = clone(state);
-  const scopeKey = input.scopeKey;
-  if (!scopeKey) throw new Error('缺少 scopeKey');
+  if (input?.projectId !== undefined && input.projectId !== next.project.id) invalidCommand('ReviewSubmission 的 projectId 与当前项目不一致。', { projectId: input.projectId })
+  const scope = scopeFromInput(next, input)
+  const { scopeKey, stage, pageId } = scope
   let round = input.reviewRoundId ? next.reviewRounds.find(item => item.id === input.reviewRoundId) : null;
-  if (input.reviewRoundId && !round) throw new Error('未找到批注轮次');
-  if (!round) { round = { id: id('round'), scopeKey, status: 'open', createdAt: now(), updatedAt: now() }; next.reviewRounds.push(round); }
+  if (input.reviewRoundId && !round) invalidCommand('未找到批注轮次。', { reviewRoundId: input.reviewRoundId })
+  if (round) {
+    const roundStage = round.stage ?? (round.scopeKey?.startsWith('draft:') ? 'draft' : 'outline')
+    const roundPageId = round.pageId ?? (roundStage === 'draft' ? round.scopeKey.slice('draft:'.length) : null)
+    if (round.status !== 'open') invalidCommand('仅 open 的 ReviewRound 可以继续提交。', { reviewRoundId: round.id, status: round.status })
+    if (round.projectId !== undefined && round.projectId !== next.project.id) invalidCommand('ReviewRound 属于其他项目。', { reviewRoundId: round.id })
+    if (round.scopeKey !== scopeKey || roundStage !== stage || roundPageId !== pageId) {
+      invalidCommand('ReviewRound 的 scope、stage 或 page 不匹配。', {
+        reviewRoundId: round.id,
+        expected: { scopeKey: round.scopeKey, stage: roundStage, pageId: roundPageId },
+        received: { scopeKey, stage, pageId },
+      })
+    }
+  }
+  if (!round) {
+    round = { id: id('round'), projectId: next.project.id, scopeKey, stage, pageId, status: 'open', createdAt: now(), updatedAt: now() }
+    next.reviewRounds.push(round)
+  }
   const candidates = next.annotations.filter(annotation => annotation.scopeKey === scopeKey && annotation.resolution === 'open' && annotation.lifecycle === 'draft' && (annotation.reviewRoundId === null || annotation.reviewRoundId === round.id));
   if (!candidates.length) throw new Error('当前轮次没有待提交批注');
   const previousCount = next.reviewSubmissions.filter(item => item.reviewRoundId === round.id).length;
   const submissionId = id('submission');
-  const submission = { id: submissionId, reviewRoundId: round.id, number: previousCount + 1, baseRevision: next.project.currentRevision, annotations: candidates.map(annotation => ({ id: annotation.id, version: annotation.version, target: clone(annotation.target), instruction: annotation.instruction, contentHash: createHash('sha256').update(`${annotation.id}:${annotation.version}:${annotation.instruction}`).digest('hex') })), status: 'pending_dispatch', idempotencyKey: `review:${submissionId}`, dispatchAttempts: 0, lastDispatchError: null, createdAt: now(), agentMessage: null };
+  const annotationSnapshots = candidates.map(annotation => ({
+    annotationId: annotation.id,
+    id: annotation.id,
+    annotationVersion: annotation.version,
+    version: annotation.version,
+    target: clone(annotation.target),
+    instruction: annotation.instruction,
+    contentHash: createHash('sha256').update(`${annotation.id}:${annotation.version}:${annotation.instruction}`).digest('hex'),
+  }))
+  const allowedCommands = clone(DEFAULT_COMMANDS[stage] ?? [])
+  const writableIds = [...new Set(writableIdsForScope(next, scope))]
+  const createdAt = now()
+  const submission = {
+    id: submissionId,
+    reviewSubmissionId: submissionId,
+    reviewRoundId: round.id,
+    number: previousCount + 1,
+    submissionNumber: previousCount + 1,
+    projectId: next.project.id,
+    stage,
+    scopeKey,
+    pageId,
+    baseRevision: next.project.currentRevision,
+    annotationSnapshots,
+    annotations: clone(annotationSnapshots),
+    allowedCommands,
+    writableIds,
+    status: 'pending_dispatch',
+    idempotencyKey: `review:${submissionId}`,
+    dispatchAttempts: 0,
+    lastDispatchError: null,
+    createdAt,
+    agentMessage: null,
+  };
   for (const annotation of candidates) { annotation.lifecycle = 'submitted'; annotation.reviewRoundId = round.id; }
   next.reviewSubmissions.push(submission); round.updatedAt = now();
   return { state: next, round: clone(round), submission: clone(submission) };
 }
 
 export function createProposalFromAgent(state, submissionId, result) {
+  const commands = Array.isArray(result?.commands) ? result.commands : []
+  if (!commands.length) invalidCommand('commands 必须至少包含一条结构化修改命令。')
+  for (const command of commands) assertStudioCommand(command)
+  const input = assertStudioApplyCommands(result)
+  if (input.projectId !== state.project.id) invalidCommand('ChangeSet 的 projectId 与当前项目不一致。', { projectId: input.projectId })
+  if (input.baseRevision !== state.project.currentRevision) {
+    throw new StudioError(ERROR_CODES.STALE_REVIEW_SUBMISSION, 'ChangeSet 的 baseRevision 已过期。', { baseRevision: input.baseRevision, currentRevision: state.project.currentRevision }, 409)
+  }
   const next = clone(state);
   const submission = next.reviewSubmissions.find(item => item.id === submissionId);
-  if (!submission) throw new Error('未找到 ReviewSubmission');
-  const idempotencyKey = String(result?.idempotencyKey || submission.idempotencyKey || `review:${submission.id}`);
+  if (!submission || input.submissionId !== submissionId || submission.reviewSubmissionId !== submissionId) invalidCommand('未找到匹配的 ReviewSubmission。', { submissionId })
+  if (submission.projectId !== input.projectId) invalidCommand('ReviewSubmission 的 projectId 不匹配。', { submissionId })
+  if (submission.baseRevision !== input.baseRevision) {
+    throw new StudioError(ERROR_CODES.STALE_REVIEW_SUBMISSION, 'ReviewSubmission 的 baseRevision 不匹配。', { submissionId, baseRevision: submission.baseRevision }, 409)
+  }
+  if (input.scopeKey !== submission.scopeKey || input.commands.some(command => command.scopeKey !== submission.scopeKey || command.baseRevision !== submission.baseRevision)) {
+    invalidCommand('Command 超出 ReviewSubmission 的冻结 scope 或 revision。', { submissionId, scopeKey: submission.scopeKey })
+  }
+  const allowedCommands = new Set(submission.allowedCommands ?? [])
+  for (const command of input.commands) if (!allowedCommands.has(command.type)) invalidCommand('Command 不在 ReviewSubmission.allowedCommands 中。', { commandId: command.commandId, type: command.type })
+  const writableIds = new Set(submission.writableIds ?? [])
+  for (const command of input.commands) {
+    const forbiddenIds = commandWritableIds(next, command).filter(value => !writableIds.has(value))
+    if (forbiddenIds.length) invalidCommand('Command 引用了 ReviewSubmission.writableIds 之外的对象。', { commandId: command.commandId, forbiddenIds })
+  }
+  const annotationIds = new Set((submission.annotationSnapshots ?? []).map(annotation => annotation.annotationId))
+  for (const command of input.commands) {
+    if (command.sourceAnnotationIds.some(annotationId => !annotationIds.has(annotationId))) invalidCommand('Command 引用了本次 Submission 之外的批注。', { commandId: command.commandId })
+    if (COMMAND_RISK[command.type] !== command.riskLevel) invalidCommand('Command riskLevel 与实际操作风险不一致。', { commandId: command.commandId, expected: COMMAND_RISK[command.type], received: command.riskLevel })
+    if (command.riskLevel === 'protected_or_deferred') invalidCommand('受保护或暂缓操作不能进入普通批注任务。', { commandId: command.commandId })
+  }
+  const idempotencyKey = String(input.idempotencyKey || submission.idempotencyKey || `review:${submission.id}`);
+  const inputHash = requestHash({ ...input, idempotencyKey })
   const existing = next.proposals.find(item => item.submissionId === submissionId);
   if (existing) {
-    if (existing.idempotencyKey !== idempotencyKey) throw new StudioError(ERROR_CODES.PROPOSAL_ALREADY_EXISTS, '该 ReviewSubmission 已存在 Proposal。', { proposalId: existing.id }, 409);
+    if (existing.idempotencyKey !== idempotencyKey || existing.inputHash !== inputHash) throw new StudioError(ERROR_CODES.PROPOSAL_ALREADY_EXISTS, '该 ReviewSubmission 已存在不同的 Proposal。', { proposalId: existing.id }, 409);
     return { state: next, proposal: clone(existing), reused: true };
   }
-  const commands = Array.isArray(result?.commands) ? clone(result.commands) : [];
-  const proposal = { id: id('proposal'), submissionId, reviewRoundId: submission.reviewRoundId, baseRevision: submission.baseRevision, idempotencyKey, message: String(result?.message || ''), commands, status: 'pending', createdAt: now() };
+  let candidate = clone(next)
+  for (const command of input.commands) candidate = applyContentAction(candidate, command, { commit: false, source: 'agent' })
+  assertCanonicalSnapshot(canonicalFromState(candidate))
+  const diff = structuredDiff(next, candidate)
+  if (!diff.changes.length) invalidCommand('ChangeSet 未产生可确认的 Canonical 差异。')
+  const riskOrder = ['ordinary_reversible', 'structural_review_required', 'protected_or_deferred']
+  const aggregateRiskLevel = input.commands.reduce((highest, command) => riskOrder.indexOf(command.riskLevel) > riskOrder.indexOf(highest) ? command.riskLevel : highest, 'ordinary_reversible')
+  const sourceAnnotationIds = [...new Set(input.commands.flatMap(command => command.sourceAnnotationIds))].sort()
+  const affectedObjectIds = diff.changes.map(change => change.objectId).sort()
+  const hasDeletion = diff.changes.some(change => change.changeType === 'deleted')
+  const proposal = {
+    id: id('proposal'),
+    submissionId,
+    reviewRoundId: submission.reviewRoundId,
+    projectId: submission.projectId,
+    scopeKey: submission.scopeKey,
+    baseRevision: submission.baseRevision,
+    idempotencyKey,
+    inputHash,
+    message: input.message,
+    commands: clone(input.commands),
+    candidateSnapshot: canonicalFromState(candidate),
+    affectedObjectIds,
+    diff,
+    aggregateRiskLevel,
+    hasDeletion,
+    sourceAnnotationIds,
+    status: 'pending',
+    createdAt: now(),
+  };
   submission.status = 'proposal_created'; submission.agentMessage = proposal.message; submission.lastDispatchError = null;
   next.proposals.push(proposal); return { state: next, proposal: clone(proposal) };
 }
@@ -402,12 +658,45 @@ export function acceptProposal(state, proposalId) {
   if (!proposal) throw new Error('未找到 Proposal');
   if (proposal.status !== 'pending') throw new Error('Proposal 已处理');
   if (state.project.currentRevision !== proposal.baseRevision) throw new Error('stale_revision');
-  let next = clone(state);
-  for (const command of proposal.commands) next = applyContentAction(next, command, { commit: false, source: 'agent' });
+  let next
+  if (proposal.candidateSnapshot) {
+    assertCanonicalSnapshot(proposal.candidateSnapshot)
+    next = projectStateFromParts({
+      snapshot: proposal.candidateSnapshot,
+      currentRevision: state.project.currentRevision,
+      operational: state,
+      ui: state.ui,
+    })
+  } else {
+    next = clone(state)
+    for (const command of proposal.commands) next = applyContentAction(next, command, { commit: false, source: 'agent' })
+  }
   next = commitRevision(next, 'agent', { proposalId, submissionId: proposal.submissionId });
   const stored = next.proposals.find(item => item.id === proposalId);
   stored.status = 'accepted'; stored.acceptedRevision = next.project.currentRevision; stored.acceptedAt = now();
   const submission = next.reviewSubmissions.find(item => item.id === stored.submissionId);
   if (submission) submission.status = 'accepted';
   return { state: next, revision: clone(next.revisions.at(-1)) };
+}
+
+function closeProposalWithoutRevision(state, proposalId, status) {
+  const next = clone(state)
+  const proposal = next.proposals.find(item => item.id === proposalId)
+  if (!proposal) throw new Error('未找到 Proposal')
+  if (proposal.status !== 'pending') throw new Error('Proposal 已处理')
+  proposal.status = status
+  proposal.updatedAt = now()
+  if (status === 'rejected') proposal.rejectedAt = proposal.updatedAt
+  if (status === 'returned_to_agent') proposal.returnedAt = proposal.updatedAt
+  const submission = next.reviewSubmissions.find(item => item.id === proposal.submissionId)
+  if (submission) submission.status = status
+  return { state: next, proposal: clone(proposal) }
+}
+
+export function rejectProposal(state, proposalId) {
+  return closeProposalWithoutRevision(state, proposalId, 'rejected')
+}
+
+export function returnProposalToAgent(state, proposalId) {
+  return closeProposalWithoutRevision(state, proposalId, 'returned_to_agent')
 }

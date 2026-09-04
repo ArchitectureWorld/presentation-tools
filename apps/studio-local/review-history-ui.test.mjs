@@ -77,7 +77,15 @@ async function loadReviewHistory() {
     ],
     proposals: [
       { id: 'proposal_1', submissionId: 'submission_1', reviewRoundId: 'round_1', baseRevision: 8, status: 'accepted', message: '第一批已应用', commands: [] },
-      { id: 'proposal_2', submissionId: 'submission_2', reviewRoundId: 'round_1', baseRevision: 9, status: 'pending', message: '第二批待确认', commands: [] },
+      {
+        id: 'proposal_2', submissionId: 'submission_2', reviewRoundId: 'round_1', baseRevision: 9, status: 'pending', message: '第二批待确认', commands: [],
+        affectedObjectIds: ['outline_node_2'], aggregateRiskLevel: 'structural_review_required', hasDeletion: true,
+        diff: {
+          before: [{ objectId: 'outline_node_2', value: { title: '旧标题' } }],
+          after: [{ objectId: 'outline_node_2', value: { title: '新标题' } }],
+          changes: [{ objectId: 'outline_node_2', changeType: 'modified', before: { title: '旧标题' }, after: { title: '新标题' } }],
+        },
+      },
     ],
     revisions: [],
   }
@@ -142,6 +150,9 @@ test('pending Proposal is grouped under its exact ReviewSubmission and exposed i
   assert.ok(secondSubmission > firstProposal && secondProposal > secondSubmission)
   assert.match(reviewHistory.innerHTML, /Agent 修改建议/)
   assert.match(reviewHistory.innerHTML, /待确认/)
+  for (const metadata of ['基于 Revision 9', '影响对象', 'outline_node_2', 'Before', '旧标题', 'After', '新标题', '结构性变更', '包含删除', '拒绝', '返回 Agent 调整']) {
+    assert.match(reviewHistory.innerHTML, new RegExp(metadata))
+  }
 })
 
 test('pending Proposal stays visible under every annotation filter and can be focused again', async () => {
