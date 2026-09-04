@@ -20,6 +20,8 @@ on:
       - 'scripts/verify-e2e-v0.1.1.mjs'
       - 'scripts/verify-responsive-ui.mjs'
       - 'scripts/verify-dsh-plugin.mjs'
+      - 'scripts/verify-workspace-live-link.mjs'
+      - 'scripts/verify-workspace-live-link.test.mjs'
       - 'scripts/verify-layout-v0.2.0.mjs'
       - 'scripts/verify-layout-openpencil-v0.2.0.mjs'
       - 'scripts/verify-layout-spike.mjs'
