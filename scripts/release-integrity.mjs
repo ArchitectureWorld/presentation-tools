@@ -118,6 +118,14 @@ export async function verifyReleaseConfiguration(root) {
     'REPORT_STUDIO_PLUGIN_PACKAGE',
   ]) assertCondition(workflow.includes(command), `workflow is missing ${command}`)
 
+  const standardWorkflow = await readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8')
+  const standardRootInstallIndex = standardWorkflow.indexOf('npm ci --ignore-scripts --no-audit --no-fund')
+  const standardVerifyAllIndex = standardWorkflow.indexOf('npm run verify:all')
+  assertCondition(
+    standardRootInstallIndex >= 0 && standardRootInstallIndex < standardVerifyAllIndex,
+    'Standard Project workflow must install root dependencies before verify:all',
+  )
+
   const platforms = ['ubuntu-latest', 'windows-latest'].filter(platform => workflow.includes(platform))
   assertCondition(platforms.length === 2, 'workflow must verify ubuntu-latest and windows-latest')
   return { workflowName: 'Report Studio v0.1.1 CI', platforms }

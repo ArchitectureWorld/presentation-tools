@@ -16,7 +16,7 @@ updated_at: 2026-09-04
 
 | 问题 | 原问题 | 修复与文件范围 | 修复提交 | 自动化证据 | 状态 |
 |---|---|---|---|---|---|
-| P0-01 | clean install 缺 AJV、CI 和 smoke 未固定当前 tarball | 根 lockfile、v0.1.1 workflow、release integrity、fresh package smoke | `627bb7f`, `3fa7312` | `1676abd` clean checkout 169/169 + release integrity | locally-verified：GitHub 当前 run 待记录 |
+| P0-01 | clean install 缺 AJV、CI 和 smoke 未固定当前 tarball | 根 lockfile、v0.1.1 workflow、release integrity、fresh package smoke；Standard workflow 在 `verify:all` 前补根 `npm ci` | `627bb7f`, `3fa7312`, pending CI follow-up commit | `1676abd` clean checkout 169/169 + release integrity；Standard workflow root-install RED/GREEN | locally-verified：GitHub 新 run 待记录 |
 | P0-02 | 标准项目会跨 projectId 接到既有 Revision 链 | `initializeFromStandardProject()`、非空 Workspace 409、UI 提示 | `d883358` | `standard-project.test.mjs`、server import tests | fixed（代码）；宿主验收待记录 |
 | P0-03 | 附件字节可落入 Canonical / Agent context | Blob ObjectStore、受控 asset API、projection scrub | `7ef4cf5`, `de19cef`, `71294f7`, `7dc05e3` | 20MB、export hash、context scrub tests | fixed（代码）；GitHub 待记录 |
 | P0-04 | Canonical 中存在竞争副本和身份漂移 | Canonical projection、stable IDs、Adapter 轮转 | `18f9d2c`, `a0c8d03`, `b2e9aa9`, `2adca59` | canonical / adapter regression tests | fixed（代码）；GitHub 待记录 |
@@ -47,5 +47,10 @@ updated_at: 2026-09-04
 - 当前代码提交为 `1676abd3737e6fda53bd97918c5b7c2d746bc178`。Windows clean checkout 完成 root/Contract clean install，169/169 tests、v0.1.1、Contract、E2E、UI、DSH static、release configuration 及 vendor zero-diff 均通过。
 - 现场 tarball 为 `architectureworld-report-studio-dsh-0.1.1.tgz`，39 files、88,476 bytes、SHA-256 `f6b4fc6a81dcf01df51dd66d071c0969d930a4a605d5764af890d9ff2ad24748`；已验证 integrity 并安装到真实 `web` Profile。
 - 目标 Revision 9 在部署后和重启后均可读，真实记录为 1 page / 4 annotations / 2 rounds / 3 submissions / 1 proposal。两份部署前备份的 `control.json` 已是同一计数和 SHA-256 `71166D…141C47`，本轮没有 POST、Proposal 确认或用户数据写入。
+
+## 2026-09-04 CI 跟进
+
+- Draft PR 的 Standard Project run `33848477459` 已确证失败于 `ERR_MODULE_NOT_FOUND: ajv`：它仅执行 Contract 的 `npm ci`，随后在仓库根运行 `verify:all`。修复前新增的 release configuration 回归按预期 RED；修复后要求 Standard workflow 在 `verify:all` 前运行根 `npm ci --ignore-scripts --no-audit --no-fund`，本地 170/170、Contract、E2E、UI、DSH、release gate 均已通过。新的远端 run 是唯一有效的确认来源。
+- 同一批旧 Report Studio v0.1.1 CI (`33848436859` 与 `33848477248`) 另有 Python `referencing` 未安装的失败；该项未混入本次 Standard workflow/AJV 最小修复，仍需单独授权和验证。
 
 详细命令、产物、真实宿主和 CI 结果写入 `.superpowers/sdd/2026-09-03-report-studio-v0.1.1-stabilization/task-10-report.md`；最终运维入口写入 handoff。

@@ -56,6 +56,33 @@ if (integrity) {
     )
   })
 
+  test('release configuration rejects the Standard Project workflow when root dependencies are absent before verify:all', async t => {
+    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-standard-workflow-test-'))
+    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
+      readFile(join(root, 'package.json'), 'utf8'),
+      readFile(join(root, 'package-lock.json'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
+    ])
+    const rootlessStandardWorkflow = standardWorkflow.replace(
+      /^          npm ci --ignore-scripts --no-audit --no-fund\r?\n/m,
+      '',
+    )
+    await Promise.all([
+      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), reportStudioWorkflow, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), rootlessStandardWorkflow, 'utf8'),
+    ])
+
+    await assert.rejects(
+      integrity.verifyReleaseConfiguration(configurationRoot),
+      /Standard Project workflow must install root dependencies before verify:all/,
+    )
+  })
+
   test('smoke package resolution refuses implicit dist or source fallbacks', async () => {
     await assert.rejects(
       integrity.resolveRequiredPluginPackage('', root),
