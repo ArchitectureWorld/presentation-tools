@@ -58,10 +58,13 @@ function findBrowser() {
   throw new Error('未找到 Chromium/Chrome，请设置 CHROMIUM_PATH');
 }
 
-async function waitForJson(url, timeoutMs = 12000) {
+async function waitForJson(url, { browser, browserLogs, timeoutMs = 45000 } = {}) {
   const startedAt = Date.now();
   let lastError;
   while (Date.now() - startedAt < timeoutMs) {
+    if (browser?.exitCode !== null) {
+      throw new Error(`Chromium 在 DevTools 就绪前退出（exitCode=${browser.exitCode}）：\n${browserLogs?.() || ''}`);
+    }
     try {
       const response = await fetch(url);
       if (response.ok) return response.json();
@@ -70,7 +73,7 @@ async function waitForJson(url, timeoutMs = 12000) {
     }
     await delay(100);
   }
-  throw new Error(`Chromium DevTools 未就绪：${lastError?.message || url}`);
+  throw new Error(`Chromium DevTools 在 ${timeoutMs}ms 内未就绪：${lastError?.message || url}\n${browserLogs?.() || ''}`);
 }
 
 function createCdpClient(webSocketUrl) {
@@ -221,12 +224,17 @@ async function main() {
     `--user-data-dir=${browserProfile}`,
     'about:blank',
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let browserStdout = '';
+  let browserStderr = '';
+  browser.stdout.on('data', chunk => { browserStdout += chunk.toString(); });
+  browser.stderr.on('data', chunk => { browserStderr += chunk.toString(); });
+  const browserLogs = () => `${browserStdout}\n${browserStderr}`.trim();
   const browserExit = new Promise(resolve => browser.once('exit', resolve));
 
   let cdp;
   try {
-    await waitForJson(`http://127.0.0.1:${debuggingPort}/json/version`);
-    const targets = await waitForJson(`http://127.0.0.1:${debuggingPort}/json/list`);
+    await waitForJson(`http://127.0.0.1:${debuggingPort}/json/version`, { browser, browserLogs });
+    const targets = await waitForJson(`http://127.0.0.1:${debuggingPort}/json/list`, { browser, browserLogs });
     const pageTarget = targets.find(target => target.type === 'page');
     assert.ok(pageTarget, '缺少 Chromium 页面目标');
     cdp = createCdpClient(pageTarget.webSocketDebuggerUrl);
