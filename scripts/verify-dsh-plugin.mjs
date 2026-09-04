@@ -21,10 +21,15 @@ assert.match(patch, /@architectureworld\/report-studio-dsh/)
 
 const host = await read('packages/studio-dsh-plugin/lib/index.js')
 for (const token of [
-  "inject = ['tools', 'webServer', 'systemPrompt']",
+  "inject = ['tools', 'webServer', 'systemPrompt', 'sessions']",
   "path: '/report-studio'",
+  "name: 'studio_open_workspace_project'",
+  "name: 'studio_reload_upstream'",
   "name: 'studio_get_context'",
   "name: 'studio_apply_commands'",
+  "'/report-studio/api/workspace/status'",
+  "'/report-studio/api/workspace/reload'",
+  "'/report-studio/api/workspace/apply'",
   "agentMode: 'dsh-native'",
   "securityMode: SECURITY_MODE",
   "networkSharedSecurity: false",
@@ -35,6 +40,12 @@ assert.match(host, /\.\.\/vendor\/apps\/studio-local\/standard-project\.mjs/)
 
 const runtime = await read('packages/studio-dsh-plugin/lib/runtime.js')
 assert.match(runtime, /\.\.\/vendor\/apps\/studio-local\/repository\.mjs/)
+for (const token of [
+  'sessions?.get(sessionId)',
+  'session?.header?.cwd',
+  'createWorkspaceWatcher',
+  'applyWorkspaceCandidate',
+]) assert.ok(runtime.includes(token), `missing Workspace runtime token: ${token}`)
 
 const client = await read('packages/studio-dsh-plugin/lib/client.js')
 for (const token of [
@@ -57,6 +68,15 @@ for (const token of [
   "report-studio-dsh-embedded",
   "report-studio-standalone",
 ]) assert.ok(browser.includes(token), `missing browser native bridge token: ${token}`)
+
+const studioBrowser = await read('apps/studio-local/public/app.js')
+for (const token of [
+  '/api/workspace/status',
+  '/api/workspace/reload',
+  '/api/workspace/apply',
+  'workspaceHasDirtyEdits',
+  'refreshWorkspaceStatus',
+]) assert.ok(studioBrowser.includes(token), `missing Workspace browser token: ${token}`)
 
 const smoke = await read('scripts/smoke-dsh-native.mjs')
 assert.match(smoke, /REPORT_STUDIO_PLUGIN_PACKAGE/)
@@ -81,4 +101,4 @@ console.log('Report Studio native DSH plugin verification PASS')
 console.log('plugin=@architectureworld/report-studio-dsh@0.1.1')
 console.log('baseline=@deepseek-ai/dsh@0.1.1-rc.2')
 console.log('route=/report-studio')
-console.log('tools=studio_get_context,studio_apply_commands')
+console.log('tools=studio_open_workspace_project,studio_reload_upstream,studio_get_context,studio_apply_commands')

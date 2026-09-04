@@ -258,7 +258,7 @@ test('Workspace watcher observes a real Windows atomic replacement and publishes
   }
 })
 
-test('Workspace watcher detects draft and asset-manifest changes and stops after close', async () => {
+test('Workspace watcher detects draft creation, modification and deletion plus asset-manifest changes', async () => {
   assert.equal(typeof liveLink.createWorkspaceWatcher, 'function')
   const workspaceRoot = await makeWorkspace('presentation-live-managed-events-')
   const harness = fakeWatchHarness()
@@ -282,18 +282,39 @@ test('Workspace watcher detects draft and asset-manifest changes and stops after
     await waitFor(() => candidates.length >= 2)
     assert.equal(candidates.length, 2)
 
+    const pageManifestPath = join(workspaceRoot, 'pages', 'manifest.json')
+    const pageManifest = JSON.parse(await readFile(pageManifestPath, 'utf8'))
+    const removedPage = pageManifest.pages[1]
+    const removedDraftPath = join(workspaceRoot, ...removedPage.draftPath.split('/'))
+    const removedDraft = await readFile(removedDraftPath, 'utf8')
+    pageManifest.pages = pageManifest.pages.slice(0, 1)
+    await writeFile(pageManifestPath, `${JSON.stringify(pageManifest, null, 2)}\n`, 'utf8')
+    await rm(removedDraftPath)
+    harness.emit('rename', removedPage.draftPath)
+    await waitFor(() => candidates.length >= 3)
+    assert.equal(candidates.length, 3)
+    assert.equal(candidates[2].snapshot.pages.length, 1)
+
+    pageManifest.pages.push(removedPage)
+    await writeFile(removedDraftPath, removedDraft, 'utf8')
+    await writeFile(pageManifestPath, `${JSON.stringify(pageManifest, null, 2)}\n`, 'utf8')
+    harness.emit('rename', removedPage.draftPath)
+    await waitFor(() => candidates.length >= 4)
+    assert.equal(candidates.length, 4)
+    assert.equal(candidates[3].snapshot.pages.length, 2)
+
     const assetPath = join(workspaceRoot, 'assets', 'manifest.json')
     const assets = JSON.parse(await readFile(assetPath, 'utf8'))
     assets.assets[0].displayName = 'Pre 更新后的图表名称'
     await writeFile(assetPath, `${JSON.stringify(assets, null, 2)}\n`, 'utf8')
     harness.emit('change', 'manifest.json')
-    await waitFor(() => candidates.length >= 3)
-    assert.equal(candidates.length, 3)
+    await waitFor(() => candidates.length >= 5)
+    assert.equal(candidates.length, 5)
 
     await watcher.close()
     harness.emit('change', 'manifest.json')
     await delay(60)
-    assert.equal(candidates.length, 3)
+    assert.equal(candidates.length, 5)
     assert.equal(statuses.at(-1).status, 'watcher_disconnected')
   } finally {
     await watcher.close()
