@@ -1,0 +1,42 @@
+name: Temporary Report Studio Source Snapshot
+
+on:
+  push:
+    branches:
+      - feat/report-studio-v0.2.0-layout
+    paths:
+      - .github/workflows/report-studio-source-snapshot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Archive current checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude='**/node_modules' \
+            --exclude='.worktrees' \
+            -czf report-studio-source-${GITHUB_SHA}.tgz .
+          sha256sum report-studio-source-${GITHUB_SHA}.tgz > report-studio-source-${GITHUB_SHA}.sha256
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-studio-source-${{ github.sha }}
+          path: |
+            report-studio-source-${{ github.sha }}.tgz
+            report-studio-source-${{ github.sha }}.sha256
+          if-no-files-found: error
+          retention-days: 1
