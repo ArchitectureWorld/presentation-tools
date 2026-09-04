@@ -108,9 +108,9 @@
 **Interfaces:**
 - `npm run verify:workspace` 成功输出 `PRESENTATION_WORKSPACE_LIVE_LINK_PASS`。
 
-- [ ] **Step 1: 写 verifier 的失败测试，锁定 22 项最低覆盖、Contract 坐标、vendor 和文档要求。**
-- [ ] **Step 2: 运行 verifier 测试并确认正确失败。**
-- [ ] **Step 3: 实现 verifier、README、安装说明与完整 Handoff；执行 `npm run sync:vendor`。**
-- [ ] **Step 4: 运行 `npm run verify:workspace`、`npm run verify:all`、vendor 零漂移、当前 HEAD tarball integrity 和 DSH smoke。**
-- [ ] **Step 5: 在 Windows 真实 DSH Web Profile 备份后安装当前 tgz，验证 Workspace 自动打开、更新、dirty 冲突、恢复、layouts/和其他文件不变以及控制台零新增错误。**
-- [ ] **Step 6: 提交并推送现有支线，等待 GitHub Windows/Linux CI 全绿；PR 保持 Draft，不合并 main。**
+- [x] **Step 1: 写 verifier 的失败测试，锁定 22 项最低覆盖、Contract 坐标、vendor 和文档要求。**
+- [x] **Step 2: 运行 verifier 测试并确认正确失败。**
+- [x] **Step 3: 实现 verifier、README、安装说明与完整 Handoff；执行 `npm run sync:vendor`。**
+- [x] **Step 4: 运行 `npm run verify:workspace`、`npm run verify:all`、vendor 零漂移、当前 HEAD tarball integrity 和 DSH smoke。**
+- [x] **Step 5: 在 Windows 真实 DSH Web Profile 备份后安装当前 tgz，验证 Workspace 自动打开、更新、dirty 冲突、恢复、layouts/和其他文件不变以及控制台零新增错误。**
+- [x] **Step 6: 提交并推送现有支线，等待 GitHub Windows/Linux CI 全绿；仓库当前没有开放 PR，未创建或合并 PR，`main` 未合并。**

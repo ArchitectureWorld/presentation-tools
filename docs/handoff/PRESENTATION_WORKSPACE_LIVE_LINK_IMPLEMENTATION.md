@@ -4,7 +4,7 @@
 
 本文件记录 Report Studio 0.1.1 在 `feat/report-studio-v0.1.1-hardening` 支线上的 Workspace Live Link 实施。代码、发布门禁、正式 Windows DSH Web Profile 部署与真实宿主验收已经完成；未经人工验收不得合并 `main`。
 
-实施代码与 tgz 完整性绑定提交：`cc205b0f787703e4f10dc50362c5438e73f593a2`。本文件的最终证据补录提交以该支线 Git 历史为准。
+实施代码与 tgz 完整性绑定提交：`cc205b0f787703e4f10dc50362c5438e73f593a2`。真实宿主证据提交：`e22a83b86aae8737c2db0f28dd35912b6efd5a63`。最终跨平台验证修复提交：`9b9f8f4ac2d46c5dbc6a44a7a83126f04490c506`；该修复只让 Windows 测试以 `realpath()` 规范路径断言，没有修改运行时或发布产物。
 
 ## 固定坐标与不可变边界
 
@@ -99,6 +99,8 @@ npm run verify:all
 - 隔离真实 DSH smoke：`5/5` 通过。
 - 固定 Contract 提交和 Schema Set SHA-256：零漂移。
 - tarball：`C:\pt-rvw-804dbd4\.tmp\report-studio-live-link-27e0f34\architectureworld-report-studio-dsh-0.1.1.tgz`，`98,673 bytes`，SHA-256 `F0414210B2CDFA9CFCE1D89430C39812AA7E60375744E2685F1AC90A04C48D91`。
+- GitHub `Presentation Standard Project v0.1.0 CI` run 14：PASS。
+- GitHub `Report Studio v0.1.1 CI` run 23：Windows 与 Linux job 均 PASS。
 
 ## Windows 人工测试结果
 
