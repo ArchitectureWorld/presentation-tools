@@ -142,6 +142,33 @@ if (integrity) {
     assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
   })
 
+  test('release configuration rejects a Report Studio workflow that omits pinned pnpm before DSH smoke', async t => {
+    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-pnpm-workflow-test-'))
+    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
+      readFile(join(root, 'package.json'), 'utf8'),
+      readFile(join(root, 'package-lock.json'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
+    ])
+    const workflowWithoutPnpm = reportStudioWorkflow.replace(
+      /      - uses: pnpm\/action-setup@v4\r?\n        with:\r?\n          version: '9\.15\.4'\r?\n/,
+      '',
+    )
+    await Promise.all([
+      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), workflowWithoutPnpm, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow, 'utf8'),
+    ])
+
+    await assert.rejects(
+      integrity.verifyReleaseConfiguration(configurationRoot),
+      /Report Studio workflow must install pnpm 9\.15\.4 before DSH smoke/,
+    )
+  })
+
   test('smoke package resolution refuses implicit dist or source fallbacks', async () => {
     await assert.rejects(
       integrity.resolveRequiredPluginPackage('', root),

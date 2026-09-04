@@ -120,7 +120,9 @@ export async function verifyReleaseConfiguration(root) {
 
   const reportStudioPythonSetupIndex = workflow.indexOf("      - uses: actions/setup-python@v5\n        with:\n          python-version: '3.12'")
   const reportStudioPythonInstallIndex = workflow.indexOf('python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0')
+  const reportStudioPnpmSetupIndex = workflow.indexOf("      - uses: pnpm/action-setup@v4\n        with:\n          version: '9.15.4'")
   const reportStudioVerifyAllIndex = workflow.indexOf('npm run verify:all')
+  const reportStudioDshSmokeIndex = workflow.indexOf('npm run smoke:dsh')
   assertCondition(
     reportStudioPythonSetupIndex >= 0 && reportStudioPythonSetupIndex < reportStudioVerifyAllIndex,
     'Report Studio workflow must set up Python 3.12 before verify:all',
@@ -128,6 +130,10 @@ export async function verifyReleaseConfiguration(root) {
   assertCondition(
     reportStudioPythonInstallIndex >= 0 && reportStudioPythonInstallIndex < reportStudioVerifyAllIndex,
     'Report Studio workflow must install pinned Python Contract dependencies before verify:all',
+  )
+  assertCondition(
+    reportStudioPnpmSetupIndex >= 0 && reportStudioPnpmSetupIndex < reportStudioDshSmokeIndex,
+    'Report Studio workflow must install pnpm 9.15.4 before DSH smoke',
   )
 
   const standardWorkflow = (await readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8')).replace(/\r\n/g, '\n')
