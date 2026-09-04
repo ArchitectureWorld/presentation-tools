@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
@@ -107,7 +107,7 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     }), response)
     assert.equal(response.statusCode, 200, body)
     const workspaceReload = JSON.parse(body)
-    assert.equal(workspaceReload.workspaceRoot, dataDir)
+    assert.equal(workspaceReload.workspaceRoot, await realpath(dataDir))
     assert.equal(workspaceReload.status, 'workspace_project_missing')
 
     const action = async value => {

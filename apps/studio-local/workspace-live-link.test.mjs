@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
@@ -64,7 +64,7 @@ test('resolveWorkspaceRoot accepts a real absolute directory and rejects a symli
   const root = await mkdtemp(join(tmpdir(), 'presentation-live-root-'))
   const link = `${root}-junction`
   try {
-    assert.equal(await liveLink.resolveWorkspaceRoot(root), await lstat(root).then(() => resolve(root)))
+    assert.equal(await liveLink.resolveWorkspaceRoot(root), await realpath(root))
     await symlink(root, link, 'junction')
     await assert.rejects(liveLink.resolveWorkspaceRoot(link), error => error.code === 'workspace_unavailable')
     await assert.rejects(liveLink.resolveWorkspaceRoot('relative/project'), error => error.code === 'workspace_unavailable')
