@@ -17,7 +17,7 @@ updated_at: 2026-09-04
 
 Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `feat/report-studio-v0.1.1-hardening`。Review 起点为 `9d18fcb03b889d2db5002665d7c18362cc7399ed`，main 基线为 `804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`。本 handoff 随所在提交一起更新；部署来源 SHA、tarball SHA-256、测试、宿主和 CI 的实际结果见同一次 Task 10 报告，不能由本文件的候选状态推导为发布许可。
 
-当前可部署代码提交为 `1676abd3737e6fda53bd97918c5b7c2d746bc178`；对应现场 tarball 是 39 files / 88,476 bytes / SHA-256 `f6b4fc6a81dcf01df51dd66d071c0969d930a4a605d5764af890d9ff2ad24748`。它已在真实 Web Profile 部署；代码、完整验证与宿主迁移读取证据见 Task 10 报告，GitHub Actions、main required checks 和真实 Provider 闭环仍是独立门槛。
+已部署插件源码截至 `1676abd3737e6fda53bd97918c5b7c2d746bc178`；对应现场 tarball 是 39 files / 88,476 bytes / SHA-256 `f6b4fc6a81dcf01df51dd66d071c0969d930a4a605d5764af890d9ff2ad24748`。最终门禁提交 `6b93b1262f9fd636ea1fbe5df1da258857325851` 的 Linux artifact 为 39 files / 87,894 bytes / SHA-256 `1de7d5aabe7518126c5c3198738fd0e8b395e7fcb59e0c5a640328702c94750d`；逐文件差异仅为 CRLF/LF。GitHub push/PR Linux/Windows 已全绿，main required checks 已启用；真实 Provider 闭环仍是独立门槛。
 
 ## 架构与兼容性
 
@@ -48,4 +48,4 @@ Repository 为 `ArchitectureWorld/presentation-tools`；唯一工作支线为 `f
 
 ## 下一位执行者入口与合并判定
 
-先读 [review resolution](../review/2026-09-03-report-studio-v0.1.1-review-blockers-resolution.md)、Task 10 报告和 CI run。禁止新增分支、禁止 force push、禁止合并 main。当前合并判定为 **否**：仍需 GitHub Linux/Windows 当前 run、真实 Provider 闭环和 main required checks 的可验证证据。自动化测试总数、失败数、最终 SHA、Actions Run、tarball 清单及 DSH Shell 结果必须以 Task 10 的现场输出为准。
+先读 [review resolution](../review/2026-09-03-report-studio-v0.1.1-review-blockers-resolution.md)、Task 10 报告和 CI run。禁止新增分支、禁止 force push、禁止合并 main。当前合并判定仍为 **否**：GitHub Linux/Windows 与 main required checks 已关闭，真实 Provider 闭环及人工验收尚未关闭。自动化测试总数、失败数、最终 SHA、Actions Run、tarball 清单及 DSH Shell 结果必须以 Task 10 的现场输出为准。
