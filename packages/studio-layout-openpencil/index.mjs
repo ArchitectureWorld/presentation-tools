@@ -7,7 +7,7 @@ import {
   mapEngineSelection,
 } from '../studio-layout-engine-binding/index.mjs'
 
-export const OPENPENCIL_ADAPTER_VERSION = '0.2.0-alpha.2'
+export const OPENPENCIL_ADAPTER_VERSION = '0.2.0-alpha.3'
 
 const ROOT_BINDING = 'rs_page'
 const SHAPE_TYPES = new Set(['rectangle', 'ellipse', 'line'])
@@ -283,15 +283,35 @@ function assertCreateTransaction(transaction) {
   }
 }
 
+function normalizeExecutionResults(transaction, results) {
+  const expectedOrder = [transaction.rootBinding, ...transaction.expectedBindings.map(entry => entry.bindingKey)]
+  const managed = results.length === expectedOrder.length
+    && results.every(entry => isObject(entry) && /^b\d+$/u.test(String(entry.binding ?? '')))
+  if (!managed) return results
+  const byIndex = new Map()
+  for (const entry of results) {
+    const index = Number(String(entry.binding).slice(1))
+    if (!Number.isSafeInteger(index) || index < 0 || index >= expectedOrder.length || byIndex.has(index)) {
+      fail('openpencil_invalid_execution_result', 'Managed OpenPencil script returned a non-contiguous binding sequence.', { results })
+    }
+    byIndex.set(index, entry)
+  }
+  if (byIndex.size !== expectedOrder.length || expectedOrder.some((_, index) => !byIndex.has(index))) {
+    fail('openpencil_invalid_execution_result', 'Managed OpenPencil script omitted an insertion binding.', { results })
+  }
+  return expectedOrder.map((binding, index) => ({ ...byIndex.get(index), binding }))
+}
+
 export function createOpenPencilEngineBinding(transaction, result, metadata = {}) {
   assertCreateTransaction(transaction)
   if (!isObject(result) || !Array.isArray(result.results)) {
     fail('openpencil_invalid_execution_result', 'OpenPencil execution result requires results[{binding,nodeId}]')
   }
+  const normalizedResults = normalizeExecutionResults(transaction, result.results)
   const expected = new Set([transaction.rootBinding, ...transaction.expectedBindings.map(entry => entry.bindingKey)])
   const resultByBinding = new Map()
   const engineNodeIds = new Set()
-  for (const [index, entry] of result.results.entries()) {
+  for (const [index, entry] of normalizedResults.entries()) {
     if (!isObject(entry) || !isNonEmptyString(entry.binding) || !isNonEmptyString(entry.nodeId)) {
       fail('openpencil_invalid_execution_result', `Invalid OpenPencil result at index ${index}`, { index, entry })
     }
