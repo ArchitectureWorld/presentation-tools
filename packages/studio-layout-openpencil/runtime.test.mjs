@@ -6,7 +6,7 @@ import {
   OpenPencilRuntimeError,
   PINNED_DSH_OPENPENCIL_VERSION,
   PINNED_OPENPENCIL_REVISION,
-  parseOpenPencilSmokeOutput,
+  assertOpenPencilRuntimeEvidence,
   resolveDshOpenPencilPackage,
   runOpenPencilRuntimeSmoke,
 } from './runtime.mjs'
@@ -19,11 +19,35 @@ function descriptor(root = '/runtime') {
     packageVersion: PINNED_DSH_OPENPENCIL_VERSION,
     openPencilVersion: '0.8.5',
     openPencilRevision: PINNED_OPENPENCIL_REVISION,
-    hostSmokeScript: join(root, 'scripts', 'test-host.mjs'),
+    editorHostModule: join(root, 'lib', 'editor-host.js'),
+    editorRecoveryModule: join(root, 'lib', 'editor-recovery.js'),
   }
 }
 
-test('resolveDshOpenPencilPackage accepts only the pinned package and OpenPencil revision', async () => {
+function passedEvidence(overrides = {}) {
+  return {
+    status: 'passed',
+    runtime: 'openpencil-managed',
+    packageVersion: PINNED_DSH_OPENPENCIL_VERSION,
+    openPencilVersion: '0.8.5',
+    openPencilRevision: PINNED_OPENPENCIL_REVISION,
+    width: 1600,
+    height: 900,
+    batchDesign: true,
+    bindingCount: 2,
+    managedEditor: true,
+    selectionMapped: true,
+    framePatch: true,
+    saved: true,
+    reopened: true,
+    documentSha256: digest('a'),
+    reopenedSha256: digest('a'),
+    lifecycle: { created: true, selected: true, updated: true, saved: true, closed: true, reopened: true },
+    ...overrides,
+  }
+}
+
+test('resolveDshOpenPencilPackage accepts only the pinned package and managed runtime modules', async () => {
   const files = new Map([
     ['/runtime/package.json', JSON.stringify({ name: '@zseven-w/dsh-openpencil', version: PINNED_DSH_OPENPENCIL_VERSION })],
     ['/runtime/platforms.json', JSON.stringify({ openPencil: { version: '0.8.5', revision: PINNED_OPENPENCIL_REVISION } })],
@@ -34,7 +58,7 @@ test('resolveDshOpenPencilPackage accepts only the pinned package and OpenPencil
       if (!files.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
       return files.get(path)
     },
-    statPath: async path => ({ isFile: () => path.endsWith('test-host.mjs') }),
+    statPath: async path => ({ isFile: () => path.endsWith('editor-host.js') || path.endsWith('editor-recovery.js') }),
   })
   assert.deepEqual(result, descriptor('/runtime'))
 })
@@ -52,85 +76,66 @@ test('resolveDshOpenPencilPackage rejects version drift', async () => {
   )
 })
 
-test('parseOpenPencilSmokeOutput validates exact renderer, real editor and stable hashes', () => {
-  const evidence = parseOpenPencilSmokeOutput(`noise before evidence\n${JSON.stringify({
-    renderer: 'openpencil',
-    fidelity: 'exact',
-    width: 1600,
-    height: 900,
-    bytes: 1234,
-    frameCount: 1,
-    frameIds: ['frame-runtime-smoke'],
-    sourceSha256: digest('a'),
-    imageSha256: digest('b'),
-    viewerAssets: true,
-    editor: true,
-  })}\n`)
-  assert.equal(evidence.frameIds[0], 'frame-runtime-smoke')
-  assert.equal(evidence.editor, true)
+test('assertOpenPencilRuntimeEvidence requires real batch, editor, selection, patch, save and reopen evidence', () => {
+  assert.deepEqual(assertOpenPencilRuntimeEvidence(passedEvidence()).status, 'passed')
+  for (const field of ['batchDesign', 'managedEditor', 'selectionMapped', 'framePatch', 'saved', 'reopened']) {
+    assert.throws(
+      () => assertOpenPencilRuntimeEvidence(passedEvidence({ [field]: false })),
+      error => error instanceof OpenPencilRuntimeError && error.code === 'layout_engine_protocol_error',
+      field,
+    )
+  }
 })
 
-test('parseOpenPencilSmokeOutput rejects a semantic adapter result masquerading as real smoke', () => {
-  assert.throws(
-    () => parseOpenPencilSmokeOutput(JSON.stringify({ renderer: 'adapter', fidelity: 'semantic', frameCount: 1, viewerAssets: true, editor: true })),
-    error => error.code === 'layout_engine_protocol_error',
-  )
-})
-
-test('runOpenPencilRuntimeSmoke creates a runtime-authored fixture and executes the pinned host smoke', async () => {
-  const calls = []
+test('runOpenPencilRuntimeSmoke executes the managed lifecycle in an isolated DSH home and cleans it', async () => {
   let cleaned = false
-  const result = await runOpenPencilRuntimeSmoke({
-    runtime: descriptor('/runtime'),
-    makeTemporaryDirectory: async () => '/tmp/layout-runtime-smoke',
-    buildFixture: async ({ outputPath, runtime, signal }) => {
-      calls.push({ kind: 'fixture', outputPath, runtime, aborted: signal.aborted })
-      return { path: outputPath, sha256: digest('c'), frameId: 'frame-runtime-smoke' }
-    },
-    runProcess: async (command, args, options) => {
-      calls.push({ kind: 'process', command, args, cwd: options.cwd })
-      return {
-        code: 0,
-        stdout: JSON.stringify({
-          renderer: 'openpencil', fidelity: 'exact', width: 1600, height: 900, bytes: 2048,
-          frameCount: 1, frameIds: ['frame-runtime-smoke'], sourceSha256: digest('c'), imageSha256: digest('d'),
-          viewerAssets: true, editor: true,
-        }),
-        stderr: '',
-      }
-    },
-    removeDirectory: async path => { assert.equal(path, '/tmp/layout-runtime-smoke'); cleaned = true },
-    nodeExecutable: '/node24',
-  })
-
-  assert.equal(result.status, 'passed')
-  assert.equal(result.packageVersion, PINNED_DSH_OPENPENCIL_VERSION)
-  assert.equal(result.openPencilRevision, PINNED_OPENPENCIL_REVISION)
-  assert.equal(result.lifecycle.created, true)
-  assert.equal(result.lifecycle.selected, true)
-  assert.equal(result.lifecycle.updated, true)
-  assert.equal(result.lifecycle.saved, true)
-  assert.equal(result.lifecycle.reopened, true)
-  assert.deepEqual(calls[1], {
-    kind: 'process',
-    command: '/node24',
-    args: ['/runtime/scripts/test-host.mjs', '/tmp/layout-runtime-smoke/report-studio-runtime-smoke.op', '1600', '900'],
-    cwd: '/runtime',
-  })
-  assert.equal(cleaned, true)
+  let observedDshHome = null
+  const before = process.env.DSH_HOME
+  process.env.DSH_HOME = '/production-dsh-home'
+  try {
+    const result = await runOpenPencilRuntimeSmoke({
+      runtime: descriptor('/runtime'),
+      makeTemporaryDirectory: async () => '/tmp/layout-runtime-smoke',
+      executeLifecycle: async ({ runtime, temporaryRoot, signal }) => {
+        assert.deepEqual(runtime, descriptor('/runtime'))
+        assert.equal(temporaryRoot, '/tmp/layout-runtime-smoke')
+        assert.equal(signal.aborted, false)
+        observedDshHome = process.env.DSH_HOME
+        return passedEvidence({ packageVersion: 'ignored-by-lifecycle' })
+      },
+      removeDirectory: async path => {
+        assert.equal(path, '/tmp/layout-runtime-smoke')
+        cleaned = true
+      },
+    })
+    assert.equal(result.status, 'passed')
+    assert.equal(result.packageVersion, PINNED_DSH_OPENPENCIL_VERSION)
+    assert.equal(observedDshHome, '/tmp/layout-runtime-smoke/dsh-home')
+    assert.equal(cleaned, true)
+    assert.equal(process.env.DSH_HOME, '/production-dsh-home')
+  } finally {
+    if (before === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = before
+  }
 })
 
-test('runOpenPencilRuntimeSmoke preserves diagnostic output when the real host fails', async () => {
-  await assert.rejects(
-    runOpenPencilRuntimeSmoke({
-      runtime: descriptor('/runtime'),
-      makeTemporaryDirectory: async () => '/tmp/layout-runtime-fail',
-      buildFixture: async ({ outputPath }) => ({ path: outputPath, sha256: digest('e'), frameId: 'frame-runtime-smoke' }),
-      runProcess: async () => ({ code: 1, stdout: 'partial', stderr: 'binary failed' }),
-      removeDirectory: async () => {},
-    }),
-    error => error.code === 'layout_engine_runtime_failed'
-      && error.details.exitCode === 1
-      && error.details.stderr === 'binary failed',
-  )
+test('runOpenPencilRuntimeSmoke restores DSH_HOME and cleans the temporary directory after failure', async () => {
+  let cleaned = false
+  const before = process.env.DSH_HOME
+  delete process.env.DSH_HOME
+  try {
+    await assert.rejects(
+      runOpenPencilRuntimeSmoke({
+        runtime: descriptor('/runtime'),
+        makeTemporaryDirectory: async () => '/tmp/layout-runtime-fail',
+        executeLifecycle: async () => { throw new OpenPencilRuntimeError('layout_engine_runtime_failed', 'managed daemon failed', { diagnostic: 'safe' }) },
+        removeDirectory: async path => { assert.equal(path, '/tmp/layout-runtime-fail'); cleaned = true },
+      }),
+      error => error.code === 'layout_engine_runtime_failed' && error.details.diagnostic === 'safe',
+    )
+    assert.equal(cleaned, true)
+    assert.equal(process.env.DSH_HOME, undefined)
+  } finally {
+    if (before !== undefined) process.env.DSH_HOME = before
+  }
 })
