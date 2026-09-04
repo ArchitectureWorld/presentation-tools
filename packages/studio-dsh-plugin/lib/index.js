@@ -5,6 +5,8 @@ import { createStudioDshRuntime } from './runtime.js'
 import { STUDIO_APPLY_COMMANDS_SCHEMA, errorPayload } from '../vendor/packages/studio-contracts/index.mjs'
 import { createStandardProjectService } from '../vendor/apps/studio-local/standard-project.mjs'
 import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/asset-service.mjs'
+import { createLayoutService } from '../vendor/apps/studio-local/layout-service.mjs'
+import { executeLayoutApi, layoutApiErrorPayload, matchLayoutApiPath } from '../vendor/apps/studio-local/layout-api.mjs'
 
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions']
@@ -165,11 +167,16 @@ function createRoute(runtime, listenHost) {
           return sendJson(response, 200, await runtime.applyWorkspaceCandidate(sessionId, await readJson(request)))
         }
         const repository = await runtime.repositoryFor(sessionId)
+        const workspace = await runtime.workspaceStatus(sessionId)
         const standardProject = createStandardProjectService(repository)
+        const layoutRoot = workspace?.workspaceRoot ? join(workspace.workspaceRoot, 'layouts') : join(repository.root, 'layouts')
+        const layoutService = createLayoutService({ repository, layoutRoot })
         if (request.method === 'GET' && url.pathname === '/report-studio/api/health') {
           return sendJson(response, 200, {
             ok: true,
             version: 'v0.1.1',
+            productVersion: '0.2.0-beta.1',
+            layoutStage: true,
             agentConfigured: true,
             agentMode: 'dsh-native',
             sessionId,
@@ -177,6 +184,7 @@ function createRoute(runtime, listenHost) {
             listenHost,
             networkSharedSecurity: false,
             dataRoot: runtime.dataRoot,
+            layoutRoot,
             migrationStatus: repository.migrationStatus().status,
           })
         }
@@ -188,6 +196,16 @@ function createRoute(runtime, listenHost) {
           return sendJson(response, 200, await standardProject.importProject(input.projectRoot))
         }
         if (request.method === 'POST' && url.pathname === '/report-studio/api/standard/export') return sendJson(response, 200, await standardProject.exportProject())
+        const layoutMatch = matchLayoutApiPath(url.pathname, '/report-studio/api')
+        if (layoutMatch) {
+          try {
+            const body = request.method === 'POST' ? await readJson(request) : {}
+            return sendJson(response, 200, await executeLayoutApi({ service: layoutService, method: request.method, match: layoutMatch, body }))
+          } catch (error) {
+            const result = layoutApiErrorPayload(error)
+            return sendJson(response, result.status, result.payload)
+          }
+        }
         if (request.method === 'GET' && url.pathname === '/report-studio/api/state') {
           return sendJson(response, 200, await runtime.getState(sessionId))
         }
@@ -228,7 +246,7 @@ function createRoute(runtime, listenHost) {
       if (await serveStatic(request, response, url)) return
       sendJson(response, 404, { error: 'not_found' })
     } catch (error) {
-      sendJson(response, error?.statusCode || 400, error?.code ? errorPayload(error) : { error: error?.message || 'request_failed' })
+      sendJson(response, error?.statusCode || error?.status || 400, error?.code ? errorPayload(error) : { error: error?.message || 'request_failed' })
     }
   }
 }
@@ -243,7 +261,8 @@ export function apply(ctx, config = {}) {
     name: 'report-studio-v0.1.1',
     order: 130,
     text: [
-      'Report Studio v0.1.1 is available in this DSH Session.',
+      'Report Studio v0.2.0 layout workspace is available in this DSH Session.',
+      'DSH remains the only Agent runtime; the Layout workspace does not choose its own model.',
       'For Report Studio review tasks, call studio_get_context with the supplied submissionId before proposing changes.',
       'Use studio_apply_commands only with the ReviewSubmission ID supplied by the user task.',
       'studio_apply_commands creates a Proposal for human confirmation and never directly commits Project State.',
