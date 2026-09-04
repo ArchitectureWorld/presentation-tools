@@ -8,7 +8,7 @@ import { validateProjectDirectoryWithAjv } from '../contracts/presentation-stand
 
 const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const pluginPackage = JSON.parse(await readFile(new URL('../packages/studio-dsh-plugin/package.json', import.meta.url), 'utf8'))
-assert.equal(rootPackage.version, '0.1.1')
+assert.match(rootPackage.version, /^(?:0\.1\.1|0\.2\.0(?:-alpha\.\d+)?)$/u)
 assert.equal(pluginPackage.version, '0.1.1')
 
 const dataDir = await mkdtemp(join(tmpdir(), 'report-studio-v0.1.1-e2e-'))
@@ -142,7 +142,8 @@ try {
   const exportValidation = await validateProjectDirectoryWithAjv(exported.projectRoot, { allowGitKeep: true })
   assert.equal(exportValidation.valid, true, JSON.stringify(exportValidation.errors, null, 2))
 
-  console.log('Report Studio v0.1.1 end-to-end verification PASS')
+  console.log('Report Studio v0.1.1 inherited end-to-end verification PASS')
+  console.log(`hostProduct=${rootPackage.version}`)
   console.log(`migrationBackup=${migration.backupPath}`)
   console.log(`acceptedRevision=${acceptedRevision}`)
   console.log(`standardExport=${exported.projectRoot}`)
