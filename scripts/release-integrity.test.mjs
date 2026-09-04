@@ -31,7 +31,7 @@ if (integrity) {
     assert.equal(result.platforms.sort().join(','), 'ubuntu-latest,windows-latest')
   })
 
-  test('release configuration requires the vendor manifest to trigger both push and pull request verification', async t => {
+  test('release configuration requires the vendor manifest to trigger push verification', async t => {
     const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-release-configuration-test-'))
     t.after(() => rm(configurationRoot, { recursive: true, force: true }))
     await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
@@ -43,7 +43,6 @@ if (integrity) {
     const manifestPathLine = "      - 'scripts/dsh-plugin-vendor-manifest.mjs'"
     const workflowMissingPushPath = workflow.replace(new RegExp(`${manifestPathLine.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}\\r?\\n`), '')
     assert.notEqual(workflowMissingPushPath, workflow, 'fixture must remove the push path filter')
-    assert.ok(workflowMissingPushPath.includes(manifestPathLine), 'fixture must retain the pull_request path filter')
     await Promise.all([
       writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
       writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
@@ -53,6 +52,33 @@ if (integrity) {
     await assert.rejects(
       integrity.verifyReleaseConfiguration(configurationRoot),
       /push path filter missing scripts\/dsh-plugin-vendor-manifest\.mjs/,
+    )
+  })
+
+  test('release configuration keeps Report Studio checks available on every pull request', async t => {
+    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-unconditional-pr-test-'))
+    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
+      readFile(join(root, 'package.json'), 'utf8'),
+      readFile(join(root, 'package-lock.json'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
+    ])
+    const filteredWorkflow = reportStudioWorkflow.replace(
+      /^  pull_request:\r?\n/m,
+      "  pull_request:\n    paths:\n      - 'package.json'\n",
+    )
+    await Promise.all([
+      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), filteredWorkflow, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow, 'utf8'),
+    ])
+
+    await assert.rejects(
+      integrity.verifyReleaseConfiguration(configurationRoot),
+      /Report Studio workflow pull_request must run without path filters/,
     )
   })
 

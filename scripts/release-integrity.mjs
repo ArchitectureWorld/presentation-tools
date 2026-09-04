@@ -94,19 +94,23 @@ export async function verifyReleaseConfiguration(root) {
   assertCondition(/^name:\s*Report Studio v0\.1\.1 CI\s*$/m.test(workflow), 'workflow name must be Report Studio v0.1.1 CI')
   assertCondition(/^\s*push:\s*$/m.test(workflow) && /^\s*pull_request:\s*$/m.test(workflow), 'workflow must run for pushes and pull requests')
   const workflowLines = workflow.split(/\r?\n/)
-  for (const trigger of ['push', 'pull_request']) {
-    const triggerIndex = workflowLines.indexOf(`  ${trigger}:`)
-    const pathsIndex = triggerIndex + 1
-    assertCondition(triggerIndex >= 0 && workflowLines[pathsIndex] === '    paths:', `workflow ${trigger} paths block is missing`)
-    const triggerPaths = new Set()
-    for (let index = pathsIndex + 1; index < workflowLines.length; index += 1) {
-      const match = workflowLines[index].match(/^      - '([^']+)'$/)
-      if (!match) break
-      triggerPaths.add(match[1])
-    }
-    for (const path of requiredPaths) {
-      assertCondition(triggerPaths.has(path), `workflow ${trigger} path filter missing ${path}`)
-    }
+  const pushIndex = workflowLines.indexOf('  push:')
+  const pushPathsIndex = pushIndex + 1
+  assertCondition(pushIndex >= 0 && workflowLines[pushPathsIndex] === '    paths:', 'workflow push paths block is missing')
+  const pushPaths = new Set()
+  for (let index = pushPathsIndex + 1; index < workflowLines.length; index += 1) {
+    const match = workflowLines[index].match(/^      - '([^']+)'$/)
+    if (!match) break
+    pushPaths.add(match[1])
+  }
+  for (const path of requiredPaths) {
+    assertCondition(pushPaths.has(path), `workflow push path filter missing ${path}`)
+  }
+
+  const pullRequestIndex = workflowLines.indexOf('  pull_request:')
+  assertCondition(pullRequestIndex >= 0, 'workflow pull_request trigger is missing')
+  for (let index = pullRequestIndex + 1; index < workflowLines.length && !/^\S/.test(workflowLines[index]); index += 1) {
+    assertCondition(workflowLines[index] !== '    paths:', 'Report Studio workflow pull_request must run without path filters')
   }
   for (const command of [
     'npm ci',

@@ -25,28 +25,6 @@ on:
       - '.gitattributes'
       - '.github/workflows/report-studio-v0.1.1-ci.yml'
   pull_request:
-    paths:
-      - 'apps/studio-local/**'
-      - 'packages/studio-contracts/**'
-      - 'packages/studio-core/**'
-      - 'packages/studio-standard-adapter/**'
-      - 'packages/studio-dsh-plugin/**'
-      - 'contracts/presentation-standard-project/**'
-      - 'scripts/verify-v0.1.1.mjs'
-      - 'scripts/verify-e2e-v0.1.1.mjs'
-      - 'scripts/verify-responsive-ui.mjs'
-      - 'scripts/verify-dsh-plugin.mjs'
-      - 'scripts/build-dsh-plugin-vendor.mjs'
-      - 'scripts/dsh-plugin-vendor-manifest.mjs'
-      - 'scripts/release-integrity.mjs'
-      - 'scripts/release-integrity.test.mjs'
-      - 'scripts/smoke-dsh-native.mjs'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'README.md'
-      - 'DSH_INSTALL.md'
-      - '.gitattributes'
-      - '.github/workflows/report-studio-v0.1.1-ci.yml'
 
 permissions:
   contents: read
