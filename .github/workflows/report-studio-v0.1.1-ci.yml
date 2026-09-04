@@ -118,7 +118,6 @@ jobs:
       - name: Smoke the tarball built by this job
         env:
           REPORT_STUDIO_PLUGIN_PACKAGE: .tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
-          PNPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: 'true'
         run: npm run smoke:dsh
 
       - name: Verify tracked files remain clean

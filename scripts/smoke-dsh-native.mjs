@@ -133,7 +133,7 @@ try {
   })
 
   console.log(`DSH smoke 2/5: install Report Studio bundle into an isolated web profile (${plugin})`)
-  const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', plugin])
+  const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', '--workspace-root', plugin])
   await run(addCommand, addArgs, { cwd: root, env, timeoutMs: 600000 })
 
   console.log('DSH smoke 3/5: verify composed profile')
