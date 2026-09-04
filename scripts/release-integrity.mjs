@@ -70,7 +70,7 @@ export async function verifyReleaseConfiguration(root) {
   const oldWorkflow = join(root, '.github', 'workflows', 'report-studio-v0.1.0-ci.yml')
   assertCondition(!await exists(oldWorkflow), 'legacy Report Studio v0.1.0 workflow must be removed')
   const workflowPath = join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml')
-  const workflow = await readFile(workflowPath, 'utf8')
+  const workflow = (await readFile(workflowPath, 'utf8')).replace(/\r\n/g, '\n')
   const requiredPaths = [
     'apps/studio-local/**',
     'packages/studio-contracts/**',
@@ -130,7 +130,7 @@ export async function verifyReleaseConfiguration(root) {
     'Report Studio workflow must install pinned Python Contract dependencies before verify:all',
   )
 
-  const standardWorkflow = await readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8')
+  const standardWorkflow = (await readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8')).replace(/\r\n/g, '\n')
   const standardRootInstallIndex = standardWorkflow.indexOf('npm ci --ignore-scripts --no-audit --no-fund')
   const standardVerifyAllIndex = standardWorkflow.indexOf('npm run verify:all')
   assertCondition(

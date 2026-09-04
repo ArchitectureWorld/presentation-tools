@@ -121,6 +121,27 @@ if (integrity) {
     )
   })
 
+  test('release configuration accepts CRLF workflow files', async t => {
+    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-crlf-workflow-test-'))
+    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
+      readFile(join(root, 'package.json'), 'utf8'),
+      readFile(join(root, 'package-lock.json'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
+      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
+    ])
+    await Promise.all([
+      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), reportStudioWorkflow.replace(/\n/g, '\r\n'), 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow.replace(/\n/g, '\r\n'), 'utf8'),
+    ])
+
+    const result = await integrity.verifyReleaseConfiguration(configurationRoot)
+    assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
+  })
+
   test('smoke package resolution refuses implicit dist or source fallbacks', async () => {
     await assert.rejects(
       integrity.resolveRequiredPluginPackage('', root),
