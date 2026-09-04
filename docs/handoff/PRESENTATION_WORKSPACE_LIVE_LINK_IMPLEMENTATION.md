@@ -2,9 +2,9 @@
 
 ## 交付状态
 
-本文件记录 Report Studio 0.1.1 在 `feat/report-studio-v0.1.1-hardening` 支线上的 Workspace Live Link 实施。当前处于最终门禁与真实 Windows DSH 宿主验收阶段；未经人工验收不得合并 `main`。
+本文件记录 Report Studio 0.1.1 在 `feat/report-studio-v0.1.1-hardening` 支线上的 Workspace Live Link 实施。代码、发布门禁、正式 Windows DSH Web Profile 部署与真实宿主验收已经完成；未经人工验收不得合并 `main`。
 
-最终提交 SHA：待本轮发布门禁提交后补录。
+实施代码与 tgz 完整性绑定提交：`cc205b0f787703e4f10dc50362c5438e73f593a2`。本文件的最终证据补录提交以该支线 Git 历史为准。
 
 ## 固定坐标与不可变边界
 
@@ -88,11 +88,47 @@ npm run verify:workspace
 npm run verify:all
 ```
 
-截至本文件创建时：Workspace parser/Watcher 聚焦测试 9/9 通过；发布 verifier 已按 TDD 观察到缺少本 Handoff 的正确失败。最终全量测试、tarball integrity、DSH smoke 与真实宿主结果将在本轮完成后补录。
+最终结果：
+
+- Workspace parser/Watcher 聚焦测试：`9/9` 通过。
+- 全量 Node 测试：`198/198` 通过。
+- `npm run verify:ui`：`6/6` 视口通过。
+- `npm run verify:dsh`：PASS。
+- `npm run verify:workspace`：`22/22`，输出 `PRESENTATION_WORKSPACE_LIVE_LINK_PASS`。
+- `npm run verify:all`：PASS。
+- 隔离真实 DSH smoke：`5/5` 通过。
+- 固定 Contract 提交和 Schema Set SHA-256：零漂移。
+- tarball：`C:\pt-rvw-804dbd4\.tmp\report-studio-live-link-27e0f34\architectureworld-report-studio-dsh-0.1.1.tgz`，`98,673 bytes`，SHA-256 `F0414210B2CDFA9CFCE1D89430C39812AA7E60375744E2685F1AC90A04C48D91`。
 
 ## Windows 人工测试结果
 
-待本轮在正式 Web Profile `C:\Users\2899\.dsh\profiles\web` 备份、安装当前 HEAD tgz 并于 `http://127.0.0.1:3080/` 完成真实宿主验收后补录。当前文字不作为宿主通过证据。
+正式 Web Profile `C:\Users\2899\.dsh\profiles\web` 已安装上述 tgz；部署前完整备份位于 `C:\Users\2899\.dsh\backups\report-studio-live-link-pre-20260904-200807`，其中包含 `1,952` 个文件、`44,228,310 bytes` 和 `sha256.csv`。现有 `@architectureworld/dsh-preplanning-agent`、`dsh-openai-codex-login`、`dsh-free-search`、`dshmarket` 及 Report Studio 数据根均保留。
+
+真实宿主验收使用：
+
+- DSH 正式入口：`http://127.0.0.1:3080/`
+- Session：`session-report-studio-live-link-acceptance`
+- Workspace：`C:\pt-rvw-804dbd4\.tmp\host-acceptance-workspace-cc205b0`
+- Project ID：`project_01992a80-0000-7000-8000-000000000101`
+
+验收结果：
+
+- DSH 会话侧栏、当前 Session、`Report Studio` 标签、原生消息输入框、模型选择器和访问/推理控制同时可见；点击标签后未离开 DSH 外壳。
+- iframe 自动绑定当前 Session Workspace；Contract `0.1.0` 全量验证通过，Watcher 显示“监听中”，Contract 错误为“无”。
+- clean 上游写入自动应用到 Pre Revision 50，没有手动刷新或跳转独立工作台。
+- 制造真实草案乐观锁冲突后，本地未提交输入保持可见；再发布 Pre Revision 51 时没有覆盖本地内容，并显示“查看更新摘要 / 保存后重新加载 / 放弃后重新加载 / 暂时保留”四个动作。
+- 执行“放弃后重新加载”后恢复为正式上游内容并应用 Pre Revision 51；当前 Workspace 状态为 `connected`、`hasUpstreamCandidate=false`。
+- 停止并重新启动本机 DSH Node 服务后，Session、Workspace 绑定、Studio Revision 19 和已应用 Pre Revision 51 仍可读取；Tailscale 进程未停止。
+- `/report-studio/api/health`：`version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`。
+- 浏览器控制台 error：`0`。
+- `layouts/acceptance-layout.json` SHA-256 仍为 `E56220902FA2769AD092DA7E8CE0312A7AC2C39342DE5C128F2DE42443BA5FF2`；`user-notes.txt` SHA-256 仍为 `00C8AEEF60E4677A4D9E777D50F0B78EAAC6A3E916B7C7B04E6406FCCC6754D6`。
+
+截图证据：
+
+- `C:\pt-rvw-804dbd4\.tmp\report-studio-live-link-27e0f34\host-restart-persistence-rev51.jpg`
+- `C:\pt-rvw-804dbd4\.tmp\report-studio-live-link-27e0f34\host-clean-update-rev50.jpg`
+- `C:\pt-rvw-804dbd4\.tmp\report-studio-live-link-27e0f34\host-dirty-conflict-rev51.jpg`
+- `C:\pt-rvw-804dbd4\.tmp\report-studio-live-link-27e0f34\host-conflict-resolved-rev51.jpg`
 
 ## 已知边界
 
