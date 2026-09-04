@@ -102,6 +102,23 @@ function revisionSummary(record, revisionRef) {
   }
 }
 
+function hydrateLegacyCanonicalProject(snapshot) {
+  const project = snapshot?.project
+  const match = typeof project?.id === 'string' && project.id.match(/^project_([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/u)
+  if (!match) return snapshot
+  const uuid = match[1]
+  if (project.projectId && project.projectRulesId && project.outlineDocumentId) return snapshot
+  return {
+    ...snapshot,
+    project: {
+      ...project,
+      projectId: project.projectId ?? project.id,
+      projectRulesId: project.projectRulesId ?? `project_rules_${uuid}`,
+      outlineDocumentId: project.outlineDocumentId ?? `outline_${uuid}`,
+    },
+  }
+}
+
 function isUnusedWorkspace(state, currentControl) {
   const initialProject = createInitialState().project
   const collections = [
@@ -329,9 +346,10 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     }
     const stored = await getObject(revision.snapshotRef)
     if (stored.kind !== 'CanonicalSnapshot') throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Revision 未引用 Canonical Snapshot。', undefined, 500)
-    assertCanonicalSnapshot(stored.value)
+    const snapshot = hydrateLegacyCanonicalProject(stored.value)
+    assertCanonicalSnapshot(snapshot)
     return projectStateFromParts({
-      snapshot: stored.value,
+      snapshot,
       currentRevision: revision.revisionNumber,
       operational: currentControl.operational,
       ui: currentControl.ui,
