@@ -71,14 +71,14 @@ OpenPencil finalize 会进行自身布局归一化。本轮观察到根高度被
 ## 浏览器烟测
 
 ```text
-Canvas backing size: 2524 x 1052
-Canvas CSS size: 1262 x 526
+Canvas backing size: 4212 x 1586
+Canvas CSS size: 2105.99 x 792.99
 Canvas/WASM non-blank: PASS
-Zoom: 38% -> 46%
-Fit view: 46% -> 38%
+Zoom: 67% -> 87%
+Fit view: 87% -> 67%
 Pan: PASS
 Dirty transition: PASS
-Save count: 2
+Save count: 1
 Reopen count: 1
 Console errors: 0
 ```
