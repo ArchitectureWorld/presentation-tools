@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
   ERROR_CODES,
+  REVIEW_RUN_INTEGRATION_STATES,
+  REVIEW_SUBMISSION_TRANSITIONS,
   StudioError,
   assertCanonicalSnapshot,
   assertStudioApplyCommands,
@@ -13,7 +15,7 @@ import {
 const now = () => new Date().toISOString();
 const ID_KINDS = Object.freeze({
   project: 'project', projectRules: 'projectRules', outlineDocument: 'outlineDocument', outline: 'outlineNode', page: 'page', draftDocument: 'draftDocument', contentBlock: 'contentBlock', listItem: 'listItem', scriptBlock: 'scriptBlock', pageAsset: 'pageAsset', revision: 'revision',
-  annotation: 'annotation', round: 'reviewRound', submission: 'reviewSubmission', proposal: 'proposal',
+  annotation: 'annotation', round: 'reviewRound', submission: 'reviewSubmission', reviewRun: 'reviewRun', proposal: 'proposal',
 });
 const id = prefix => createStudioId(ID_KINDS[prefix]);
 const clone = value => structuredClone(value);
@@ -93,7 +95,7 @@ export function createInitialState() {
   return {
     schemaVersion: 'report-studio.v0.1.1',
     project: { id: projectId, projectId, projectRulesId: id('projectRules'), outlineDocumentId: id('outlineDocument'), title: '未命名汇报项目', currentRevision: 0, createdAt: now(), updatedAt: now() },
-    outline: [], pages: [], annotations: [], reviewRounds: [], reviewSubmissions: [], proposals: [], revisions: [],
+    outline: [], pages: [], annotations: [], reviewRounds: [], reviewSubmissions: [], reviewRuns: [], proposals: [], revisions: [],
     ui: { stage: 'outline', activePageId: null },
   };
 }
@@ -627,30 +629,148 @@ export function createProposalFromAgent(state, submissionId, result) {
     status: 'pending',
     createdAt: now(),
   };
-  submission.status = 'proposal_created'; submission.agentMessage = proposal.message; submission.lastDispatchError = null;
-  next.proposals.push(proposal); return { state: next, proposal: clone(proposal) };
+  const transitioned = transitionReviewSubmission(next, submissionId, 'proposal_created', { resultProposalId: proposal.id })
+  const transitionedSubmission = transitioned.state.reviewSubmissions.find(item => item.id === submissionId)
+  transitionedSubmission.agentMessage = proposal.message
+  transitioned.state.proposals.push(proposal)
+  return { state: transitioned.state, proposal: clone(proposal) };
 }
 
-export function markSubmissionDispatch(state, submissionId, { status, error = null } = {}) {
-  if (!['dispatched', 'dispatch_failed'].includes(status)) throw new Error('无效投递状态');
-  const next = clone(state);
-  const submission = next.reviewSubmissions.find(item => item.id === submissionId);
-  if (!submission) throw new Error('未找到 ReviewSubmission');
-  submission.status = status;
-  submission.dispatchAttempts = Number(submission.dispatchAttempts || 0) + 1;
-  submission.lastDispatchError = status === 'dispatch_failed' ? String(error || '投递失败') : null;
-  submission.lastDispatchAt = now();
-  return { state: next, submission: clone(submission) };
+function submissionTransitionError(submissionId, from, to) {
+  return new StudioError(
+    ERROR_CODES.INVALID_SUBMISSION_TRANSITION,
+    `ReviewSubmission 不允许从 ${from} 迁移到 ${to}。`,
+    { submissionId, from, to },
+    409,
+  )
 }
 
-export function retryReviewSubmission(state, submissionId) {
-  const next = clone(state);
-  const submission = next.reviewSubmissions.find(item => item.id === submissionId);
-  if (!submission) throw new Error('未找到 ReviewSubmission');
-  if (submission.status !== 'dispatch_failed') throw new Error('仅投递失败的 ReviewSubmission 可以重投');
-  submission.status = 'pending_dispatch';
-  submission.lastDispatchError = null;
-  return { state: next, submission: clone(submission) };
+function submissionOf(state, submissionId) {
+  const submission = state.reviewSubmissions.find(item => item.id === submissionId)
+  if (!submission) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '未找到 ReviewSubmission', { submissionId }, 404)
+  return submission
+}
+
+function latestReviewRun(state, submissionId) {
+  return (state.reviewRuns ?? [])
+    .filter(run => run.reviewSubmissionId === submissionId)
+    .sort((left, right) => Number(right.dispatchAttempt) - Number(left.dispatchAttempt))[0] ?? null
+}
+
+export function beginReviewDispatch(state, submissionId, {
+  sessionId,
+  at = now(),
+  leaseMs = 120_000,
+} = {}) {
+  const next = clone(state)
+  next.reviewRuns ??= []
+  const submission = submissionOf(next, submissionId)
+  if (submission.status !== 'pending_dispatch') throw submissionTransitionError(submissionId, submission.status, 'pending_dispatch')
+  const existing = latestReviewRun(next, submissionId)
+  if (existing?.integrationState === 'pending_dispatch') {
+    return { state: next, submission: clone(submission), reviewRun: clone(existing), idempotent: true }
+  }
+  const cleanSessionId = String(sessionId ?? '').trim()
+  if (!cleanSessionId) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '开始投递必须绑定 sessionId。', { submissionId }, 400)
+  const dispatchAttempt = Math.max(Number(submission.dispatchAttempts || 0), Number(existing?.dispatchAttempt || 0)) + 1
+  const createdAt = String(at)
+  const leaseExpiresAt = new Date(new Date(createdAt).getTime() + Number(leaseMs)).toISOString()
+  const reviewRunId = id('reviewRun')
+  const reviewRun = {
+    id: reviewRunId,
+    reviewRunId,
+    reviewSubmissionId: submissionId,
+    sessionId: cleanSessionId,
+    dispatchAttempt,
+    integrationState: 'pending_dispatch',
+    createdAt,
+    deliveredAt: null,
+    resultProposalId: null,
+    lastError: null,
+    leaseExpiresAt,
+  }
+  submission.dispatchAttempts = dispatchAttempt
+  submission.activeReviewRunId = reviewRunId
+  submission.lastDispatchAt = createdAt
+  submission.lastDispatchError = null
+  next.reviewRuns.push(reviewRun)
+  return { state: next, submission: clone(submission), reviewRun: clone(reviewRun), idempotent: false }
+}
+
+export function transitionReviewSubmission(state, submissionId, to, {
+  reviewRunId = null,
+  resultProposalId = null,
+  error = null,
+  sessionId = null,
+  at = now(),
+} = {}) {
+  if (!REVIEW_RUN_INTEGRATION_STATES.includes(to)) throw submissionTransitionError(submissionId, 'unknown', to)
+  const next = clone(state)
+  next.reviewRuns ??= []
+  const submission = submissionOf(next, submissionId)
+  const from = submission.status
+  if (from === 'dispatched' && to === 'dispatched') {
+    const run = latestReviewRun(next, submissionId)
+    if (reviewRunId && run?.reviewRunId !== reviewRunId) throw submissionTransitionError(submissionId, from, to)
+    return { state: next, submission: clone(submission), reviewRun: clone(run), idempotent: true }
+  }
+  if (!(REVIEW_SUBMISSION_TRANSITIONS[from] ?? []).includes(to)) throw submissionTransitionError(submissionId, from, to)
+  let run = null
+  if (!(from === 'dispatch_failed' && to === 'pending_dispatch')) {
+    run = reviewRunId
+      ? next.reviewRuns.find(item => item.reviewRunId === reviewRunId && item.reviewSubmissionId === submissionId)
+      : next.reviewRuns.find(item => item.reviewRunId === submission.activeReviewRunId) ?? latestReviewRun(next, submissionId)
+    if (!run || run.integrationState !== from) throw submissionTransitionError(submissionId, from, to)
+  }
+  submission.status = to
+  submission.lastDispatchAt = String(at)
+  if (run && String(sessionId ?? '').trim()) run.sessionId = String(sessionId).trim()
+  if (to === 'dispatch_failed') {
+    const message = String(error || '投递失败')
+    submission.lastDispatchError = message
+    run.lastError = message
+  } else submission.lastDispatchError = null
+  if (to === 'pending_dispatch') submission.activeReviewRunId = null
+  else {
+    run.integrationState = to
+    if (to === 'dispatched') run.deliveredAt = String(at)
+    if (to === 'proposal_created') {
+      if (!resultProposalId) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Proposal 迁移必须提供 resultProposalId。', { submissionId }, 400)
+      run.resultProposalId = resultProposalId
+    }
+  }
+  return { state: next, submission: clone(submission), reviewRun: clone(run), idempotent: false }
+}
+
+export function recoverExpiredReviewDispatches(state, { at = now() } = {}) {
+  let next = clone(state)
+  const deadline = new Date(at).getTime()
+  const recoveredReviewRunIds = []
+  for (const run of next.reviewRuns ?? []) {
+    if (run.integrationState !== 'pending_dispatch' || !run.leaseExpiresAt || new Date(run.leaseExpiresAt).getTime() > deadline) continue
+    const submission = next.reviewSubmissions.find(item => item.id === run.reviewSubmissionId)
+    if (!submission || submission.status !== 'pending_dispatch' || submission.activeReviewRunId !== run.reviewRunId) continue
+    next = transitionReviewSubmission(next, submission.id, 'dispatch_failed', {
+      reviewRunId: run.reviewRunId,
+      error: '投递等待超时，可继续投递。',
+      at,
+    }).state
+    recoveredReviewRunIds.push(run.reviewRunId)
+  }
+  return { state: next, recoveredReviewRunIds }
+}
+
+export function markSubmissionDispatch(state, submissionId, { status, error = null, reviewRunId = null, sessionId = 'legacy-bridge', at = now() } = {}) {
+  if (!['dispatched', 'dispatch_failed'].includes(status)) throw submissionTransitionError(submissionId, submissionOf(state, submissionId).status, status)
+  let prepared = { state, reviewRun: null }
+  const submission = submissionOf(state, submissionId)
+  if (submission.status === 'pending_dispatch' && !latestReviewRun(state, submissionId)) prepared = beginReviewDispatch(state, submissionId, { sessionId, at })
+  return transitionReviewSubmission(prepared.state, submissionId, status, { error, reviewRunId: reviewRunId ?? prepared.reviewRun?.reviewRunId, sessionId, at })
+}
+
+export function retryReviewSubmission(state, submissionId, { sessionId = 'legacy-bridge', at = now(), leaseMs = 120_000 } = {}) {
+  const pending = transitionReviewSubmission(state, submissionId, 'pending_dispatch', { at })
+  return beginReviewDispatch(pending.state, submissionId, { sessionId, at, leaseMs })
 }
 
 export function acceptProposal(state, proposalId) {
@@ -674,9 +794,8 @@ export function acceptProposal(state, proposalId) {
   next = commitRevision(next, 'agent', { proposalId, submissionId: proposal.submissionId });
   const stored = next.proposals.find(item => item.id === proposalId);
   stored.status = 'accepted'; stored.acceptedRevision = next.project.currentRevision; stored.acceptedAt = now();
-  const submission = next.reviewSubmissions.find(item => item.id === stored.submissionId);
-  if (submission) submission.status = 'accepted';
-  return { state: next, revision: clone(next.revisions.at(-1)) };
+  const transitioned = transitionReviewSubmission(next, stored.submissionId, 'accepted', { resultProposalId: stored.id })
+  return { state: transitioned.state, revision: clone(transitioned.state.revisions.at(-1)) };
 }
 
 function closeProposalWithoutRevision(state, proposalId, status) {
@@ -688,9 +807,9 @@ function closeProposalWithoutRevision(state, proposalId, status) {
   proposal.updatedAt = now()
   if (status === 'rejected') proposal.rejectedAt = proposal.updatedAt
   if (status === 'returned_to_agent') proposal.returnedAt = proposal.updatedAt
-  const submission = next.reviewSubmissions.find(item => item.id === proposal.submissionId)
-  if (submission) submission.status = status
-  return { state: next, proposal: clone(proposal) }
+  const submissionStatus = status === 'returned_to_agent' ? 'rejected' : status
+  const transitioned = transitionReviewSubmission(next, proposal.submissionId, submissionStatus, { resultProposalId: proposal.id })
+  return { state: transitioned.state, proposal: clone(proposal) }
 }
 
 export function rejectProposal(state, proposalId) {
@@ -699,4 +818,16 @@ export function rejectProposal(state, proposalId) {
 
 export function returnProposalToAgent(state, proposalId) {
   return closeProposalWithoutRevision(state, proposalId, 'returned_to_agent')
+}
+
+export function markProposalStale(state, proposalId) {
+  const next = clone(state)
+  const proposal = next.proposals.find(item => item.id === proposalId)
+  if (!proposal) throw new Error('未找到 Proposal')
+  if (proposal.status !== 'pending') throw new Error('Proposal 已处理')
+  proposal.status = 'stale'
+  proposal.updatedAt = now()
+  proposal.staleAt = proposal.updatedAt
+  const transitioned = transitionReviewSubmission(next, proposal.submissionId, 'stale', { resultProposalId: proposal.id })
+  return { state: transitioned.state, proposal: clone(proposal) }
 }

@@ -56,6 +56,10 @@ function envelope(state, submission, commands, overrides = {}) {
   }
 }
 
+function delivered(submitted) {
+  return { ...submitted, state: markSubmissionDispatch(submitted.state, submitted.submission.id, { status: 'dispatched', sessionId: 'gateway-test' }).state }
+}
+
 function twoPageDraftSubmission() {
   let state = createInitialState()
   state = addOutline(state, '第一页')
@@ -123,7 +127,7 @@ test('ReviewRound reuse rejects a closed round', () => {
 })
 
 test('valid multi-command ChangeSet is preflighted in one isolated Candidate and persists structured diff', () => {
-  const submitted = outlineSubmission()
+  const submitted = delivered(outlineSubmission())
   const [first, second] = submitted.state.outline
   const commands = [
     { ...commandCommon(submitted.submission), type: 'outline.rename', nodeId: first.id, title: '第一章（新）' },
@@ -146,7 +150,7 @@ test('valid multi-command ChangeSet is preflighted in one isolated Candidate and
 })
 
 test('acceptance publishes the exact preflighted Candidate identities shown by the Proposal diff', () => {
-  const submitted = twoPageDraftSubmission()
+  const submitted = delivered(twoPageDraftSubmission())
   const command = {
     ...commandCommon(submitted.submission),
     type: 'draft.update',
@@ -161,7 +165,7 @@ test('acceptance publishes the exact preflighted Candidate identities shown by t
 })
 
 function outlineRenameFixture() {
-  const submitted = outlineSubmission()
+  const submitted = delivered(outlineSubmission())
   const command = {
     ...commandCommon(submitted.submission),
     type: 'outline.rename',

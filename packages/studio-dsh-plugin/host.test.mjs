@@ -105,7 +105,32 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     body = ''
     await route.handler({ method: 'GET', url: `/report-studio/api/assets/${asset.assetId}/content?sessionId=other-session` }, response)
     assert.equal(response.statusCode, 404)
+
+    state = await action({ type: 'annotation.add', scopeKey: 'outline:root', instruction: '验证 dispatch guard' })
+    body = ''
+    await route.handler(Object.assign(Readable.from([Buffer.from(JSON.stringify({ scopeKey: 'outline:root', stage: 'outline' }))]), {
+      method: 'POST', url: '/report-studio/api/review/submit?sessionId=session-host-test', headers: { 'content-type': 'application/json' },
+    }), response)
+    assert.equal(response.statusCode, 200, body)
+    const submitted = JSON.parse(body)
+    const dispatch = async status => {
+      body = ''
+      await route.handler(Object.assign(Readable.from([Buffer.from(JSON.stringify({ status, reviewRunId: submitted.reviewRun.reviewRunId }))]), {
+        method: 'POST', url: `/report-studio/api/review/${submitted.submission.id}/dispatch?sessionId=session-host-test`, headers: { 'content-type': 'application/json' },
+      }), response)
+      return { statusCode: response.statusCode, payload: JSON.parse(body) }
+    }
+    assert.equal((await dispatch('dispatched')).statusCode, 200)
+    const duplicate = await dispatch('dispatched')
+    assert.equal(duplicate.statusCode, 200)
+    body = ''
+    await route.handler({ method: 'GET', url: '/report-studio/api/state?sessionId=session-host-test' }, response)
+    assert.equal(JSON.parse(body).reviewRuns.length, 1)
+    const regression = await dispatch('dispatch_failed')
+    assert.equal(regression.statusCode, 409)
+    assert.equal(regression.payload.error.code, 'invalid_submission_transition')
   } finally {
     await rm(dataDir, { recursive: true, force: true })
   }
+
 })

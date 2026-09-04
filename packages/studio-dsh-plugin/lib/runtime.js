@@ -4,13 +4,17 @@ import { join, resolve } from 'node:path'
 import { createRepository } from '../vendor/apps/studio-local/repository.mjs'
 import {
   acceptProposal as acceptCoreProposal,
+  beginReviewDispatch,
   createProposalFromAgent,
   executeAction as executeCoreAction,
+  markProposalStale,
   markSubmissionDispatch,
+  recoverExpiredReviewDispatches,
   rejectProposal as rejectCoreProposal,
   retryReviewSubmission,
   returnProposalToAgent as returnCoreProposalToAgent,
   submitReviewRound,
+  transitionReviewSubmission,
 } from '../vendor/packages/studio-core/index.mjs'
 import { ERROR_CODES, StudioError } from '../vendor/packages/studio-contracts/index.mjs'
 import { reviewSubmissionContext } from '../vendor/apps/studio-local/agent-context.mjs'
@@ -90,7 +94,11 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
   }
 
   async function getState(sessionId) {
-    return structuredClone((await repositoryFor(sessionId)).getState())
+    const repository = await repositoryFor(sessionId)
+    const current = repository.getState()
+    if (!recoverExpiredReviewDispatches(current).recoveredReviewRunIds.length) return structuredClone(current)
+    const recovered = await repository.transactOperational(state => recoverExpiredReviewDispatches(state).state)
+    return structuredClone(recovered)
   }
 
   async function executeAction(sessionId, action) {
@@ -111,14 +119,17 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     const id = cleanSessionId(sessionId)
     const repository = await repositoryFor(id)
     let submitted
+    let begun
     await repository.transactOperational(state => {
       submitted = submitReviewRound(state, input)
-      return submitted.state
+      begun = beginReviewDispatch(submitted.state, submitted.submission.id, { sessionId: id })
+      return begun.state
     })
     return {
       state: structuredClone(repository.getState()),
       round: structuredClone(submitted.round),
-      submission: structuredClone(submitted.submission),
+      submission: structuredClone(begun.submission),
+      reviewRun: structuredClone(begun.reviewRun),
       dshPrompt: {
         kind: 'report_studio.review_submission',
         sessionId: id,
@@ -143,11 +154,17 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     const repository = await repositoryFor(sessionId)
     const proposal = repository.getState().proposals.find(item => item.id === proposalId)
     if (!proposal) throw new Error('未找到 Proposal')
-    const state = await repository.transactContent(
-      { baseRevision: proposal.baseRevision, source: 'agent', detail: { proposalId, submissionId: proposal.submissionId } },
-      current => acceptCoreProposal(current, proposalId).state,
-    )
-    return { state, revision: structuredClone(state.revisions.at(-1)) }
+    try {
+      const state = await repository.transactContent(
+        { baseRevision: proposal.baseRevision, source: 'agent', detail: { proposalId, submissionId: proposal.submissionId } },
+        current => acceptCoreProposal(current, proposalId).state,
+      )
+      return { state, revision: structuredClone(state.revisions.at(-1)) }
+    } catch (error) {
+      if (error?.code !== ERROR_CODES.STALE_REVISION && error?.message !== 'stale_revision') throw error
+      await repository.transactOperational(current => markProposalStale(current, proposalId).state)
+      throw error
+    }
   }
 
   async function updateProposal(sessionId, proposalId, action) {
@@ -205,20 +222,33 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
   }
 
   async function updateDispatch(sessionId, submissionId, input) {
-    const repository = await repositoryFor(sessionId)
+    const id = cleanSessionId(sessionId)
+    const repository = await repositoryFor(id)
     let result
     await repository.transactOperational(state => {
-      result = markSubmissionDispatch(state, submissionId, input)
+      result = markSubmissionDispatch(state, submissionId, { ...input, sessionId: id })
       return result.state
     })
     return result.submission
   }
 
   async function retrySubmission(sessionId, submissionId) {
-    const repository = await repositoryFor(sessionId)
+    const id = cleanSessionId(sessionId)
+    const repository = await repositoryFor(id)
     let result
     await repository.transactOperational(state => {
-      result = retryReviewSubmission(state, submissionId)
+      const submission = state.reviewSubmissions.find(item => item.id === submissionId)
+      if (!submission) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '未找到 ReviewSubmission', { submissionId }, 404)
+      let recoverable = state
+      if (submission.status === 'pending_dispatch' && submission.activeReviewRunId) {
+        recoverable = transitionReviewSubmission(state, submissionId, 'dispatch_failed', {
+          reviewRunId: submission.activeReviewRunId,
+          error: '用户请求继续投递。',
+        }).state
+      }
+      result = recoverable.reviewSubmissions.find(item => item.id === submissionId).status === 'dispatch_failed'
+        ? retryReviewSubmission(recoverable, submissionId, { sessionId: id })
+        : beginReviewDispatch(recoverable, submissionId, { sessionId: id })
       return result.state
     })
     const current = repository.getState()
@@ -226,7 +256,8 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     return {
       state: current,
       submission: result.submission,
-      dshPrompt: { kind: 'report_studio.review_submission', sessionId: cleanSessionId(sessionId), text: reviewPrompt(cleanSessionId(sessionId), current, round, result.submission) },
+      reviewRun: result.reviewRun,
+      dshPrompt: { kind: 'report_studio.review_submission', sessionId: id, text: reviewPrompt(id, current, round, result.submission) },
     }
   }
 

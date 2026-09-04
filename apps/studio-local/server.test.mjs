@@ -48,11 +48,15 @@ test('review submission through configured bridge creates a persisted proposal',
     const nodeId = state.outline[0].id;
     bridge.submit = async ({ submission, context }) => {
       receivedContext = context;
+      const duringDispatch = app.repository.getState();
+      assert.equal(duringDispatch.reviewRuns.length, 1);
+      assert.equal(duringDispatch.reviewRuns[0].integrationState, 'pending_dispatch');
       return ({
       submissionId: submission.id,
       projectId: submission.projectId,
       baseRevision: submission.baseRevision,
       scopeKey: submission.scopeKey,
+      sessionRef: 'dsh-session-bridge',
       message: '建议修改标题',
       commands: [{
         commandId: createStudioId('command'), type: 'outline.rename', nodeId, title: '第一章：目标',
@@ -65,6 +69,11 @@ test('review submission through configured bridge creates a persisted proposal',
     const review = await fetch(`${base}/api/review/submit`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ scopeKey:'outline:root' }) }).then(r=>r.json());
     assert.equal(review.bridgeResult.message, '建议修改标题'); assert.ok(review.bridgeResult.proposalId); assert.equal(review.state.proposals.length, 1); assert.equal(review.state.outline[0].title, '第一章');
     assert.equal(review.state.reviewSubmissions[0].status, 'proposal_created');
+    assert.equal(review.state.reviewRuns.length, 1);
+    assert.equal(review.state.reviewRuns[0].reviewSubmissionId, review.submission.id);
+    assert.equal(review.state.reviewRuns[0].sessionId, 'dsh-session-bridge');
+    assert.equal(review.state.reviewRuns[0].integrationState, 'proposal_created');
+    assert.equal(review.state.reviewRuns[0].resultProposalId, review.bridgeResult.proposalId);
     assert.equal(receivedContext.submission.reviewSubmissionId, review.submission.id);
     assert.equal(receivedContext.taskScope.allowedCommands.includes('outline.delete'), false);
     assert.equal('pages' in receivedContext, false);
@@ -79,8 +88,12 @@ test('HTTP Proposal reject and return actions are persisted without creating a R
     await app.repository.transactOperational(current => ({
       ...current,
       reviewSubmissions: [
-        { id: 'submission_reject', status: 'proposal_created' },
-        { id: 'submission_return', status: 'proposal_created' },
+        { id: 'submission_reject', status: 'proposal_created', activeReviewRunId: 'run_reject' },
+        { id: 'submission_return', status: 'proposal_created', activeReviewRunId: 'run_return' },
+      ],
+      reviewRuns: [
+        { id: 'run_reject', reviewRunId: 'run_reject', reviewSubmissionId: 'submission_reject', dispatchAttempt: 1, integrationState: 'proposal_created', resultProposalId: 'proposal_reject' },
+        { id: 'run_return', reviewRunId: 'run_return', reviewSubmissionId: 'submission_return', dispatchAttempt: 1, integrationState: 'proposal_created', resultProposalId: 'proposal_return' },
       ],
       proposals: [
         { id: 'proposal_reject', submissionId: 'submission_reject', status: 'pending', baseRevision: state.project.currentRevision },
@@ -164,13 +177,50 @@ test('configured bridge failure is persisted and the same submission can be retr
     const submissionId = failedPayload.submission.id;
     state = await fetch(`${base}/api/state`).then(response => response.json());
     assert.equal(state.reviewSubmissions[0].status, 'dispatch_failed');
+    assert.equal(state.reviewRuns[0].dispatchAttempt, 1);
+    assert.equal(state.reviewRuns[0].integrationState, 'dispatch_failed');
     shouldFail = false;
     const retried = await fetch(`${base}/api/review/${submissionId}/retry`, { method:'POST', headers:{'content-type':'application/json'}, body:'{}' });
     assert.equal(retried.status, 200);
     const retriedPayload = await retried.json();
     assert.equal(retriedPayload.submission.id, submissionId);
     assert.equal(retriedPayload.state.reviewSubmissions[0].status, 'dispatched');
+    assert.deepEqual(retriedPayload.state.reviewRuns.map(run => run.dispatchAttempt), [1, 2]);
+    assert.deepEqual(retriedPayload.state.reviewRuns.map(run => run.integrationState), ['dispatch_failed', 'dispatched']);
   } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
+});
+
+test('pending Submission survives server restart and resumes without replacement', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-pending-restart-'));
+  let first;
+  let second;
+  try {
+    first = await createStudioServer({ dataDir: dir, port: 0, agentBridge: { configured: false } }); await first.start();
+    let base = `http://127.0.0.1:${first.port}`;
+    await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'annotation.add', scopeKey:'outline:root', instruction:'重启恢复' }) });
+    const submitted = await fetch(`${base}/api/review/submit`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ scopeKey:'outline:root' }) }).then(response => response.json());
+    const originalId = submitted.submission.id;
+    const originalKey = submitted.submission.idempotencyKey;
+    assert.equal(submitted.submission.status, 'pending_dispatch');
+    await first.stop(); first = null;
+
+    const bridge = { configured: true, async submit() { return { message: '已恢复', commands: [] }; }, async chat() { return { message: 'ok', commands: [] }; } };
+    second = await createStudioServer({ dataDir: dir, port: 0, agentBridge: bridge }); await second.start();
+    base = `http://127.0.0.1:${second.port}`;
+    const persisted = await fetch(`${base}/api/state`).then(response => response.json());
+    assert.equal(persisted.reviewSubmissions[0].id, originalId);
+    assert.equal(persisted.reviewSubmissions[0].status, 'pending_dispatch');
+    const resumed = await fetch(`${base}/api/review/${originalId}/retry`, { method:'POST', headers:{'content-type':'application/json'}, body:'{}' }).then(response => response.json());
+    assert.equal(resumed.submission.id, originalId);
+    assert.equal(resumed.submission.idempotencyKey, originalKey);
+    assert.equal(resumed.state.reviewSubmissions.length, 1);
+    assert.equal(resumed.state.reviewSubmissions[0].status, 'dispatched');
+    assert.equal(resumed.state.reviewRuns[0].dispatchAttempt, 1);
+  } finally {
+    await first?.stop().catch(() => undefined);
+    await second?.stop().catch(() => undefined);
+    await rm(dir, { recursive:true, force:true });
+  }
 });
 
 test('HTTP API exposes migration status and blocks writes until confirmed', async () => {

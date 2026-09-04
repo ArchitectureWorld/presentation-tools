@@ -83,6 +83,7 @@ function operationalFromState(state, revisions = state.revisions ?? []) {
     annotations: clone(state.annotations ?? []),
     reviewRounds: clone(state.reviewRounds ?? []),
     reviewSubmissions: clone(state.reviewSubmissions ?? []),
+    reviewRuns: clone(state.reviewRuns ?? []),
     proposals: clone(state.proposals ?? []),
     revisions: clone(revisions),
   }

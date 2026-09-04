@@ -74,6 +74,8 @@ async function loadReviewHistory() {
     reviewSubmissions: [
       { id: 'submission_1', reviewRoundId: 'round_1', number: 1, baseRevision: 8, status: 'accepted', annotations: annotations.slice(0, 7) },
       { id: 'submission_2', reviewRoundId: 'round_1', number: 2, baseRevision: 9, status: 'proposal_created', annotations: annotations.slice(7) },
+      { id: 'submission_3', reviewRoundId: 'round_1', number: 3, baseRevision: 9, status: 'pending_dispatch', annotations: [] },
+      { id: 'submission_4', reviewRoundId: 'round_1', number: 4, baseRevision: 9, status: 'dispatch_failed', annotations: [] },
     ],
     proposals: [
       { id: 'proposal_1', submissionId: 'submission_1', reviewRoundId: 'round_1', baseRevision: 8, status: 'accepted', message: '第一批已应用', commands: [] },
@@ -177,4 +179,10 @@ test('pending Proposal stays visible under every annotation filter and can be fo
     await listener({ target: { closest: selector => selector === '[data-focus-proposal]' ? proposalAttention : null } })
   }
   assert.equal(getProposalScrollCount(), 2, 'header attention control should reveal the pending Proposal on demand')
+})
+
+test('persisted pending and failed submissions both render a continue-dispatch action after reload', async () => {
+  const { reviewHistory } = await loadReviewHistory()
+  assert.match(reviewHistory.innerHTML, /data-retry-submission="submission_3"[^>]*>继续投递</)
+  assert.match(reviewHistory.innerHTML, /data-retry-submission="submission_4"[^>]*>继续投递</)
 })

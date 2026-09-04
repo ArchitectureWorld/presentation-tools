@@ -15,6 +15,10 @@ function agentCommandInput(state, submission, command) {
   }
 }
 
+function delivered(submitted) {
+  return { ...submitted, state: markSubmissionDispatch(submitted.state, submitted.submission.id, { status: 'dispatched', sessionId: 'core-test' }).state }
+}
+
 test('outline nodes receive stable ids and draft page keeps source outline id', () => {
   let state = createInitialState();
   ({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '项目背景' }));
@@ -55,7 +59,7 @@ test('agent proposal is explicit and acceptance creates revision without auto re
   let state = createInitialState();
   ({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: 'A' })); const nodeId = state.outline[0].id;
   ({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', target: { type: 'outline-node', id: nodeId, label: 'A' }, instruction: '标题更明确' }));
-  const submitted = submitReviewRound(state, { scopeKey: 'outline:root' }); state = submitted.state;
+  const submitted = delivered(submitReviewRound(state, { scopeKey: 'outline:root' })); state = submitted.state;
   const proposalResult = createProposalFromAgent(state, submitted.submission.id, agentCommandInput(state, submitted.submission, { type: 'outline.rename', nodeId, title: 'A：明确目标' }));
   state = proposalResult.state; assert.equal(state.outline[0].title, 'A'); const before = state.project.currentRevision;
   const accepted = acceptProposal(state, proposalResult.proposal.id);
@@ -166,7 +170,7 @@ test('ReviewSubmission delivery failure can retry the same immutable submission'
 test('repeating Agent commands for one submission returns the existing Proposal', () => {
   let state = createInitialState()
   ;({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '幂等意见' }))
-  const submitted = submitReviewRound(state, { scopeKey: 'outline:root' })
+  const submitted = delivered(submitReviewRound(state, { scopeKey: 'outline:root' }))
   const input = agentCommandInput(submitted.state, submitted.submission, { type: 'project.rename', projectId: submitted.state.project.id, title: '幂等项目' })
   const first = createProposalFromAgent(submitted.state, submitted.submission.id, input)
   const repeated = createProposalFromAgent(first.state, submitted.submission.id, input)

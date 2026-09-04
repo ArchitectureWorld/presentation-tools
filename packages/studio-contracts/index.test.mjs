@@ -2,11 +2,30 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   ERROR_CODES,
+  REVIEW_RUN_INTEGRATION_STATES,
+  REVIEW_SUBMISSION_TRANSITIONS,
   assertCanonicalSnapshot,
   canonicalFromState,
   createStudioId,
   projectStateFromParts,
 } from './index.mjs'
+
+test('review lifecycle contract exposes the closed monotonic state graph', () => {
+  assert.deepEqual(REVIEW_RUN_INTEGRATION_STATES, [
+    'pending_dispatch', 'dispatched', 'dispatch_failed', 'proposal_created', 'accepted', 'rejected', 'stale',
+  ])
+  assert.deepEqual(REVIEW_SUBMISSION_TRANSITIONS, {
+    pending_dispatch: ['dispatched', 'dispatch_failed'],
+    dispatched: ['proposal_created'],
+    dispatch_failed: ['pending_dispatch'],
+    proposal_created: ['accepted', 'rejected', 'stale'],
+    accepted: [],
+    rejected: [],
+    stale: [],
+  })
+  assert.equal(ERROR_CODES.INVALID_SUBMISSION_TRANSITION, 'invalid_submission_transition')
+  assert.match(createStudioId('reviewRun'), /^review_run_[0-9a-f-]{36}$/)
+})
 
 function validSnapshot({ pageCount = 1, withAsset = false } = {}) {
   const projectId = createStudioId('project')

@@ -535,7 +535,7 @@ function submissionHtml(submission) {
         <strong>第 ${submission.number} 次提交</strong>
         <span>baseRevision ${submission.baseRevision} · ${escapeHtml(labels[submission.status] || submission.status)}</span>
         ${submission.lastDispatchError ? `<small class="submission-error">${escapeHtml(submission.lastDispatchError)}</small>` : ''}
-        ${submission.status === 'dispatch_failed' ? `<button class="small-button" data-retry-submission="${escapeAttr(submission.id)}" type="button">重新投递</button>` : ''}
+        ${['pending_dispatch', 'dispatch_failed'].includes(submission.status) ? `<button class="small-button" data-retry-submission="${escapeAttr(submission.id)}" type="button">继续投递</button>` : ''}
       </div>
     </div>
   `;

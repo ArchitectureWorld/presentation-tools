@@ -12,6 +12,7 @@ export const ERROR_CODES = Object.freeze({
   INVALID_COMMAND: 'invalid_command',
   INVALID_REFERENCE: 'invalid_reference',
   DISPATCH_FAILED: 'dispatch_failed',
+  INVALID_SUBMISSION_TRANSITION: 'invalid_submission_transition',
   PROPOSAL_ALREADY_EXISTS: 'proposal_already_exists',
   STANDARD_CONTRACT_INVALID: 'standard_contract_invalid',
   STANDARD_EXPORT_FAILED: 'standard_export_failed',
@@ -19,6 +20,26 @@ export const ERROR_CODES = Object.freeze({
   STANDARD_IMPORT_REQUIRES_NEW_WORKSPACE: 'standard_import_requires_new_workspace',
   REPOSITORY_LOCKED: 'repository_locked',
   REPOSITORY_INTEGRITY_ERROR: 'repository_integrity_error',
+})
+
+export const REVIEW_RUN_INTEGRATION_STATES = Object.freeze([
+  'pending_dispatch',
+  'dispatched',
+  'dispatch_failed',
+  'proposal_created',
+  'accepted',
+  'rejected',
+  'stale',
+])
+
+export const REVIEW_SUBMISSION_TRANSITIONS = Object.freeze({
+  pending_dispatch: Object.freeze(['dispatched', 'dispatch_failed']),
+  dispatched: Object.freeze(['proposal_created']),
+  dispatch_failed: Object.freeze(['pending_dispatch']),
+  proposal_created: Object.freeze(['accepted', 'rejected', 'stale']),
+  accepted: Object.freeze([]),
+  rejected: Object.freeze([]),
+  stale: Object.freeze([]),
 })
 
 export class StudioError extends Error {
@@ -50,6 +71,7 @@ const STUDIO_PREFIXES = Object.freeze({
   annotation: 'annotation',
   reviewRound: 'review_round',
   reviewSubmission: 'review_submission',
+  reviewRun: 'review_run',
   proposal: 'proposal',
   command: 'command',
   changeSet: 'change_set',
@@ -312,6 +334,7 @@ export function projectStateFromParts({ snapshot, currentRevision, operational =
     annotations: clone(operational.annotations ?? []),
     reviewRounds: clone(operational.reviewRounds ?? []),
     reviewSubmissions: clone(operational.reviewSubmissions ?? []),
+    reviewRuns: clone(operational.reviewRuns ?? []),
     proposals: clone(operational.proposals ?? []),
     revisions: clone(operational.revisions ?? []),
     ui: clone(ui),

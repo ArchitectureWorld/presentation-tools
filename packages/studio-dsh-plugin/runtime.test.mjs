@@ -20,6 +20,11 @@ test('native DSH runtime binds isolated Report Studio projects to session ids an
     const pageId = state.pages[0].id
     state = await runtime.executeAction('session-a', { type: 'annotation.add', scopeKey: `draft:${pageId}`, reviewRoundId: null, target: { type: 'page', id: pageId, label: 'DSH 原生接入' }, instruction: '补充原生 DSH 工作台说明' })
     const submitted = await runtime.submitReview('session-a', { scopeKey: `draft:${pageId}`, reviewRoundId: null })
+    assert.equal(submitted.reviewRun.reviewSubmissionId, submitted.submission.id)
+    assert.equal(submitted.reviewRun.sessionId, 'session-a')
+    assert.equal(submitted.reviewRun.dispatchAttempt, 1)
+    assert.equal(submitted.reviewRun.integrationState, 'pending_dispatch')
+    await runtime.updateDispatch('session-a', submitted.submission.id, { status: 'dispatched', reviewRunId: submitted.reviewRun.reviewRunId })
     assert.match(submitted.dshPrompt.text, /studio_get_context/)
     assert.match(submitted.dshPrompt.text, new RegExp(submitted.submission.id))
     const context = await runtime.getContext('session-a', submitted.submission.id)
@@ -55,9 +60,49 @@ test('native DSH runtime binds isolated Report Studio projects to session ids an
     assert.equal(repeated.proposalId, applied.proposalId)
     const sessionA = await runtime.getState('session-a')
     assert.equal(sessionA.proposals.length, 1)
+    assert.equal(sessionA.reviewRuns[0].integrationState, 'proposal_created')
+    assert.equal(sessionA.reviewRuns[0].resultProposalId, applied.proposalId)
     const sessionB = await runtime.getState('session-b')
     assert.equal(sessionB.outline.length, 0)
     assert.notEqual(sessionA.project.id, sessionB.project.id)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('native DSH retry reuses the immutable Submission and creates the next ReviewRun attempt', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'report-studio-dsh-retry-'))
+  try {
+    const runtime = createStudioDshRuntime({ dataRoot: root })
+    await runtime.executeAction('retry-session', { type: 'annotation.add', scopeKey: 'outline:root', instruction: '重试投递' })
+    const submitted = await runtime.submitReview('retry-session', { scopeKey: 'outline:root' })
+    await runtime.updateDispatch('retry-session', submitted.submission.id, {
+      status: 'dispatch_failed', reviewRunId: submitted.reviewRun.reviewRunId, error: 'native unavailable',
+    })
+    const retried = await runtime.retrySubmission('retry-session', submitted.submission.id)
+    assert.equal(retried.submission.id, submitted.submission.id)
+    assert.equal(retried.submission.idempotencyKey, submitted.submission.idempotencyKey)
+    assert.equal(retried.reviewRun.dispatchAttempt, 2)
+    assert.equal(retried.reviewRun.reviewSubmissionId, submitted.submission.id)
+    assert.equal(retried.reviewRun.integrationState, 'pending_dispatch')
+    const state = await runtime.getState('retry-session')
+    assert.deepEqual(state.reviewRuns.map(run => run.integrationState), ['dispatch_failed', 'pending_dispatch'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('native DSH can resume a persisted pending attempt through legal failure and retry edges', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'report-studio-dsh-resume-'))
+  try {
+    const runtime = createStudioDshRuntime({ dataRoot: root })
+    await runtime.executeAction('resume-session', { type: 'annotation.add', scopeKey: 'outline:root', instruction: '恢复投递' })
+    const submitted = await runtime.submitReview('resume-session', { scopeKey: 'outline:root' })
+    const resumed = await runtime.retrySubmission('resume-session', submitted.submission.id)
+    assert.equal(resumed.submission.id, submitted.submission.id)
+    assert.equal(resumed.reviewRun.dispatchAttempt, 2)
+    const state = await runtime.getState('resume-session')
+    assert.deepEqual(state.reviewRuns.map(run => run.integrationState), ['dispatch_failed', 'pending_dispatch'])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

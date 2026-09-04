@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { createHash } from 'node:crypto'
 import { createRepository } from './repository.mjs'
-import { executeAction } from '../../packages/studio-core/index.mjs'
+import { beginReviewDispatch, executeAction, submitReviewRound } from '../../packages/studio-core/index.mjs'
 
 const importedSnapshot = () => ({
   project: {
@@ -51,6 +51,32 @@ test('content transaction persists an immutable snapshot that reloads through Pr
       assert.equal(reopened.getState().project.currentRevision, 1)
       const objects = await readdir(join(dir, 'objects', 'sha256'))
       assert.ok(objects.length >= 4, 'initial and committed Snapshot/Revision objects must exist')
+    } finally {
+      await reopened.close()
+    }
+  })
+})
+
+test('pending ReviewRun and immutable Submission persist across repository restart', async () => {
+  await withRepository(async ({ dir, repository }) => {
+    let submitted
+    let begun
+    await repository.transactOperational(state => {
+      state = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '重启后继续' }).state
+      submitted = submitReviewRound(state, { scopeKey: 'outline:root' })
+      begun = beginReviewDispatch(submitted.state, submitted.submission.id, { sessionId: 'restart-session', leaseMs: 60_000 })
+      return begun.state
+    })
+    await repository.close()
+
+    const reopened = await createRepository(dir)
+    try {
+      const state = reopened.getState()
+      assert.equal(state.reviewSubmissions[0].id, submitted.submission.id)
+      assert.equal(state.reviewSubmissions[0].idempotencyKey, submitted.submission.idempotencyKey)
+      assert.equal(state.reviewSubmissions[0].status, 'pending_dispatch')
+      assert.equal(state.reviewRuns[0].reviewRunId, begun.reviewRun.reviewRunId)
+      assert.equal(state.reviewRuns[0].integrationState, 'pending_dispatch')
     } finally {
       await reopened.close()
     }
