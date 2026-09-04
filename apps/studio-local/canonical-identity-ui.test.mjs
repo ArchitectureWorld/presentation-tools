@@ -92,6 +92,33 @@ test('fresh repository upload creates a Revision and Contract-valid export while
   }
 })
 
+test('caption patch produced by the Draft buffer survives repository reload and standard export', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-caption-reload-'))
+  let repository = await createRepository(dir)
+  try {
+    await repository.transactContent({ baseRevision: 0, source: 'human', detail: { actionType: 'outline.add' } }, state => executeAction(state, { type: 'outline.add', title: '说明页' }).state)
+    let state = repository.getState()
+    await repository.transactContent({ baseRevision: state.project.currentRevision, source: 'human', detail: { actionType: 'draft.ensurePage' } }, current => executeAction(current, { type: 'draft.ensurePage', outlineNodeId: current.outline[0].id }).state)
+    state = repository.getState()
+    await ingestAsset({ repository, request: Readable.from([png()]), pageId: state.pages[0].id, mimeType: 'image/png', originalFileName: 'caption.png' })
+    state = repository.getState()
+    const original = state.pages[0].pageAssets[0]
+    await repository.transactContent({ baseRevision: state.project.currentRevision, source: 'human', detail: { actionType: 'draft.update' } }, current => executeAction(current, {
+      type: 'draft.update', pageId: current.pages[0].id, patch: { pageAssets: [{ ...original, caption: '来自草案 Buffer 的说明' }] },
+    }).state)
+    await repository.close()
+    repository = await createRepository(dir)
+    state = repository.getState()
+    assert.deepEqual([state.pages[0].pageAssets[0].pageAssetId, state.pages[0].pageAssets[0].caption], [original.pageAssetId, '来自草案 Buffer 的说明'])
+    const exported = await createStandardProjectService(repository).exportProject()
+    const draft = JSON.parse(await readFile(join(exported.projectRoot, 'pages', 'drafts', `${state.pages[0].pageId}.json`), 'utf8'))
+    assert.equal(draft.pageAssets[0].caption, '来自草案 Buffer 的说明')
+  } finally {
+    await repository.close().catch(() => undefined)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('standard import through UI save payload and core update preserves multiple ScriptBlocks and ListItems on export', async () => {
   const { buildDraftUpdatePatch } = await loadUiHelper()
   assert.equal(typeof buildDraftUpdatePatch, 'function')

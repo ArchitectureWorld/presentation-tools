@@ -8,6 +8,7 @@ let migration = null;
 const revealedProposalIds = new Set();
 let draftEditBuffer = null;
 let draftAutosaveTimer = null;
+let draftFlushPromise = null;
 const DRAFT_AUTOSAVE_DELAY = 500;
 
 const query = selector => document.querySelector(selector);
@@ -123,6 +124,10 @@ function updateDraftBufferFromInput(input) {
     const block = buffer.scriptBlocks.find(value => value.scriptBlockId === input.dataset.scriptBlockId);
     if (!block) return false;
     block.value = input.value;
+  } else if (input.dataset?.assetCaption) {
+    const asset = buffer.assetCaptions.find(value => value.pageAssetId === input.dataset.assetCaption);
+    if (!asset) return false;
+    asset.caption = input.value;
   } else return false;
   buffer.dirty = true;
   buffer.saveState = 'dirty';
@@ -140,7 +145,7 @@ function scheduleDraftAutosave() {
 }
 
 function draftPatchFromBuffer(page, buffer) {
-  return buildDraftUpdatePatch(page, {
+  const patch = buildDraftUpdatePatch(page, {
     heading: buffer.heading,
     body: buffer.body,
     listInputs: buffer.listItems.length
@@ -149,11 +154,28 @@ function draftPatchFromBuffer(page, buffer) {
     scriptInputs: buffer.scriptBlocks,
     script: buffer.script,
   });
+  if (page.pageAssets?.length) {
+    patch.pageAssets = page.pageAssets.map(asset => ({
+      ...asset,
+      caption: buffer.assetCaptions.find(value => value.pageAssetId === asset.pageAssetId)?.caption ?? asset.caption,
+    }));
+  }
+  return patch;
 }
 
 async function flushDraftBuffer({ reason = '保存草案' } = {}) {
+  if (draftFlushPromise) return draftFlushPromise;
   const buffer = draftEditBuffer;
   if (!buffer?.dirty) return true;
+  draftFlushPromise = flushDraftBufferNow(buffer, reason);
+  try {
+    return await draftFlushPromise;
+  } finally {
+    draftFlushPromise = null;
+  }
+}
+
+async function flushDraftBufferNow(buffer, reason) {
   const page = state.pages.find(item => item.id === buffer.pageId);
   if (!page) {
     buffer.saveState = 'failed';
@@ -348,6 +370,7 @@ function renderOutline() {
 }
 
 function renderAsset(asset, index) {
+  const caption = draftEditBuffer?.assetCaptions.find(item => item.pageAssetId === asset.pageAssetId)?.caption ?? asset.caption ?? '';
   const preview = asset.id && String(asset.mimeType || asset.type || '').startsWith('image/')
     ? `<img src="${escapeAttr(assetContentUrl(asset.id))}" alt="${escapeAttr(asset.name || `素材 ${index + 1}`)}">`
     : `<div class="empty-state" style="min-height:110px;padding:18px"><div><strong>素材预览</strong><p>当前文件没有可显示的图片预览。</p></div></div>`;
@@ -359,6 +382,7 @@ function renderAsset(asset, index) {
         <div class="asset-item-copy">
           <strong>${escapeHtml(asset.name || `素材 ${index + 1}`)}</strong>
           <small>${escapeHtml(asset.type || 'image')}</small>
+          <input class="asset-caption-input" data-asset-caption="${escapeAttr(asset.pageAssetId || '')}" value="${escapeAttr(caption)}" aria-label="素材 ${index + 1} 说明">
         </div>
         <button class="small-button" data-remove-asset="${escapeAttr(asset.pageAssetId || '')}" type="button">移出本页</button>
       </div>
@@ -1046,8 +1070,8 @@ document.addEventListener('click', async event => {
   if (removeAsset) {
     const page = activePage();
     const pageAssets = (page.pageAssets || []).filter(asset => asset.pageAssetId !== removeAsset.dataset.removeAsset);
-    await runAfterDraftFlush('移除素材', () => action({ type: 'draft.update', pageId: page.id, patch: { pageAssets } }));
-    toast('素材已移出本页');
+    const removed = await runAfterDraftFlush('移除素材', () => action({ type: 'draft.update', pageId: page.id, patch: { pageAssets } }));
+    if (removed) toast('素材已移出本页');
   }
 });
 
