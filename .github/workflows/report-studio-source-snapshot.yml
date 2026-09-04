@@ -23,20 +23,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          archive="$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.tgz"
+          digest="$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.sha256"
           tar \
             --exclude=.git \
             --exclude=node_modules \
             --exclude='**/node_modules' \
             --exclude='.worktrees' \
-            -czf report-studio-source-${GITHUB_SHA}.tgz .
-          sha256sum report-studio-source-${GITHUB_SHA}.tgz > report-studio-source-${GITHUB_SHA}.sha256
+            -czf "$archive" \
+            -C "$GITHUB_WORKSPACE" .
+          sha256sum "$archive" | sed "s#${RUNNER_TEMP}/##" > "$digest"
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
           name: report-studio-source-${{ github.sha }}
           path: |
-            report-studio-source-${{ github.sha }}.tgz
-            report-studio-source-${{ github.sha }}.sha256
+            ${{ runner.temp }}/report-studio-source-${{ github.sha }}.tgz
+            ${{ runner.temp }}/report-studio-source-${{ github.sha }}.sha256
           if-no-files-found: error
           retention-days: 1
