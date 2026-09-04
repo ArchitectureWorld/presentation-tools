@@ -21,8 +21,11 @@ async function loadReviewHistory() {
   const htmlSource = await readFile(new URL('./public/index.html', import.meta.url), 'utf8')
   const listeners = new Map()
   let proposalScrollCount = 0
-  const proposalNode = element({
+  const proposalActionNode = element({
     scrollIntoView() { proposalScrollCount += 1 },
+  })
+  const proposalNode = element({
+    querySelector(selector) { return selector === '[data-accept-proposal]' ? proposalActionNode : null },
   })
   const filters = ['all', 'unfinished', 'completed'].map(value => element({ dataset: { filter: value } }))
   const reviewHistory = element()
@@ -74,10 +77,20 @@ async function loadReviewHistory() {
     reviewSubmissions: [
       { id: 'submission_1', reviewRoundId: 'round_1', number: 1, baseRevision: 8, status: 'accepted', annotations: annotations.slice(0, 7) },
       { id: 'submission_2', reviewRoundId: 'round_1', number: 2, baseRevision: 9, status: 'proposal_created', annotations: annotations.slice(7) },
+      { id: 'submission_3', reviewRoundId: 'round_1', number: 3, baseRevision: 9, status: 'pending_dispatch', annotations: [] },
+      { id: 'submission_4', reviewRoundId: 'round_1', number: 4, baseRevision: 9, status: 'dispatch_failed', annotations: [] },
     ],
     proposals: [
       { id: 'proposal_1', submissionId: 'submission_1', reviewRoundId: 'round_1', baseRevision: 8, status: 'accepted', message: '第一批已应用', commands: [] },
-      { id: 'proposal_2', submissionId: 'submission_2', reviewRoundId: 'round_1', baseRevision: 9, status: 'pending', message: '第二批待确认', commands: [] },
+      {
+        id: 'proposal_2', submissionId: 'submission_2', reviewRoundId: 'round_1', baseRevision: 9, status: 'pending', message: '第二批待确认', commands: [],
+        affectedObjectIds: ['outline_node_2'], aggregateRiskLevel: 'structural_review_required', hasDeletion: true,
+        diff: {
+          before: [{ objectId: 'outline_node_2', value: { title: '旧标题' } }],
+          after: [{ objectId: 'outline_node_2', value: { title: '新标题' } }],
+          changes: [{ objectId: 'outline_node_2', changeType: 'modified', before: { title: '旧标题' }, after: { title: '新标题' } }],
+        },
+      },
     ],
     revisions: [],
   }
@@ -142,6 +155,9 @@ test('pending Proposal is grouped under its exact ReviewSubmission and exposed i
   assert.ok(secondSubmission > firstProposal && secondProposal > secondSubmission)
   assert.match(reviewHistory.innerHTML, /Agent 修改建议/)
   assert.match(reviewHistory.innerHTML, /待确认/)
+  for (const metadata of ['基于 Revision 9', '影响对象', 'outline_node_2', 'Before', '旧标题', 'After', '新标题', '结构性变更', '包含删除', '拒绝', '返回 Agent 调整']) {
+    assert.match(reviewHistory.innerHTML, new RegExp(metadata))
+  }
 })
 
 test('pending Proposal stays visible under every annotation filter and can be focused again', async () => {
@@ -166,4 +182,10 @@ test('pending Proposal stays visible under every annotation filter and can be fo
     await listener({ target: { closest: selector => selector === '[data-focus-proposal]' ? proposalAttention : null } })
   }
   assert.equal(getProposalScrollCount(), 2, 'header attention control should reveal the pending Proposal on demand')
+})
+
+test('persisted pending and failed submissions both render a continue-dispatch action after reload', async () => {
+  const { reviewHistory } = await loadReviewHistory()
+  assert.match(reviewHistory.innerHTML, /data-retry-submission="submission_3"[^>]*>继续投递</)
+  assert.match(reviewHistory.innerHTML, /data-retry-submission="submission_4"[^>]*>继续投递</)
 })

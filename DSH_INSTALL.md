@@ -1,6 +1,6 @@
 # Report Studio v0.1.1 — DSH 原生安装、升级与回滚
 
-本文件是部署入口。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。
+本文件是候选版本的部署入口。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。当前支线的 GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均已取得证据；PR 仍保持 Draft，未经人工验收不得合并 `main` 或发布 Release。
 
 ## 固定基线
 
@@ -23,6 +23,7 @@ git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
 node --version
 dsh --version
+npm ci
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
 ```
@@ -63,8 +64,13 @@ Get-ChildItem -LiteralPath $backup -Recurse -File | Get-FileHash -Algorithm SHA2
 
 ```bash
 dsh plugin --profile web remove @architectureworld/report-studio-dsh
-npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
-dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+dsh plugin --profile web add ./.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
@@ -79,6 +85,26 @@ DSH Web 的正式入口是 `http://127.0.0.1:3080/`。使用顺序固定为：
 4. 在 Report Studio 中完成编辑、批注、评审提交与 Proposal 人工确认。
 
 不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。会话头部的 `Report Studio · 独立打开` 只用于备用独立窗口，点击前会说明该窗口不显示 DSH 模型、推理等级、会话侧栏和主对话区。独立页面顶部提供“返回 DSH 主界面”。
+
+### Session 安全边界
+
+当前 DSH `0.1.1-rc.2` 没有向插件路由提供可信服务端 Session 身份或 iframe capability 签发接口。本插件因此采用机器可读的 `securityMode=local-single-user-only`，只允许 DSH Web 监听 `127.0.0.1`；若 Profile 配置成 `0.0.0.0`，插件会拒绝启动。query `sessionId` 只是本机单用户路由键，不是认证令牌，本版本不支持多人或网络共享部署。Agent 工具仍只使用 DSH exec context 中的 Session，忽略模型提供的 Session 选择。
+
+### Workspace Live Link 使用方式
+
+Report Studio 从当前 DSH Session 的 `SessionHeader.cwd` 获取 Workspace，`studio_open_workspace_project` 会检查 `project.json`、执行 Contract `0.1.0` 全量验证并自动载入合法项目。不得把 Profile 目录当作 Workspace，也不得从浏览器传入另一个绝对路径。
+
+Live Link 以默认 `750 ms` 防抖监听 `project.json`、`rules.json`、`outline.json`、页面清单与草案、source-materials manifest 和 assets manifest。收到连续 change、Windows rename 或目录替换后，会完整重扫并重新验证；无效中间态不会替换当前合法快照，监听会继续等待恢复。
+
+同步状态位于 Report Studio 顶部。需要主动检查时，可点击“重新读取 Workspace”或调用 `studio_reload_upstream`。如果本地存在 dirty 编辑，上游候选不会自动覆盖，必须由用户选择保存、放弃或暂时保留。`layouts/` 由 Presentation 独占管理，Workspace 其他文件不受刷新影响。
+
+部署前后都应执行：
+
+```bash
+npm run verify:workspace
+```
+
+只有输出 `PRESENTATION_WORKSPACE_LIVE_LINK_PASS`，并在正式入口 `http://127.0.0.1:3080/` 完成真实 Workspace 验收，才可视为 Live Link 发布候选通过。
 
 ## 4. A1.1 旧数据无损升级
 
@@ -119,21 +145,26 @@ objects/sha256/*.json
 
 ```bash
 npm run verify:all
-npm run smoke:dsh
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
 正式环境至少验收：
 
 - 从 `http://127.0.0.1:3080/` 进入后，DSH 会话侧栏、模型选择器、推理等级和消息输入区保持可用；
 - 点击原生 `Report Studio` 标签后仍留在 DSH 外壳内，并以当前 Session ID 加载工作台；
-- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`；
+- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`、`securityMode=local-single-user-only`、`listenHost=127.0.0.1`、`networkSharedSecurity=false`；
 - 迁移前旧 `state.json` 与备份 SHA-256 一致；
 - 大纲、草案、批注、Submission、Proposal 接受和重启恢复可用；
 - 标准项目导出通过 Contract `0.1.0`；
 - `studio_get_context` 和 `studio_apply_commands` 已注册；
 - 原有 DSH 插件仍在，且没有把独立 `4173` 服务作为正式入口。
 
-自动化验证不等同于真实模型质量验收；模型是否能按业务意图生成满意建议，需要在目标账号、目标模型和真实项目资料中另行确认。
+真实目标 Provider 已在当前 DSH Session 中完成 `ReviewSubmission → studio_get_context → studio_apply_commands → Proposal → 人工接受 → 新 Revision → 重启恢复`。该闭环证明集成链路与人工确认边界有效，但不替代具体项目对模型建议质量的业务验收。
 
 ## 6. 回滚
 

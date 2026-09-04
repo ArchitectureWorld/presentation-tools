@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { appendFile, mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { Readable } from 'node:stream'
 import { createInitialState } from '../../packages/studio-core/index.mjs'
 import {
   CONTROL_SCHEMA_VERSION,
@@ -12,7 +14,7 @@ import {
   createStudioId,
   projectStateFromParts,
 } from '../../packages/studio-contracts/index.mjs'
-import { inspectLegacyState, prepareLegacyMigration } from './migration.mjs'
+import { inspectLegacyState, mapLegacyState, prepareLegacyMigration } from './migration.mjs'
 
 const clone = value => structuredClone(value)
 
@@ -81,6 +83,7 @@ function operationalFromState(state, revisions = state.revisions ?? []) {
     annotations: clone(state.annotations ?? []),
     reviewRounds: clone(state.reviewRounds ?? []),
     reviewSubmissions: clone(state.reviewSubmissions ?? []),
+    reviewRuns: clone(state.reviewRuns ?? []),
     proposals: clone(state.proposals ?? []),
     revisions: clone(revisions),
   }
@@ -99,12 +102,48 @@ function revisionSummary(record, revisionRef) {
   }
 }
 
-export async function createRepository(dataDir, { faultInjector = () => undefined } = {}) {
+function hydrateLegacyCanonicalProject(snapshot) {
+  const project = snapshot?.project
+  const match = typeof project?.id === 'string' && project.id.match(/^project_([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/u)
+  if (!match) return snapshot
+  const uuid = match[1]
+  if (project.projectId && project.projectRulesId && project.outlineDocumentId) return snapshot
+  return {
+    ...snapshot,
+    project: {
+      ...project,
+      projectId: project.projectId ?? project.id,
+      projectRulesId: project.projectRulesId ?? `project_rules_${uuid}`,
+      outlineDocumentId: project.outlineDocumentId ?? `outline_${uuid}`,
+    },
+  }
+}
+
+function isUnusedWorkspace(state, currentControl) {
+  const initialProject = createInitialState().project
+  const collections = [
+    state.outline,
+    state.pages,
+    state.annotations,
+    state.reviewRounds,
+    state.reviewSubmissions,
+    state.proposals,
+    state.reviewRuns,
+    currentControl.operational?.reviewRuns,
+  ]
+  return currentControl.projectHead.currentRevision === 0
+    && collections.every(collection => (collection ?? []).length === 0)
+    && state.project.title === initialProject.title
+    && state.project.status === initialProject.status
+}
+
+export async function createRepository(dataDir, { faultInjector = () => undefined, fileOpen = open } = {}) {
   const root = resolve(dataDir)
   await mkdir(root, { recursive: true })
   const controlPath = join(root, 'control.json')
   const legacyStatePath = join(root, 'state.json')
   const objectsDirectory = join(root, 'objects', 'sha256')
+  const orphanLogPath = join(root, 'objects', 'orphaned-blobs.jsonl')
   const lockPath = join(root, 'repository.lock')
   await mkdir(objectsDirectory, { recursive: true })
   const lockToken = await acquireLock(lockPath)
@@ -157,6 +196,173 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     return JSON.parse(payload)
   }
 
+  async function hydrateLegacyCanonicalSnapshot(snapshot, currentControl) {
+    const projectHydrated = hydrateLegacyCanonicalProject(snapshot)
+    try {
+      assertCanonicalSnapshot(projectHydrated)
+      return projectHydrated
+    } catch (error) {
+      const migration = currentControl.migration
+      if (error?.code !== ERROR_CODES.INVALID_REFERENCE || migration?.status !== 'completed' || !migration.legacyStateRef || typeof migration.mapPath !== 'string') throw error
+      const legacy = await getObject(migration.legacyStateRef)
+      if (legacy.kind !== 'LegacyState' || !legacy.value || typeof legacy.value !== 'object') {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '迁移记录未引用有效的原始 LegacyState。', undefined, 500)
+      }
+      let migrationMap
+      try { migrationMap = JSON.parse(await readFile(migration.mapPath, 'utf8')) }
+      catch (mapError) {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '无法读取历史迁移映射。', { cause: mapError.message }, 500)
+      }
+      if (!migrationMap?.ids || typeof migrationMap.ids !== 'object' || Array.isArray(migrationMap.ids)) {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '历史迁移映射结构无效。', undefined, 500)
+      }
+      return canonicalFromState(mapLegacyState(legacy.value, migrationMap, { requireExistingIds: true, deriveMissingIds: true }))
+    }
+  }
+
+  async function putBlob(source, { mimeType, originalFileName, sizeBytes = null, sha256: expectedSha256 = null } = {}) {
+    if (!source || typeof source[Symbol.asyncIterator] !== 'function') throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 输入必须是可流式读取的字节流。', undefined, 400)
+    if (typeof mimeType !== 'string' || !mimeType || typeof originalFileName !== 'string' || !originalFileName) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 缺少 MIME 类型或原始文件名。', undefined, 400)
+    const temporary = join(objectsDirectory, `.${randomUUID()}.blob.tmp`)
+    const handle = await fileOpen(temporary, 'wx')
+    const hash = createHash('sha256')
+    let written = 0
+    let complete = false
+    try {
+      for await (const chunk of source) {
+        const bytes = Buffer.from(chunk)
+        written += bytes.length
+        hash.update(bytes)
+        let offset = 0
+        while (offset < bytes.length) {
+          const result = await handle.write(bytes, offset, bytes.length - offset, written - bytes.length + offset)
+          if (!result?.bytesWritten) throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 落盘时发生短写入。', undefined, 500)
+          offset += result.bytesWritten
+        }
+      }
+      await handle.sync()
+      complete = true
+    } finally {
+      await handle.close()
+      if (!complete) await unlink(temporary).catch(() => undefined)
+    }
+    const digest = hash.digest('hex')
+    if ((sizeBytes !== null && sizeBytes !== written) || (expectedSha256 && expectedSha256 !== digest)) {
+      await unlink(temporary).catch(() => undefined)
+      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 字节数或 SHA-256 校验失败。', { sizeBytes: written, sha256: digest }, 400)
+    }
+    const blobPath = join(objectsDirectory, `${digest}.blob`)
+    const staged = await stat(temporary)
+    if (staged.size !== written || await hashBlobFile(temporary) !== digest) {
+      await unlink(temporary).catch(() => undefined)
+      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 暂存文件的字节数或 SHA-256 校验失败。', { sizeBytes: staged.size, sha256: digest }, 500)
+    }
+    try { await rename(temporary, blobPath) }
+    catch (error) {
+      if (!(await pathExists(blobPath))) throw error
+      await unlink(temporary).catch(() => undefined)
+    }
+    const descriptor = { sha256: digest, sizeBytes: written, mimeType, originalFileName, createdAt: new Date().toISOString() }
+    const descriptorPath = join(objectsDirectory, `${digest}.blob.json`)
+    if (!(await pathExists(descriptorPath))) await atomicWriteJson(descriptorPath, descriptor)
+    else return JSON.parse(await readFile(descriptorPath, 'utf8'))
+    return descriptor
+  }
+
+  async function hashBlobFile(path) {
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(path)) hash.update(chunk)
+    return hash.digest('hex')
+  }
+
+  async function verifyBlob(reference) {
+    const sha = String(reference?.sha256 ?? '')
+    if (!/^[a-f0-9]{64}$/i.test(sha)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Blob 引用缺少有效 SHA-256。', { reference }, 404)
+    const descriptor = JSON.parse(await readFile(join(objectsDirectory, `${sha}.blob.json`), 'utf8'))
+    const blobPath = join(objectsDirectory, `${sha}.blob`)
+    const info = await stat(blobPath)
+    if (descriptor.sha256 !== sha || descriptor.sizeBytes !== info.size || await hashBlobFile(blobPath) !== sha) {
+      throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Blob 描述符、字节数或 SHA-256 校验失败。', { sha256: sha }, 500)
+    }
+    return descriptor
+  }
+
+  async function openBlob(reference) {
+    const sha = String(reference?.sha256 ?? '')
+    if (!/^[a-f0-9]{64}$/i.test(sha)) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, 'Blob 引用缺少有效 SHA-256。', { reference }, 404)
+    await verifyBlob(reference)
+    return createReadStream(join(objectsDirectory, `${sha}.blob`))
+  }
+
+  async function recordOrphanBlob(reference, detail = {}) {
+    await appendFile(orphanLogPath, `${JSON.stringify({ recordedAt: new Date().toISOString(), objectRef: clone(reference), detail: clone(detail) })}\n`, 'utf8')
+  }
+
+  function assertNoNewInlineBinary(baseValue, candidateValue) {
+    const seen = new WeakSet()
+    const queue = [{ base: baseValue, value: candidateValue, path: '$', scope: 'root' }]
+    const reject = (path, kind) => {
+      throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Canonical 发布不接受新的 Data URL、Base64 或内联二进制载荷；请使用受控上传或显式迁移。', { path, kind }, 400)
+    }
+    const sameLegacyLeaf = (base, value) => typeof value === 'string' && value === base
+    const base64Bytes = value => typeof value === 'string' && value.length >= 16 && value.length % 4 === 0 && /^[a-z0-9+/]+={0,2}$/iu.test(value)
+    while (queue.length) {
+      const { base, value, path, scope } = queue.pop()
+      if (value == null) continue
+      if (typeof value === 'string') {
+        if (/^data:/iu.test(value) && !sameLegacyLeaf(base, value)) reject(path, 'data_url')
+        continue
+      }
+      if (Buffer.isBuffer(value) || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) reject(path, 'binary_value')
+      if (typeof value !== 'object') continue
+      if (seen.has(value)) reject(path, 'cyclic_value')
+      seen.add(value)
+      if (value.type === 'Buffer' && Array.isArray(value.data)) reject(path, 'buffer_object')
+      if (Array.isArray(value)) {
+        for (let index = value.length - 1; index >= 0; index -= 1) queue.push({ base: base?.[index], value: value[index], path: `${path}[${index}]`, scope })
+        continue
+      }
+      for (const key of Object.keys(value).reverse()) {
+        const child = value[key]
+        const baseChild = base && typeof base === 'object' ? base[key] : undefined
+        const lower = key.toLowerCase()
+        const binaryKey = lower === 'dataurl' || lower === 'database64' || lower === 'data_base64'
+        const scopedBytes = (scope === 'page_asset' || scope === 'archive_file') && (lower === 'data' || lower === 'bytes') && base64Bytes(child)
+        if ((binaryKey || scopedBytes) && child != null && !sameLegacyLeaf(baseChild, child)) reject(`${path}.${key}`, binaryKey ? 'binary_field' : 'scoped_base64_bytes')
+        const childScope = key === 'pages' ? 'page' : scope === 'page' && key === 'assets' ? 'page_asset' : scope === 'root' && key === 'project' ? 'project' : scope === 'project' && key === 'extensionPayload' ? 'project_extension' : scope === 'project_extension' && key === 'standardArchive' ? 'standard_archive' : scope === 'standard_archive' && key === 'files' ? 'archive_file' : scope
+        queue.push({ base: baseChild, value: child, path: `${path}.${key}`, scope: childScope })
+      }
+    }
+  }
+
+  async function migrateLegacyAssets() {
+    assertReady()
+    const replacements = new Map()
+    for (const page of state.pages ?? []) for (const asset of page.assets ?? []) {
+      const match = /^data:([^;,]+);base64,([a-z0-9+/=\s]+)$/iu.exec(String(asset.dataUrl ?? ''))
+      if (!match) continue
+      const bytes = Buffer.from(match[2].replace(/\s/gu, ''), 'base64')
+      const mimeType = match[1].toLowerCase()
+      const objectRef = await putBlob(Readable.from([bytes]), { mimeType, originalFileName: asset.name ?? `${asset.id}.bin` })
+      replacements.set(asset.id, { ...clone(asset), mimeType, objectRef, sizeBytes: objectRef.sizeBytes, sha256: objectRef.sha256 })
+      delete replacements.get(asset.id).dataUrl
+    }
+    if (!replacements.size) return clone(state)
+    return transactContent({ baseRevision: state.project.currentRevision, source: 'migration', detail: { actionType: 'asset.migrate_data_url' } }, candidate => {
+      for (const page of candidate.pages ?? []) {
+        page.assets = (page.assets ?? []).map(asset => clone(replacements.get(asset.id) ?? asset))
+        page.pageAssets = (page.pageAssets ?? []).map(link => {
+          const replacement = replacements.get(link.assetId)
+          if (!replacement) return link
+          const { id, ...assetFields } = replacement
+          const { dataUrl, dataBase64, ...linkFields } = link
+          return { ...linkFields, ...clone(assetFields), assetId: id }
+        })
+      }
+      return candidate
+    })
+  }
+
   async function loadState(currentControl) {
     const revision = await getObject(currentControl.projectHead.currentRevisionRef)
     if (revision.kind !== 'RevisionRecord' || revision.revisionNumber !== currentControl.projectHead.currentRevision) {
@@ -164,9 +370,9 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     }
     const stored = await getObject(revision.snapshotRef)
     if (stored.kind !== 'CanonicalSnapshot') throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Revision 未引用 Canonical Snapshot。', undefined, 500)
-    assertCanonicalSnapshot(stored.value)
+    const snapshot = await hydrateLegacyCanonicalSnapshot(stored.value, currentControl)
     return projectStateFromParts({
-      snapshot: stored.value,
+      snapshot,
       currentRevision: revision.revisionNumber,
       operational: currentControl.operational,
       ui: currentControl.ui,
@@ -256,7 +462,15 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       const baseState = await loadState(fresh)
       const candidate = await mutator(clone(baseState))
       if (!candidate || typeof candidate !== 'object') throw new StudioError(ERROR_CODES.INVALID_COMMAND, '内容事务必须返回完整项目状态。')
+      assertNoNewInlineBinary(baseState, candidate)
+      const baseSnapshot = canonicalFromState(baseState)
       const snapshot = canonicalFromState(candidate)
+      if (canonicalJson(snapshot) === canonicalJson(baseSnapshot)) {
+        return publish({
+          ...fresh,
+          ui: clone(candidate.ui ?? fresh.ui),
+        })
+      }
       const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
       const revisionNumber = currentRevision + 1
       const revision = {
@@ -305,6 +519,56 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     })
   }
 
+  async function initializeFromStandardProject({ snapshot: importedSnapshot, detail = null, ui = {}, source = 'standard_import' }) {
+    assertReady()
+    return enqueue(async () => {
+      const fresh = await readControlFresh()
+      const current = await loadState(fresh)
+      if (!isUnusedWorkspace(current, fresh)) {
+        throw new StudioError(
+          ERROR_CODES.STANDARD_IMPORT_REQUIRES_NEW_WORKSPACE,
+          '当前工作区已有项目内容或评审历史。为避免覆盖数据，请在新的 DSH Session 或新的空白项目工作区中导入标准项目。',
+          undefined,
+          409,
+        )
+      }
+
+      const snapshot = clone(importedSnapshot)
+      assertCanonicalSnapshot(snapshot)
+      assertNoNewInlineBinary({}, snapshot)
+      const createdAt = new Date().toISOString()
+      const candidate = projectStateFromParts({
+        snapshot,
+        currentRevision: 0,
+        operational: { project: { updatedAt: createdAt } },
+        ui,
+      })
+      const snapshotRef = await putObject({ kind: 'CanonicalSnapshot', value: snapshot })
+      const revision = {
+        kind: 'RevisionRecord',
+        revisionId: createStudioId('revision'),
+        revisionNumber: 0,
+        parentRevision: null,
+        parentRevisionRef: null,
+        snapshotRef,
+        source,
+        detail: clone(detail),
+        idempotencyKey: null,
+        createdAt,
+      }
+      const revisionRef = await putObject(revision)
+      const nextControl = {
+        ...fresh,
+        projectHead: { projectId: snapshot.project.id, currentRevision: 0, currentRevisionRef: revisionRef },
+        operational: operationalFromState(candidate, [revisionSummary(revision, revisionRef)]),
+        ui: clone(ui),
+      }
+      await loadState(nextControl)
+      await faultInjector('before_standard_import_head_publish', { nextControl, revision, revisionRef, snapshotRef })
+      return publish(nextControl)
+    })
+  }
+
   async function getSnapshotAt(revisionNumber) {
     assertReady()
     const summary = control.operational.revisions.find(item => item.number === revisionNumber)
@@ -322,6 +586,54 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       return transactContent({ baseRevision, source: next.revisions?.at(-1)?.source ?? 'human', detail: next.revisions?.at(-1)?.detail ?? null }, () => next)
     }
     return transactOperational(() => next)
+  }
+
+  async function publishUpstreamSnapshot({ snapshot, fingerprint, workspaceRoot, sourceRevision = null, sourceRevisions = [] }) {
+    assertReady()
+    if (!snapshot || typeof snapshot !== 'object') {
+      throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Workspace 上游快照不能为空。', undefined, 400)
+    }
+    if (!/^[a-f0-9]{64}$/iu.test(String(fingerprint ?? ''))) {
+      throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Workspace 上游快照缺少稳定 SHA-256 指纹。', { fingerprint: fingerprint ?? null }, 400)
+    }
+    const detail = {
+      actionType: 'workspace.upstream_publish',
+      workspaceRoot: String(workspaceRoot ?? ''),
+      fingerprint: String(fingerprint),
+      sourceRevision,
+      sourceRevisions: clone(sourceRevisions),
+    }
+    const current = clone(state)
+    const activePageId = current.ui?.activePageId
+    const nextActivePageId = snapshot.pages?.some(page => page.id === activePageId)
+      ? activePageId
+      : snapshot.pages?.[0]?.id ?? null
+    const ui = {
+      ...clone(current.ui ?? {}),
+      stage: current.ui?.stage === 'draft' && !nextActivePageId
+        ? 'outline'
+        : current.ui?.stage ?? (nextActivePageId ? 'draft' : 'outline'),
+      activePageId: nextActivePageId,
+    }
+
+    if (isUnusedWorkspace(current, control)) {
+      return initializeFromStandardProject({
+        snapshot,
+        detail,
+        source: 'workspace_upstream',
+        ui: { ...ui, stage: nextActivePageId ? 'draft' : 'outline' },
+      })
+    }
+
+    return transactContent(
+      { baseRevision: current.project.currentRevision, source: 'workspace_upstream', detail },
+      state => projectStateFromParts({
+        snapshot,
+        currentRevision: state.project.currentRevision,
+        operational: operationalFromState(state, state.revisions),
+        ui,
+      }),
+    )
   }
 
   async function applyMigration() {
@@ -388,6 +700,13 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     },
     applyMigration,
     getSnapshotAt,
+    putBlob,
+    openBlob,
+    verifyBlob,
+    recordOrphanBlob,
+    migrateLegacyAssets,
+    initializeFromStandardProject,
+    publishUpstreamSnapshot,
     transactContent,
     transactOperational,
     async replace(next) { return replace(next) },

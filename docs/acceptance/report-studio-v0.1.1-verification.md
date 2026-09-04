@@ -1,12 +1,14 @@
-# Report Studio v0.1.1 发布验收记录
+# Report Studio v0.1.1 稳定化验收记录
 
-验收日期：2026-09-03（Asia/Shanghai）
+> 当前记录对应最终代码 `2ebe7e43bad1bb1d0de1e5fc037aa15184c05585`。技术验证通过不等于自动批准合并或发布；PR #6 仍保持 Draft，等待人工验收。
+
+验收日期：2026-09-04（Asia/Shanghai）
 
 仓库：`ArchitectureWorld/presentation-tools`
 
 起始基线：`main@804dbd4dfa7bafc9acd373e9ae51f2d02c9f1257`
 
-入口修复基线：`feat/report-studio-v0.1.1-hardening@77dd34023c88c591c4d0b8d57c511bc6706d116f`
+稳定化代码：`feat/report-studio-v0.1.1-hardening@2ebe7e43bad1bb1d0de1e5fc037aa15184c05585`
 
 产品版本：`Report Studio 0.1.1`
 
@@ -53,9 +55,9 @@ DSH Profile web
 npm run verify:all
 ```
 
-结果：PASS。
+结果：176/176，失败 0。
 
-- Root 单元/集成测试：51/51；
+- Root 单元/集成测试：176/176；
 - 标准 Contract Node 测试：8/8；
 - Schema Set SHA-256：`5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc`；
 - 最小 Fixture、完整示例、npm pack 和独立 consumer：PASS；
@@ -71,10 +73,13 @@ npm run verify:all
 命令：
 
 ```bash
-npm run smoke:dsh
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
-结果：PASS。烟测从 `dist` tarball 安装到临时 DSH Home，解析并安装显式依赖，组合 Web Profile，启动真实 DSH Web，然后验证：
+结果：PASS。烟测只从 `REPORT_STUDIO_PLUGIN_PACKAGE` 指定的当前 checkout 新打 tarball 安装到临时 DSH Home，解析并安装显式依赖，组合 Web Profile，启动真实 DSH Web，然后验证：
 
 - `/report-studio/api/health?sessionId=smoke-session`；
 - `version=v0.1.1`；
@@ -89,33 +94,42 @@ npm run smoke:dsh
 
 - DSH 会话侧栏、原生消息输入、模型选择器和推理等级可见且可用；
 - `Report Studio` 标签注册成功；从“对话”切换到该标签后浏览器地址仍为 `/`，没有跳转到独立页；
-- iframe 加载当前 Session，Studio 内部重复 Agent FAB/弹窗不再作为入口，顶部引导使用 DSH 原生对话框；
+- iframe 加载当前 Session；项目级悬浮 Agent FAB/约 80% 聊天窗保留并绑定同一 Session，不包含模型或 Provider 控件，也不建立第二套 Runtime；
 - Studio 自有模型选择器数量为 0；
 - 当前待确认 Proposal 显示在对应“第 1 次提交”容器底部；“待确认 1”可将“确认应用”按钮定位到批注滚动区可视范围；
 - 直接访问独立页时显示“当前为 Report Studio 独立工作台……”以及“返回 DSH 主界面”；
 - 浏览器控制台新增错误为 0；
-- 批注生成的不可变 ReviewSubmission 已进入当前 DSH Session，Studio 显示“已投递”，Revision 保持 9，没有绕过 Proposal 直接写入；
-- DSH 重启后重新读取：Revision 9、1 个草案页、4 条批注、2 个 ReviewRound、3 个 ReviewSubmission、1 个待确认 Proposal；
+- 既有迁移项目在部署与重启后保持 Revision 9、1 个草案页、4 条批注、2 个 ReviewRound、3 个 ReviewSubmission、1 个 ReviewRun、1 个 Proposal；
+- 独立真实 Provider 验收 Session 中，批注生成的不可变 ReviewSubmission 进入当前 DSH Session，Agent 依次使用 `studio_get_context` 与 `studio_apply_commands` 生成待确认 Proposal，没有直接写入 Revision；
+- 人工点击确认后 Revision `3 → 4`，标题更新为“验收页面：Agent Proposal 已生成”；DSH 重启后 Proposal 和 ReviewRun 均恢复为 `accepted`；
 - 健康检查返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`。
 
-宿主截图：
+历史入口与分组截图：
 
 - `docs/acceptance/evidence/report-studio-v0.1.1-dsh-shell.png`
 - `docs/acceptance/evidence/report-studio-v0.1.1-standalone-notice.png`
 - `docs/acceptance/evidence/report-studio-v0.1.1-review-history-grouped.png`
 
-真实 Agent 闭环存在一个宿主环境边界：当前 Session 的 DSH 模型请求连续重试 5 次后返回 `TRANSPORT / fetch failed`。因此本次真实宿主已证明 Prompt bridge 投递和“不直接改 Revision”，但没有由真实模型生成 Proposal。Proposal 创建、人工确认后才产生新 Revision、刷新与重启持久化的产品逻辑由自动化 E2E 覆盖并通过；真实模型端闭环需在 DSH Provider 传输恢复后复验，不把该外部传输失败误报为 Report Studio 通过。
+当前真实 Provider 截图：
+
+- `docs/acceptance/evidence/report-studio-v0.1.1-provider-proposal-accepted-2ebe7e4.png`（SHA-256 `25FBEFB4E575BF45E50D9DE17A342885C7A089580463353C285D3E0D3D33BA3E`）
+- `docs/acceptance/evidence/report-studio-v0.1.1-provider-restart-persisted-2ebe7e4.png`（SHA-256 `68560586B5873BEFF64B5C208D42E3847D962F3C212FAB4C85B4A81BEE9C0C80`）
+
+真实 Provider 验收 Session：`session-d8666c4f-f5e3-4028-89ae-d592e53bf06d`。此前 `TRANSPORT / fetch failed` 属于 2026-09-03 的历史环境故障，不再是当前阻断。
 
 ## 发布物
 
 ```text
-dist/architectureworld-report-studio-dsh-0.1.1.tgz
-sizeBytes: 61618
-sha256: 87D0571C3FC55787BD8C97A2C19E7B21E5656AEFFFFC31170BC117BE100A3338
-files: 36
+C:\pt-rvw-804dbd4\.tmp\report-studio-pack-2ebe7e4\architectureworld-report-studio-dsh-0.1.1.tgz
+sourceCommit: 2ebe7e43bad1bb1d0de1e5fc037aa15184c05585
+sizeBytes: 89201
+sha256: 322A13CCC0E0F7D76216EBB1DA67F60AF5C0F167425265256CB0EAEC9B2B8271
+files: 39
 ```
 
 包内包含 DSH host/client、Studio Repository/Core/Contracts、标准 Adapter、Contract Schema 和生产 UI；AJV 依赖以精确版本声明。`prepack` 会从权威源码重新同步 vendor，避免手工复制漂移。
+
+同一代码 SHA 的 Linux CI artifact 为 88,175 bytes、39 files、SHA-256 `A8782935C9C08BD70A4CC8269A8181E6C035A8B38933E5694FEAF2D561A58D7A`。平台包分别通过内容清单、release-integrity 和 DSH smoke。
 
 ## A1.1 数据安全证据
 
@@ -129,7 +143,9 @@ files: 36
 
 ## 验收边界
 
-已验证的是代码、数据迁移、浏览器 UI、标准目录、发布包、真实 DSH Host 路由和 Session prompt 投递。真实模型返回受当前 DSH Provider 的 `TRANSPORT / fetch failed` 阻断；目标账号、模型路由和真实项目内容质量仍属于部署环境验收。正式排版、分页以及 PPTX/PDF/HTML 成品导出不属于 v0.1.1。
+已验证的是代码、数据迁移、浏览器 UI、标准目录、发布包、真实 DSH Host 路由、Session prompt 投递、真实模型 Proposal、人工确认和重启恢复。具体项目内容质量仍属于业务验收。正式排版、分页以及 PPTX/PDF/HTML 成品导出不属于 v0.1.1。
+
+GitHub 证据：push run `33858374268`、PR run `33858377994` 的 Linux/Windows 均 success，Standard Project run `33858377996` success。main 已配置 `strict=true`、`linux-verification` / `windows-verification` required checks、PR 必经和 `enforce_admins=true`，并禁止 force push 与删除。PR #6 未合并。
 
 ## 部署与回滚
 

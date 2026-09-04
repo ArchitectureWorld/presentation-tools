@@ -25,6 +25,9 @@ try {
   const health = await fetch(`${baseUrl}/api/health`).then(response => response.json())
   assert.equal(health.ok, true)
   assert.equal(health.version, 'v0.1.1')
+  assert.equal(health.securityMode, 'local-single-user-only')
+  assert.equal(health.listenHost, '127.0.0.1')
+  assert.equal(health.networkSharedSecurity, false)
 
   let state = await fetch(`${baseUrl}/api/state`).then(response => response.json())
   const contentAction = async action => {

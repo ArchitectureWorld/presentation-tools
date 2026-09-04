@@ -1,0 +1,114 @@
+name: Report Studio v0.1.1 CI
+
+on:
+  push:
+    paths:
+      - 'apps/studio-local/**'
+      - 'packages/studio-contracts/**'
+      - 'packages/studio-core/**'
+      - 'packages/studio-standard-adapter/**'
+      - 'packages/studio-dsh-plugin/**'
+      - 'contracts/presentation-standard-project/**'
+      - 'scripts/verify-v0.1.1.mjs'
+      - 'scripts/verify-e2e-v0.1.1.mjs'
+      - 'scripts/verify-responsive-ui.mjs'
+      - 'scripts/verify-dsh-plugin.mjs'
+      - 'scripts/build-dsh-plugin-vendor.mjs'
+      - 'scripts/dsh-plugin-vendor-manifest.mjs'
+      - 'scripts/release-integrity.mjs'
+      - 'scripts/release-integrity.test.mjs'
+      - 'scripts/smoke-dsh-native.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'README.md'
+      - 'DSH_INSTALL.md'
+      - '.gitattributes'
+      - '.github/workflows/report-studio-v0.1.1-ci.yml'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    name: ${{ matrix.check-name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            check-name: linux-verification
+          - os: windows-latest
+            check-name: windows-verification
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9.15.4'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install root and Contract dependencies from lockfiles
+        run: |
+          npm ci
+          python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0
+          npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+
+      - name: Run the complete v0.1.1 verification gate
+        run: npm run verify:all
+
+      - name: Regenerate vendor and reject drift
+        run: |
+          npm run sync:vendor
+          git diff --exit-code -- packages/studio-dsh-plugin/vendor
+
+      - name: Pack the current checkout
+        run: |
+          node -e "const fs=require('node:fs');fs.rmSync('.tmp/report-studio-pack',{recursive:true,force:true});fs.mkdirSync('.tmp/report-studio-pack',{recursive:true})"
+          npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+
+      - name: Verify package inventory and write artifact evidence
+        run: >-
+          node scripts/release-integrity.mjs
+          --package .tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
+          --source-commit ${{ github.sha }}
+          --dsh-version 0.1.1-rc.2
+          --build-command "npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack"
+          --manifest .tmp/report-studio-pack/artifact-manifest-${{ runner.os }}.json
+
+      - name: Install the pinned DSH CLI
+        run: |
+          npm install --global @deepseek-ai/dsh@0.1.1-rc.2
+          node -e "const fs=require('node:fs'),p=require('node:path'),c=require('node:child_process');const win=process.platform==='win32';const npmCli=win?[p.join(p.dirname(process.execPath),'node_modules','npm','bin','npm-cli.js')]:[];const prefix=c.execFileSync(win?process.execPath:'npm',[...npmCli,'prefix','-g'],{encoding:'utf8'}).trim();const bin=win?p.join(prefix,'dsh.cmd'):p.join(prefix,'bin','dsh');fs.appendFileSync(process.env.GITHUB_ENV,'REPORT_STUDIO_DSH_BIN='+bin+'\n')"
+
+      - name: Smoke the tarball built by this job
+        env:
+          REPORT_STUDIO_PLUGIN_PACKAGE: .tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
+        run: npm run smoke:dsh
+
+      - name: Verify tracked files remain clean
+        run: |
+          git diff --check
+          git diff --exit-code
+
+      - name: Upload Linux release candidate evidence
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-studio-dsh-${{ github.sha }}
+          path: |
+            .tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
+            .tmp/report-studio-pack/artifact-manifest-${{ runner.os }}.json
+          if-no-files-found: error

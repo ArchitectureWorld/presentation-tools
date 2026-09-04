@@ -4,7 +4,7 @@
   const embedded = window.parent !== window
   const nativeMode = reportStudioRoute && Boolean(sessionId)
 
-  if (reportStudioRoute && !embedded) {
+  if (!embedded) {
     document.documentElement.classList.add('report-studio-standalone')
     const notice = document.querySelector('#report-studio-standalone-notice')
     if (notice) notice.hidden = false
@@ -43,7 +43,7 @@
     document.body.appendChild(notice)
   }
 
-  async function watchForProposal(previousCount) {
+  async function watchForProposal({ submissionId, reviewRunId }) {
     const deadline = Date.now() + 120000
     while (Date.now() < deadline) {
       await new Promise(resolve => window.setTimeout(resolve, 1500))
@@ -51,7 +51,12 @@
         const response = await nativeFetch(apiPath('/api/state'), { headers: { accept: 'application/json' } })
         if (!response.ok) continue
         const current = await response.json()
-        if ((current.proposals?.length ?? 0) <= previousCount) continue
+        const proposal = (current.proposals ?? []).find(item => item.submissionId === submissionId)
+        const reviewRun = reviewRunId ? (current.reviewRuns ?? []).find(item => item.reviewRunId === reviewRunId) : null
+        const linkedProposal = reviewRun?.resultProposalId
+          ? (current.proposals ?? []).find(item => item.id === reviewRun.resultProposalId)
+          : null
+        if (!proposal && !linkedProposal) continue
         const active = document.activeElement
         const editing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
         if (editing) showRefreshNotice()
@@ -61,7 +66,7 @@
     }
   }
 
-  function requestPrompt(prompt, previousProposalCount) {
+  function requestPrompt(prompt, reviewTarget = {}) {
     const target = window.parent !== window ? window.parent : window.opener
     if (!target) return Promise.reject(new Error('未找到承载 Report Studio 的 DSH 会话窗口。'))
     const requestId = `studio_prompt_${Date.now()}_${Math.random().toString(36).slice(2)}`
@@ -70,7 +75,7 @@
         pendingPrompts.delete(requestId)
         reject(new Error('DSH Session 接收请求超时。'))
       }, 60000)
-      pendingPrompts.set(requestId, { resolve, reject, timeout, previousProposalCount, kind: prompt.kind })
+      pendingPrompts.set(requestId, { resolve, reject, timeout, reviewTarget, kind: prompt.kind })
       target.postMessage({
         type: 'report-studio.prompt',
         requestId,
@@ -81,12 +86,12 @@
     })
   }
 
-  async function reportDispatch(submissionId, status, error = null) {
+  async function reportDispatch(submissionId, status, error = null, reviewRunId = null) {
     if (!submissionId) return null
     const response = await nativeFetch(apiPath(`/api/review/${encodeURIComponent(submissionId)}/dispatch`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ status, error }),
+      body: JSON.stringify({ status, error, reviewRunId }),
     })
     if (!response.ok) throw new Error('无法保存 DSH 投递状态。')
     return response.json()
@@ -105,7 +110,7 @@
       return
     }
     pending.resolve(message)
-    if (pending.kind === 'report_studio.review_submission') void watchForProposal(pending.previousProposalCount)
+    if (pending.kind === 'report_studio.review_submission') void watchForProposal(pending.reviewTarget)
   })
 
   window.fetch = async (input, init) => {
@@ -117,10 +122,10 @@
     const payload = await response.clone().json().catch(() => null)
     if (!payload?.dshPrompt) return response
     try {
-      await requestPrompt(payload.dshPrompt, payload.state?.proposals?.length ?? 0)
-      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatched')
+      await requestPrompt(payload.dshPrompt, { submissionId: payload.submission?.id, reviewRunId: payload.reviewRun?.reviewRunId })
+      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatched', null, payload.reviewRun?.reviewRunId)
     } catch (error) {
-      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatch_failed', error.message).catch(() => undefined)
+      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatch_failed', error.message, payload.reviewRun?.reviewRunId).catch(() => undefined)
       throw error
     }
     const currentState = isReviewRequest

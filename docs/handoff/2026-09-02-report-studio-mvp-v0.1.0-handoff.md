@@ -1,5 +1,7 @@
 # Report Studio v0.1.0 MVP 开发 Handoff
 
+> **historical-reference**：此文件只描述 v0.1.0 当时状态，不是当前版本、发布状态或部署说明。请改读 `2026-09-03-report-studio-v0.1.1-stabilization-handoff.md`。
+
 ## 当前状态
 
 ```text

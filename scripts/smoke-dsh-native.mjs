@@ -5,27 +5,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
+import { resolveRequiredPluginPackage } from './release-integrity.mjs'
 
 const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || '@deepseek-ai/dsh@0.1.1-rc.2'
 const DSH_BIN = process.env.REPORT_STUDIO_DSH_BIN?.trim() || ''
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const sourcePlugin = join(root, 'packages', 'studio-dsh-plugin')
-const packagedPlugin = join(root, 'dist', 'architectureworld-report-studio-dsh-0.1.1.tgz')
-
-async function resolvePluginPackage() {
-  const configured = process.env.REPORT_STUDIO_PLUGIN_PACKAGE?.trim()
-  if (configured) {
-    const target = resolve(configured)
-    await access(target, constants.R_OK)
-    return target
-  }
-  try {
-    await access(packagedPlugin, constants.R_OK)
-    return packagedPlugin
-  } catch {
-    return sourcePlugin
-  }
-}
+const smokeWorkspace = resolve(root, 'contracts', 'presentation-standard-project', 'examples', 'unformatted-project', 'project_01992a80-0000-7000-8000-000000000101-campus-renewal-brief')
 
 async function resolveDshCommand() {
   if (DSH_BIN) {
@@ -133,10 +118,45 @@ async function waitForHealth(url, child, logs, timeoutMs = 120000) {
   throw new Error(`Timed out waiting for ${url}\n${logs()}`)
 }
 
+async function createSmokeSession(baseUrl, child, logs, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs
+  let lastResponse = 'DSH API 尚未响应'
+  const request = {
+    type: 'client-request',
+    rpcId: 'report-studio-smoke-session-create',
+    method: 'session.create',
+    payload: { sessionId: 'smoke-session', cwd: smokeWorkspace },
+  }
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`DSH exited before Session creation (${child.exitCode})\n${logs()}`)
+    let response
+    try {
+      response = await fetch(`${baseUrl}/api/session.create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+    } catch (error) {
+      lastResponse = String(error)
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
+      continue
+    }
+    if (!response.ok) {
+      lastResponse = `HTTP ${response.status}: ${await response.text()}`
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
+      continue
+    }
+    const payload = await response.json()
+    if (payload?.result?.ok === true && payload.result.value?.sessionId === 'smoke-session') return payload.result.value
+    throw new Error(`DSH Session creation failed: ${JSON.stringify(payload)}\n${logs()}`)
+  }
+  throw new Error(`Timed out creating smoke-session at ${baseUrl}: ${lastResponse}\n${logs()}`)
+}
+
 const home = await mkdtemp(join(tmpdir(), 'report-studio-dsh-home-'))
 const env = { ...process.env, DSH_HOME: home, CI: '1', NO_COLOR: '1' }
+const plugin = await resolveRequiredPluginPackage(process.env.REPORT_STUDIO_PLUGIN_PACKAGE, root)
 const dsh = await resolveDshCommand()
-const plugin = await resolvePluginPackage()
 const invoke = args => [dsh.command, [...dsh.prefix, ...args]]
 let child
 try {
@@ -149,7 +169,7 @@ try {
   })
 
   console.log(`DSH smoke 2/5: install Report Studio bundle into an isolated web profile (${plugin})`)
-  const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', plugin])
+  const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', '--workspace-root', plugin])
   await run(addCommand, addArgs, { cwd: root, env, timeoutMs: 600000 })
 
   console.log('DSH smoke 3/5: verify composed profile')
@@ -180,9 +200,11 @@ try {
     process.stderr.write(text)
   })
   const logs = () => `${stdout}\n${stderr}`
-  const healthUrl = `http://127.0.0.1:${port}/report-studio/api/health?sessionId=smoke-session`
+  const baseUrl = `http://127.0.0.1:${port}`
+  await createSmokeSession(baseUrl, child, logs)
+  const healthUrl = `${baseUrl}/report-studio/api/health?sessionId=smoke-session`
   const health = await waitForHealth(healthUrl, child, logs)
-  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true || health.migrationStatus !== 'ready') {
+  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true || health.migrationStatus !== 'ready' || health.securityMode !== 'local-single-user-only' || health.listenHost !== '127.0.0.1' || health.networkSharedSecurity !== false) {
     throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
   }
 

@@ -1,6 +1,6 @@
 # Presentation Tools — Report Studio v0.1.1
 
-Report Studio `v0.1.1` 是可部署的“大纲 + 草案”工作台：支持 A1.1 旧数据无损升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。正式排版、分页和 PPTX/PDF/HTML 成品导出属于 `v0.2.0`，当前界面会明确显示为未开放能力。
+Report Studio `v0.1.1` 是已完成稳定化验证、等待人工验收合并的“大纲 + 草案”候选工作台：代码包含 A1.1 旧数据升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。当前支线的双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均已有证据；PR 仍保持 Draft，未经人工验收不得合并 `main` 或发布 Release。正式排版、分页和 PPTX/PDF/HTML 成品导出属于后续范围，当前界面会明确显示为未开放能力。
 
 ## 产品边界
 
@@ -30,10 +30,15 @@ git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
 git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
+npm ci
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
-npm pack ./packages/studio-dsh-plugin --pack-destination ./dist
-dsh plugin --profile web add ./dist/architectureworld-report-studio-dsh-0.1.1.tgz
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+dsh plugin --profile web add ./.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
@@ -65,14 +70,42 @@ studio_apply_commands       幂等生成待确认 Proposal
 
 正式模式不需要 `REPORT_STUDIO_AGENT_URL`，也不会启动第二套 Agent Runtime。
 
+### Workspace Live Link
+
+DSH 插件会把当前会话的 `SessionHeader.cwd` 作为唯一可信 Workspace，调用 `studio_open_workspace_project` 自动识别并全量验证其中的 Presentation Standard Project Directory `0.1.0`。浏览器不会提交任意绝对路径，插件也不会扫描磁盘或把 DSH Profile 误当成项目目录。
+
+验证通过后，Workspace Live Link 读取大纲、页面草案、讲解稿、source materials 与正式 assets，并以默认 `750 ms` 项目级防抖监听 Contract 托管文件。连续写入、Windows rename 或目录替换都会先触发完整重扫；只有整个项目再次通过 Contract 验证后，才会向界面发布新候选。无效或未完成的上游写入会保留上一份合法快照，并在后续合法写入时自动恢复。
+
+- 本地没有未保存编辑：自动载入合法上游快照，并尽量保持 active page、展开状态和滚动位置。
+- 本地存在 dirty 编辑：绝不静默覆盖，用户可查看摘要、保存后重新加载、明确放弃后重新加载，或暂时保留当前版本。
+- `layouts/` 始终由 Presentation 管理；Workspace 其他资料也不会被 Live Link 读取、删除或重建。
+- 手动重新扫描可使用界面中的“重新读取 Workspace”或 DSH 工具 `studio_reload_upstream`。
+
+正式入口仍是 `http://127.0.0.1:3080/`。切换 DSH Workspace 后应重新进入当前 Session 的 `Report Studio` 标签，不能继续使用上一个 Workspace 的内容。发布门禁：
+
+```bash
+npm run verify:workspace
+```
+
+成功时输出 `PRESENTATION_WORKSPACE_LIVE_LINK_PASS`。
+
+### Session 安全边界
+
+当前验证基线 DSH `0.1.1-rc.2` 的 `webServer` 只提供 HTTP 路由与监听地址，未提供可把 iframe 请求绑定到可信服务端 Session 身份的 capability hook。因此本版本明确运行在 `securityMode=local-single-user-only`：DSH Web 与独立调试服务都必须监听 `127.0.0.1`，配置为 `0.0.0.0` 会拒绝启动；不支持多人或网络共享安全，也不把 query `sessionId` 宣称为认证。`/api/health` 会返回 `securityMode`、`listenHost` 和 `networkSharedSecurity=false`。Agent 工具的 Session 仍只取自 DSH exec context，模型参数不能选择其他 Session。
+
 ## 验证
 
 ```bash
 npm run verify:all
-npm run smoke:dsh
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
-`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 使用隔离的 DSH Home 安装 `dist` 中的发布 tarball、启动 Web Profile 并检查正式路由。真实模型生成质量仍需在实际 DSH 账号/模型环境中验收。
+`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 只安装 `REPORT_STUDIO_PLUGIN_PACKAGE` 明确指定的当前 checkout 新打 tarball，不会自动读取 `dist`。真实目标 Provider 已完成一次 `ReviewSubmission → Proposal → 人工接受 → 新 Revision → 重启恢复` 闭环；具体业务内容质量仍由实际项目验收决定。
 
 ## 独立调试
 

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createStudioServer } from '../apps/studio-local/server.mjs'
+import { createStudioId } from '../packages/studio-contracts/index.mjs'
 import { validateProjectDirectoryWithAjv } from '../contracts/presentation-standard-project/src/index.mjs'
 
 const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -38,8 +39,21 @@ const bridge = {
   async submit({ submission }) {
     return {
       message: '已生成标题优化建议。',
-      commands: [{ type: 'outline.rename', nodeId, title: '01 项目目标与实施边界' }],
+      commands: [{
+        commandId: createStudioId('command'),
+        type: 'draft.update',
+        scopeKey: submission.scopeKey,
+        baseRevision: submission.baseRevision,
+        riskLevel: 'ordinary_reversible',
+        sourceAnnotationIds: submission.annotationSnapshots.map(annotation => annotation.annotationId),
+        pageId: submission.pageId,
+        patch: { heading: '项目目标与实施边界' },
+      }],
       submissionId: submission.id,
+      projectId: submission.projectId,
+      baseRevision: submission.baseRevision,
+      scopeKey: submission.scopeKey,
+      idempotencyKey: submission.idempotencyKey,
       sessionRef: 'e2e-session',
     }
   },
@@ -66,6 +80,9 @@ try {
   const health = await fetch(`${baseUrl}/api/health`).then(response => response.json())
   assert.equal(health.version, 'v0.1.1')
   assert.equal(health.migrationStatus, 'migration_required')
+  assert.equal(health.securityMode, 'local-single-user-only')
+  assert.equal(health.listenHost, '127.0.0.1')
+  assert.equal(health.networkSharedSecurity, false)
 
   const migration = await post(baseUrl, '/api/migration/apply')
   assert.equal(migration.status, 'ready')
@@ -103,10 +120,10 @@ try {
   const review = await post(baseUrl, '/api/review/submit', { scopeKey: `draft:${pageId}` })
   assert.equal(review.submission.status, 'proposal_created')
   assert.ok(review.bridgeResult.proposalId)
-  assert.equal(review.state.outline[0].title, '01 项目目标')
+  assert.equal(review.state.pages[0].heading, '项目目标')
 
   const accepted = await post(baseUrl, `/api/proposal/${review.bridgeResult.proposalId}/accept`)
-  assert.equal(accepted.state.outline[0].title, '01 项目目标与实施边界')
+  assert.equal(accepted.state.pages[0].heading, '项目目标与实施边界')
   assert.equal(accepted.state.proposals[0].status, 'accepted')
   const acceptedRevision = accepted.state.project.currentRevision
 
@@ -116,7 +133,7 @@ try {
   baseUrl = `http://127.0.0.1:${app.port}`
   const recovered = await fetch(`${baseUrl}/api/state`).then(response => response.json())
   assert.equal(recovered.project.currentRevision, acceptedRevision)
-  assert.equal(recovered.outline[0].title, '01 项目目标与实施边界')
+  assert.equal(recovered.pages[0].heading, '项目目标与实施边界')
   assert.equal(recovered.proposals[0].status, 'accepted')
 
   const exported = await post(baseUrl, '/api/standard/export')
