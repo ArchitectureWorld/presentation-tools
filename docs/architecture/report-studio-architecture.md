@@ -1,11 +1,11 @@
 ---
 document_id: report-studio-architecture
 name: 通用汇报工作台架构开发文档
-status: production-baseline
-version: 1.1.0
-review_status: implementation-verified
+status: candidate
+version: 1.1.1
+review_status: stabilization-required
 review_method: user-approved-adversarial-self-review
-approved_for: report-studio-v0.1.1-deployment
+approved_for: report-studio-v0.1.1-stabilization-only
 updated_at: 2026-09-03
 language: zh-CN
 owners:
@@ -44,7 +44,22 @@ scope:
 
 > 本文件是本项目唯一的架构母文件。后续确认的架构、数据、交互和技术决策持续更新到本文件，不另建平行的“v2 / v3 架构文件”。文档头记录当前版本，末尾保留变更记录。
 
-> **当前生产基线：`1.1.0`，对应 Report Studio `v0.1.1`。** `1.0.0` 是开发前冻结版；`1.1.0` 记录已经实现并验证的 A1.1 迁移、Revision CAS、冻结评审上下文、标准项目 Adapter 和部署边界。后续改变已稳定规则必须新增 ADR 并提升文档版本。
+> **当前状态：Report Studio `v0.1.1` 候选收口中，不是生产基线。** `1.0.0` 是开发前冻结版；`1.1.0` 保留当时的设计与实施记录。`1.1.1` 只纠正验收状态、术语和部署边界：在 GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环及 main required checks 均有当前证据前，本文件不得被解读为可发布、可合并或生产可用的声明。
+
+### v0.1.1 能力矩阵
+
+| 能力 | 长期目标架构 | v0.1.1 已实现 | 当前暂缓 / 未验收 |
+|---|---|---|---|
+| Canonical 内容与 Revision | 稳定 ID、不可变 Snapshot、ProjectHead CAS | 已实现并有本地自动化覆盖 | GitHub 双平台当前 run 仍待取得 |
+| 标准项目 Adapter | 空白工作区初始化、稳定 ID 往返、staging 导出 | 已实现并有本地自动化覆盖 | 真实用户项目导入导出仍需人工验收 |
+| 二进制素材 | 内容寻址 Blob、受控读取、无 Base64 Canonical | 已实现并有本地自动化覆盖 | 完整正式 Asset Ingestion 工作流暂缓 |
+| 编辑器 | 页面 Draft Buffer、flush、冲突与 no-op 控制 | 已实现并有本地自动化覆盖 | 完整 React / TypeScript 重写暂缓 |
+| Review 与 Agent Command | Submission 冻结、严格命令、Proposal、ReviewRun | 已实现并有本地自动化覆盖 | 完整 ChangeSet 与正式风险策略暂缓；真实 Provider 闭环待验收 |
+| DSH 宿主 | `conversation.view`、同 Session 悬浮 Agent、原生外壳 | 插件集成和隔离 smoke 已实现 | 真实 DSH Web Shell 人工验收待记录 |
+| 安全与网络 | 可验证的服务端 Session Capability | 本版本仅 `local-single-user-only`、`127.0.0.1` | 多人 / 网络共享安全暂缓 |
+| 排版与成品导出 | 正式 Layout、分页、冻结成品导出 | 不在 v0.1.1 范围 | 暂缓至后续版本 |
+
+上述“已实现”仅陈述代码范围和自动化覆盖，不替代当前 GitHub、真实 DSH 宿主、真实 Provider 或 main 保护规则的验收证据。
 
 ## 0. 文档使用规则
 
@@ -62,7 +77,7 @@ scope:
 2. 前期策划、BIM 汇报、技术方案、论文答辩等均属于上层模板、规则包或内容能力，不进入平台核心领域模型。
 3. DSH Harness 是唯一的智能执行面，负责 Agent、Agent Preset、模型与 Provider 路由、Agent Loop、工具调用、子 Agent、Session 日志、取消与恢复。
 4. Report Studio 不自建第二套 Agent Runtime，不固定模型，不由 UI 直接调用模型，也不让排版引擎内置的 AI / MCP 形成第二条智能执行链。正式产品入口是 DSH Web 根地址 `http://127.0.0.1:3080/`；Report Studio 通过当前 Session 的 `conversation.view` 呈现。模型、推理等级、Session 与消息输入留在 DSH 原生外壳，`/report-studio` 只承担同源 iframe/独立工作台内容与 API，不构成第二套应用外壳。
-5. Report Studio 负责结构化业务事实：项目、大纲、页面、草案、素材、排版、批注、ReviewBatch、Proposal、Revision、审计与导出。
+5. Report Studio 负责结构化业务事实：项目、大纲、页面、草案、素材、批注、ReviewRound、ReviewSubmission、ReviewRun、Proposal、Revision、审计与受控标准项目导出；排版和成品导出不在 v0.1.1 范围。
 6. 人工界面、DSH Agent 工具和导出器围绕同一套 Canonical Model 工作；Tiptap、OpenPencil 或其他编辑器都只是 Adapter 后的交互与渲染实现。
 7. 所有可被选择、批注、修改、引用、同步或导出的对象都必须拥有稳定且类型明确的 ID。
 8. DSH Agent 不读取 DOM、React 状态、数据库表、编辑器私有 JSON 或未经筛选的整个项目；它读取平台生成的结构化语义投影。
@@ -103,6 +118,8 @@ scope:
 - 使用“批注”，不把评论系统另立为第二套模型；
 - 使用“DSH Agent”表示由 DSH Harness 管理和运行的 Agent；
 - 使用“项目内容 Revision”表示平台正式业务内容版本，不等同于 DSH Session Turn / Step。
+- **ReviewRound** 是用户可见的一轮评审；**ReviewSubmission** 是该轮内一次不可变提交；**ReviewRun** 是该 Submission 在当前 DSH Session 中的一次投递和执行关联。
+- `ReviewBatch` 是本文件早期设计叙述中的历史术语。除明确标记的历史记录外，当前 v0.1.1 语义一律使用 ReviewRound / ReviewSubmission / ReviewRun；不能把它们当成可互换的对象。
 
 ### 0.4 开发启动摘要【冻结】
 
@@ -2595,7 +2612,7 @@ npm 包 `@architectureworld/presentation-contracts@0.1.0` 提供 Schema、TypeSc
 
 权威最小 Fixture 和完整未排版示例位于 Contract 根目录。最终验证必须同时覆盖七类 Schema、空项目、两页示例、稳定 ID、跨文件引用、讲解稿引用、路径可移植性、MIME、`sizeBytes`、SHA-256、npm 打包和全新 consumer 安装；本标准支线不得修改 Report Studio UI、交互、批注、悬浮 Agent、排版或导出实现。
 
-### Report Studio v0.1.1 接入映射【已实现并验证】
+### Report Studio v0.1.1 接入映射【候选实现，待外部验收】
 
 `packages/studio-standard-adapter` 是标准目录与 Studio Canonical Snapshot 之间的唯一转换边界。导入保留标准稳定 ID、未知内容块和原始受管文件；导出只读取冻结 Revision，生成 Contract-valid 目录，并把 Studio 新增 data-URL 素材落盘后写入 Asset Manifest。已删除页面的历史 Draft 不得进入新导出。
 
@@ -2614,4 +2631,4 @@ Canonical 内容只包括项目、大纲、页面草案和页面素材。Annotat
 | ADR-067 | `sourceRefs` 只做 provider-neutral 来源追溯 | 已稳定 |
 | ADR-068 | Source Material 与正式 Asset 分离，文件以相对路径、`sizeBytes` 和 SHA-256 校验 | 已稳定 |
 | ADR-069 | 跨仓唯一消费单元为精确版本 npm Contract 包及 Schema Set Hash | 已稳定 |
-| ADR-070 | Report Studio 通过独立 Adapter 消费标准目录；Canonical、Operational、Control 三层不混写 | 已实现并验证 |
+| ADR-070 | Report Studio 通过独立 Adapter 消费标准目录；Canonical、Operational、Control 三层不混写 | 候选实现；外部验收待完成 |

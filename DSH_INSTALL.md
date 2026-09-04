@@ -1,6 +1,6 @@
 # Report Studio v0.1.1 — DSH 原生安装、升级与回滚
 
-本文件是部署入口。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。
+本文件是候选版本的部署入口。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。在 GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 未同时取得当前证据前，`v0.1.1` 仅可作为 stabilization candidate，不得视作可发布、可合并或生产可用。
 
 ## 固定基线
 
@@ -137,7 +137,7 @@ npm run smoke:dsh
 - `studio_get_context` 和 `studio_apply_commands` 已注册；
 - 原有 DSH 插件仍在，且没有把独立 `4173` 服务作为正式入口。
 
-自动化验证不等同于真实模型质量验收；模型是否能按业务意图生成满意建议，需要在目标账号、目标模型和真实项目资料中另行确认。
+自动化验证不等同于真实模型质量验收；模型是否能按业务意图生成满意建议、并完成 ReviewSubmission → Proposal → 接受 → 新 Revision 的真实闭环，需要在目标账号、目标模型和真实项目资料中另行确认。此前 `TRANSPORT / fetch failed` 不构成通过证据。
 
 ## 6. 回滚
 

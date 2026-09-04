@@ -1,6 +1,6 @@
 # Presentation Tools — Report Studio v0.1.1
 
-Report Studio `v0.1.1` 是可部署的“大纲 + 草案”工作台：支持 A1.1 旧数据无损升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。正式排版、分页和 PPTX/PDF/HTML 成品导出属于 `v0.2.0`，当前界面会明确显示为未开放能力。
+Report Studio `v0.1.1` 是处于收口验证中的“大纲 + 草案”候选工作台：代码包含 A1.1 旧数据升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。GitHub 双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均未同时具备当前证据前，不能将此分支视作可发布、可合并或生产可用。正式排版、分页和 PPTX/PDF/HTML 成品导出属于后续范围，当前界面会明确显示为未开放能力。
 
 ## 产品边界
 
