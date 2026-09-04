@@ -26,11 +26,16 @@ export async function inspectLegacyState(dataDir) {
   return { exists: true, path, bytes, state }
 }
 
-function mapLegacyState(legacy, migrationMap) {
+export function mapLegacyState(legacy, migrationMap, { requireExistingIds = false } = {}) {
   const ids = migrationMap.ids
   function mapped(oldId, kind) {
     if (oldId === null || oldId === undefined) return oldId
-    if (!ids[oldId]) ids[oldId] = createStudioId(kind)
+    if (!ids[oldId]) {
+      if (requireExistingIds) {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '历史迁移映射缺少稳定 ID。', { oldId, kind }, 500)
+      }
+      ids[oldId] = createStudioId(kind)
+    }
     return ids[oldId]
   }
   function reference(oldId) { return ids[oldId] ?? oldId }

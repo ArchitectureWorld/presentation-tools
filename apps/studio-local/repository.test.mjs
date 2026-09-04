@@ -103,6 +103,51 @@ test('reopens a legacy canonical snapshot by deriving required project identitie
   }
 })
 
+test('reopens a simplified historical canonical snapshot from its immutable legacy migration source', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-historical-canonical-'))
+  const createdAt = '2026-09-03T00:00:00.000Z'
+  const legacy = {
+    schemaVersion: 'report-studio.v0.1.1',
+    project: { id: 'project_old', title: '历史项目', currentRevision: 9, createdAt, updatedAt: createdAt },
+    outline: [{ id: 'outline_old', title: '历史章节', children: [] }],
+    pages: [{ id: 'page_old', outlineNodeId: 'outline_old', heading: '历史页面', body: '历史正文', bullets: ['历史要点'], script: '历史讲解稿', assets: [] }],
+    annotations: [], reviewRounds: [], reviewSubmissions: [], proposals: [], revisions: [], ui: { stage: 'draft', activePageId: 'page_old' },
+  }
+  await writeFile(join(dir, 'state.json'), `${JSON.stringify(legacy, null, 2)}\n`, 'utf8')
+  let repository = await createRepository(dir)
+  try {
+    await repository.applyMigration()
+    await repository.close()
+    repository = null
+    const controlPath = join(dir, 'control.json')
+    const control = JSON.parse(await readFile(controlPath, 'utf8'))
+    const revisionPath = join(dir, 'objects', 'sha256', `${control.projectHead.currentRevisionRef.sha256}.json`)
+    const revision = JSON.parse(await readFile(revisionPath, 'utf8'))
+    revision.snapshotRef = await replaceContentAddressedObject(dir, {
+      kind: 'CanonicalSnapshot',
+      value: { project: legacy.project, outline: legacy.outline, pages: legacy.pages },
+    })
+    control.projectHead.currentRevisionRef = await replaceContentAddressedObject(dir, revision)
+    await writeFile(controlPath, `${JSON.stringify(control, null, 2)}\n`, 'utf8')
+    const controlBeforeOpen = await readFile(controlPath, 'utf8')
+    const migrationMapBeforeOpen = await readFile(join(dir, 'migration-map.json'), 'utf8')
+
+    repository = await createRepository(dir)
+    const state = repository.getState()
+    const page = state.pages[0]
+    assert.match(state.outline[0].outlineNodeId, /^outline_node_[0-9a-f-]{36}$/)
+    assert.equal(page.outlineNodeId, state.outline[0].outlineNodeId)
+    assert.match(page.draftDocumentId, /^draft_page_[0-9a-f-]{36}$/)
+    assert.match(page.contentBlocks[0].contentBlockId, /^content_block_[0-9a-f-]{36}$/)
+    assert.match(page.scriptBlocks[0].scriptBlockId, /^script_block_[0-9a-f-]{36}$/)
+    assert.equal(await readFile(controlPath, 'utf8'), controlBeforeOpen)
+    assert.equal(await readFile(join(dir, 'migration-map.json'), 'utf8'), migrationMapBeforeOpen)
+  } finally {
+    await repository?.close?.()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('pending ReviewRun and immutable Submission persist across repository restart', async () => {
   await withRepository(async ({ dir, repository }) => {
     let submitted

@@ -14,7 +14,7 @@ import {
   createStudioId,
   projectStateFromParts,
 } from '../../packages/studio-contracts/index.mjs'
-import { inspectLegacyState, prepareLegacyMigration } from './migration.mjs'
+import { inspectLegacyState, mapLegacyState, prepareLegacyMigration } from './migration.mjs'
 
 const clone = value => structuredClone(value)
 
@@ -196,6 +196,30 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     return JSON.parse(payload)
   }
 
+  async function hydrateLegacyCanonicalSnapshot(snapshot, currentControl) {
+    const projectHydrated = hydrateLegacyCanonicalProject(snapshot)
+    try {
+      assertCanonicalSnapshot(projectHydrated)
+      return projectHydrated
+    } catch (error) {
+      const migration = currentControl.migration
+      if (error?.code !== ERROR_CODES.INVALID_REFERENCE || migration?.status !== 'completed' || !migration.legacyStateRef || typeof migration.mapPath !== 'string') throw error
+      const legacy = await getObject(migration.legacyStateRef)
+      if (legacy.kind !== 'LegacyState' || !legacy.value || typeof legacy.value !== 'object') {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '迁移记录未引用有效的原始 LegacyState。', undefined, 500)
+      }
+      let migrationMap
+      try { migrationMap = JSON.parse(await readFile(migration.mapPath, 'utf8')) }
+      catch (mapError) {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '无法读取历史迁移映射。', { cause: mapError.message }, 500)
+      }
+      if (!migrationMap?.ids || typeof migrationMap.ids !== 'object' || Array.isArray(migrationMap.ids)) {
+        throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, '历史迁移映射结构无效。', undefined, 500)
+      }
+      return canonicalFromState(mapLegacyState(legacy.value, migrationMap, { requireExistingIds: true }))
+    }
+  }
+
   async function putBlob(source, { mimeType, originalFileName, sizeBytes = null, sha256: expectedSha256 = null } = {}) {
     if (!source || typeof source[Symbol.asyncIterator] !== 'function') throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 输入必须是可流式读取的字节流。', undefined, 400)
     if (typeof mimeType !== 'string' || !mimeType || typeof originalFileName !== 'string' || !originalFileName) throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Blob 缺少 MIME 类型或原始文件名。', undefined, 400)
@@ -346,8 +370,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     }
     const stored = await getObject(revision.snapshotRef)
     if (stored.kind !== 'CanonicalSnapshot') throw new StudioError(ERROR_CODES.REPOSITORY_INTEGRITY_ERROR, 'Revision 未引用 Canonical Snapshot。', undefined, 500)
-    const snapshot = hydrateLegacyCanonicalProject(stored.value)
-    assertCanonicalSnapshot(snapshot)
+    const snapshot = await hydrateLegacyCanonicalSnapshot(stored.value, currentControl)
     return projectStateFromParts({
       snapshot,
       currentRevision: revision.revisionNumber,
