@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   ENGINE_BINDING_SCHEMA_VERSION,
   assertLayoutEngineBinding,
@@ -9,7 +8,7 @@ import {
 
 export const OPENPENCIL_ADAPTER_VERSION = '0.2.0-alpha.2'
 
-const ROOT_BINDING = 'rs_page'
+const ROOT_BINDING = 'b0'
 const SHAPE_TYPES = new Set(['rectangle', 'ellipse', 'line'])
 const TEXT_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'textAlign', 'textColor', 'opacity']
 const SHAPE_STYLE_KEYS = ['fill', 'stroke', 'strokeWidth', 'cornerRadius', 'opacity']
@@ -88,8 +87,8 @@ function assertRenderPlan(plan) {
   return plan
 }
 
-function bindingKeyForLayoutElement(layoutElementId) {
-  return `rs_el_${createHash('sha256').update(layoutElementId, 'utf8').digest('hex').slice(0, 16)}`
+function bindingKeyForElementIndex(index) {
+  return `b${index + 1}`
 }
 
 function copyWhitelistedStyle(node, style, keys) {
@@ -237,17 +236,17 @@ export function compileOpenPencilCreateTransaction(renderPlan, options = {}) {
     width: renderPlan.canvas.width,
     height: renderPlan.canvas.height,
   }
-  const operations = [`${ROOT_BINDING}=I(null,${JSON.stringify(rootNode)})`]
+  const operations = [`const ${ROOT_BINDING}=I(null,${JSON.stringify(rootNode)})`]
   const expectedBindings = []
   const bindingKeys = new Set()
-  for (const element of sortedElements) {
-    const bindingKey = bindingKeyForLayoutElement(element.layoutElementId)
+  for (const [index, element] of sortedElements.entries()) {
+    const bindingKey = bindingKeyForElementIndex(index)
     if (bindingKeys.has(bindingKey)) {
       fail('openpencil_invalid_render_plan', `LayoutElement binding hash collision: ${bindingKey}`, { bindingKey })
     }
     bindingKeys.add(bindingKey)
     expectedBindings.push({ bindingKey, layoutElementId: element.layoutElementId })
-    operations.push(`${bindingKey}=I(${ROOT_BINDING},${JSON.stringify(nodeForElement(element, options))})`)
+    operations.push(`const ${bindingKey}=I(${ROOT_BINDING},${JSON.stringify(nodeForElement(element, options))})`)
   }
   return {
     adapterVersion: OPENPENCIL_ADAPTER_VERSION,

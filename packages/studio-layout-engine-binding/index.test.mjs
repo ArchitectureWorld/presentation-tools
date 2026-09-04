@@ -59,6 +59,13 @@ test('valid OpenPencil engine binding is accepted without mutation', () => {
   assert.deepEqual(binding, before)
 })
 
+test('real OpenPencil sequential transaction binding keys are accepted', () => {
+  const binding = fixture()
+  binding.nodeMap[0].bindingKey = 'b1'
+  binding.nodeMap[1].bindingKey = 'b2'
+  assert.equal(assertLayoutEngineBinding(binding), binding)
+})
+
 test('duplicate layout element identities are rejected', () => {
   const binding = fixture()
   binding.nodeMap[1].layoutElementId = binding.nodeMap[0].layoutElementId

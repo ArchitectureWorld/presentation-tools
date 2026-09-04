@@ -5,7 +5,7 @@ export const OPENPENCIL_ENGINE_ADAPTER_VERSION = '0.2.0-alpha.2'
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 const BINDING_ID = new RegExp(`^layout_engine_binding_${UUID_V7.source.slice(1, -1)}$`, 'u')
-const BINDING_KEY = /^rs_el_[0-9a-f]{16}$/u
+const BINDING_KEY = /^(?:rs_el_[0-9a-f]{16}|b[1-9][0-9]*)$/u
 const SHA256_REF = /^sha256:[0-9a-f]{64}$/u
 
 export class LayoutEngineBindingError extends Error {

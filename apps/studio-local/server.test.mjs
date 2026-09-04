@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRepository } from './repository.mjs';
 import { createStudioServer } from './server.mjs';
 
@@ -96,7 +97,7 @@ test('HTTP API imports and exports a Contract-valid standard project', async () 
   const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
   try {
     const base = `http://127.0.0.1:${app.port}`;
-    const projectRoot = new URL('../../contracts/presentation-standard-project/fixtures/minimal/project_01992a80-0000-7000-8000-000000000001-minimal-project/', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/u, '$1');
+    const projectRoot = fileURLToPath(new URL('../../contracts/presentation-standard-project/fixtures/minimal/project_01992a80-0000-7000-8000-000000000001-minimal-project/', import.meta.url));
     const imported = await fetch(`${base}/api/standard/import`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ projectRoot }) });
     const importedText = await imported.text(); assert.equal(imported.status, 200, importedText);
     const importedPayload = JSON.parse(importedText);
