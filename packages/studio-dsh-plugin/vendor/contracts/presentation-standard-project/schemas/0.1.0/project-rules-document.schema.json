@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-rules-document.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "ProjectRulesDocument",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/project-rules-document.schema.json"
+    },
+    "documentType": {
+      "const": "ProjectRulesDocument"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "projectRulesId": {
+      "$ref": "common.schema.json#/$defs/projectRulesId"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "audiences": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "purposes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "language": {
+      "$ref": "common.schema.json#/$defs/languageTag"
+    },
+    "writingRules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "terminology": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      },
+      "propertyNames": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "truthConstraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "prohibitedContent": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "visualIntent": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "projectRulesId",
+    "projectId",
+    "audiences",
+    "purposes",
+    "language",
+    "writingRules",
+    "terminology",
+    "truthConstraints",
+    "visualIntent",
+    "prohibitedContent"
+  ]
+}

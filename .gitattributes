@@ -1,0 +1,17 @@
+* text=auto
+
+# Contract hashes are defined over repository bytes and must not change on Windows.
+contracts/presentation-standard-project/**/*.json text eol=lf
+contracts/presentation-standard-project/**/*.mjs text eol=lf
+contracts/presentation-standard-project/**/*.d.ts text eol=lf
+contracts/presentation-standard-project/**/*.md text eol=lf
+contracts/presentation-standard-project/**/*.csv text eol=lf
+contracts/presentation-standard-project/**/*.svg text eol=lf
+contracts/presentation-standard-project/SCHEMASET.sha256 text eol=lf
+contracts/presentation-standard-project/STANDARD_VERSION text eol=lf
+
+# Vendored Contract bytes must stay identical to the authoritative LF sources.
+packages/studio-dsh-plugin/vendor/contracts/presentation-standard-project/**/*.json text eol=lf
+packages/studio-dsh-plugin/vendor/contracts/presentation-standard-project/**/*.mjs text eol=lf
+packages/studio-dsh-plugin/vendor/contracts/presentation-standard-project/**/*.d.ts text eol=lf
+packages/studio-dsh-plugin/vendor/contracts/presentation-standard-project/SCHEMASET.sha256 text eol=lf

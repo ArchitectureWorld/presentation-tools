@@ -1,5 +1,7 @@
 # Report Studio UI × 架构整合 Review v0.1.0
 
+> **historical-reference**：此 Review 只记录 v0.1.0 当时裁定；其中 PASS 不能用于描述当前 v0.1.1。请改读 `2026-09-03-report-studio-v0.1.1-review-blockers-resolution.md`。
+
 ## 1. 结论
 
 本轮完成 UI 原型与整体架构的冲突裁决后，当前统一版本为：

@@ -35,7 +35,21 @@ async function getFreePort() {
 
 function findBrowser() {
   const configured = process.env.CHROMIUM_PATH;
-  const candidates = [configured, 'google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser'].filter(Boolean);
+  const windowsCandidates = process.platform === 'win32'
+    ? [
+        process.env.ProgramFiles && join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      ]
+    : [];
+  const candidates = [
+    configured,
+    ...windowsCandidates,
+    'google-chrome-stable',
+    'google-chrome',
+    'chromium',
+    'chromium-browser',
+  ].filter(Boolean);
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
     const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
@@ -44,10 +58,13 @@ function findBrowser() {
   throw new Error('未找到 Chromium/Chrome，请设置 CHROMIUM_PATH');
 }
 
-async function waitForJson(url, timeoutMs = 12000) {
+async function waitForJson(url, { browser, browserLogs, timeoutMs = 45000 } = {}) {
   const startedAt = Date.now();
   let lastError;
   while (Date.now() - startedAt < timeoutMs) {
+    if (browser?.exitCode !== null) {
+      throw new Error(`Chromium 在 DevTools 就绪前退出（exitCode=${browser.exitCode}）：\n${browserLogs?.() || ''}`);
+    }
     try {
       const response = await fetch(url);
       if (response.ok) return response.json();
@@ -56,7 +73,7 @@ async function waitForJson(url, timeoutMs = 12000) {
     }
     await delay(100);
   }
-  throw new Error(`Chromium DevTools 未就绪：${lastError?.message || url}`);
+  throw new Error(`Chromium DevTools 在 ${timeoutMs}ms 内未就绪：${lastError?.message || url}\n${browserLogs?.() || ''}`);
 }
 
 function createCdpClient(webSocketUrl) {
@@ -121,6 +138,13 @@ async function clickCenter(cdp, selector) {
   await delay(120);
 }
 
+async function pressTab(cdp, shift = false) {
+  const event = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, modifiers: shift ? 8 : 0 };
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
+  await delay(80);
+}
+
 async function waitFor(cdp, expression, description, timeoutMs = 7000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -131,17 +155,19 @@ async function waitFor(cdp, expression, description, timeoutMs = 7000) {
 }
 
 async function seed(baseUrl) {
+  let latest = await fetch(`${baseUrl}/api/state`).then(response => response.json());
   const post = async body => fetch(`${baseUrl}/api/action`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, baseRevision: latest.project.currentRevision }),
   }).then(async response => {
     const value = await response.json();
-    if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
-    return value;
+    if (!response.ok) throw new Error(value.error?.message || value.error || `HTTP ${response.status}`);
+    latest = value;
+    return latest;
   });
 
-  let state = await post({ type: 'project.rename', title: 'Report Studio v0.1.0 响应式验收' });
+  let state = await post({ type: 'project.rename', title: 'Report Studio v0.1.1 响应式验收' });
   state = await post({ type: 'outline.add', parentId: null, title: '项目背景与目标' });
   const rootId = state.outline[0].id;
   state = await post({ type: 'outline.add', parentId: rootId, title: '建设背景与现状' });
@@ -198,12 +224,17 @@ async function main() {
     `--user-data-dir=${browserProfile}`,
     'about:blank',
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let browserStdout = '';
+  let browserStderr = '';
+  browser.stdout.on('data', chunk => { browserStdout += chunk.toString(); });
+  browser.stderr.on('data', chunk => { browserStderr += chunk.toString(); });
+  const browserLogs = () => `${browserStdout}\n${browserStderr}`.trim();
   const browserExit = new Promise(resolve => browser.once('exit', resolve));
 
   let cdp;
   try {
-    await waitForJson(`http://127.0.0.1:${debuggingPort}/json/version`);
-    const targets = await waitForJson(`http://127.0.0.1:${debuggingPort}/json/list`);
+    await waitForJson(`http://127.0.0.1:${debuggingPort}/json/version`, { browser, browserLogs });
+    const targets = await waitForJson(`http://127.0.0.1:${debuggingPort}/json/list`, { browser, browserLogs });
     const pageTarget = targets.find(target => target.type === 'page');
     assert.ok(pageTarget, '缺少 Chromium 页面目标');
     cdp = createCdpClient(pageTarget.webSocketDebuggerUrl);
@@ -220,6 +251,43 @@ async function main() {
       fetch(`${baseUrl}/api/state`).then(response => response.json()),
       fetch(`${baseUrl}/api/health`).then(response => response.json()),
     ]);
+    const visualRoundId = 'review_round_visual';
+    const visualSubmissionId = 'review_submission_visual';
+    const visualCreatedAt = '2026-09-03T08:00:00.000Z';
+    const visualAnnotations = Array.from({ length: 16 }, (_, index) => ({
+      id: `annotation_visual_${index + 1}`,
+      scopeKey: 'outline:root',
+      reviewRoundId: visualRoundId,
+      target: { type: 'scope', id: 'outline:root', label: '整份大纲' },
+      instruction: `用于验证长批注列表中 Proposal 可发现性的批注 ${index + 1}`,
+      lifecycle: 'submitted',
+      resolution: 'open',
+      version: 1,
+      createdAgainstRevision: seededState.project.currentRevision,
+      createdAt: visualCreatedAt,
+      updatedAt: visualCreatedAt,
+    }));
+    seededState.annotations.push(...visualAnnotations);
+    seededState.reviewRounds.push({ id: visualRoundId, scopeKey: 'outline:root', status: 'open', createdAt: visualCreatedAt, updatedAt: visualCreatedAt });
+    seededState.reviewSubmissions.push({
+      id: visualSubmissionId,
+      reviewRoundId: visualRoundId,
+      number: 1,
+      baseRevision: seededState.project.currentRevision,
+      status: 'proposal_created',
+      annotations: visualAnnotations,
+      createdAt: visualCreatedAt,
+    });
+    seededState.proposals.push({
+      id: 'proposal_visual',
+      submissionId: visualSubmissionId,
+      reviewRoundId: visualRoundId,
+      baseRevision: seededState.project.currentRevision,
+      status: 'pending',
+      message: '长批注列表中的待确认修改建议',
+      commands: [],
+      createdAt: visualCreatedAt,
+    });
     const fetchStub = `
       <script>
         (() => {
@@ -254,6 +322,7 @@ async function main() {
     });
     await waitFor(cdp, `document.readyState === 'complete' && document.querySelector('#project-title')`, 'Report Studio 加载');
     await waitFor(cdp, `document.querySelector('#project-title').value.includes('响应式验收')`, '项目数据加载');
+    await cdp.evaluate(`document.documentElement.classList.add('report-studio-dsh-native')`);
 
     const results = [];
     for (const viewport of viewports) {
@@ -267,6 +336,12 @@ async function main() {
 
       await cdp.evaluate(`document.querySelector('[data-stage="outline"]').click()`);
       await waitFor(cdp, `document.querySelector('[data-stage="outline"]').classList.contains('active')`, '大纲阶段切换');
+      await cdp.evaluate(`document.querySelector('#proposal-attention').click()`);
+      await waitFor(cdp, `(() => {
+        const region = document.querySelector('.comment-scroll-region').getBoundingClientRect();
+        const button = document.querySelector('[data-proposal-id="proposal_visual"] [data-accept-proposal]')?.getBoundingClientRect();
+        return Boolean(button && button.top >= region.top - 1 && button.bottom <= region.bottom + 1);
+      })()`, `${viewport.name} Proposal 确认按钮进入可视范围`);
 
       const outlineMetrics = await cdp.evaluate(`(() => {
         const body = document.body;
@@ -274,6 +349,10 @@ async function main() {
         const stage = document.querySelector('.stage-workspace').getBoundingClientRect();
         const panel = document.querySelector('.comment-panel').getBoundingClientRect();
         const topbar = document.querySelector('.topbar').getBoundingClientRect();
+        const scrollRegion = document.querySelector('.comment-scroll-region').getBoundingClientRect();
+        const proposal = document.querySelector('[data-submission-id="${visualSubmissionId}"] [data-proposal-id="proposal_visual"]');
+        const proposalButton = proposal?.querySelector('[data-accept-proposal]');
+        const proposalButtonRect = proposalButton?.getBoundingClientRect();
         return {
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
@@ -284,6 +363,9 @@ async function main() {
           topbarHeight: topbar.height,
           colorScheme: getComputedStyle(document.documentElement).colorScheme,
           background: getComputedStyle(body).backgroundImage,
+          proposalGrouped: Boolean(proposal),
+          proposalAttentionVisible: !document.querySelector('#proposal-attention').hidden,
+          proposalButtonVisible: Boolean(proposalButtonRect && proposalButtonRect.top >= scrollRegion.top - 1 && proposalButtonRect.bottom <= scrollRegion.bottom + 1),
         };
       })()`);
 
@@ -292,6 +374,9 @@ async function main() {
       assert.ok(outlineMetrics.panelWidth >= 275, `${viewport.name} 批注栏过窄`);
       assert.equal(outlineMetrics.colorScheme, 'dark');
       assert.match(outlineMetrics.background, /gradient/i);
+      assert.equal(outlineMetrics.proposalGrouped, true, `${viewport.name} Proposal 未归入对应提交`);
+      assert.equal(outlineMetrics.proposalAttentionVisible, true, `${viewport.name} 未显示待确认提示`);
+      assert.equal(outlineMetrics.proposalButtonVisible, true, `${viewport.name} 待确认按钮未进入批注滚动区可视范围`);
 
       const outlineShot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
       await writeFile(join(screenshotDir, `${viewport.name}-outline.png`), Buffer.from(outlineShot.data, 'base64'));
@@ -315,21 +400,50 @@ async function main() {
       await writeFile(join(screenshotDir, `${viewport.name}-draft.png`), Buffer.from(draftShot.data, 'base64'));
 
       await clickCenter(cdp, '#agent-fab .agent-orb-image');
-      await waitFor(cdp, `!document.querySelector('#agent-modal').hidden`, 'Agent 弹窗打开');
+      await waitFor(cdp, `!document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗打开`);
       const agentState = await cdp.evaluate(`(() => ({
         status: document.querySelector('#agent-status').textContent.trim(),
+        fabDisplay: getComputedStyle(document.querySelector('#agent-fab')).display,
+        expanded: document.querySelector('#agent-fab').getAttribute('aria-expanded'),
+        workspaceInert: document.querySelector('#app').inert,
+        workspaceAriaHidden: document.querySelector('#app').getAttribute('aria-hidden'),
         modalWidth: document.querySelector('.agent-chat-card').getBoundingClientRect().width,
         modalHeight: document.querySelector('.agent-chat-card').getBoundingClientRect().height,
       }))()`);
       assert.equal(agentState.status, 'DSH Bridge 未配置 · 可正常人工编辑');
+      assert.notEqual(agentState.fabDisplay, 'none', `${viewport.name} 原生 iframe 隐藏了 Agent FAB`);
+      assert.equal(agentState.expanded, 'true');
+      assert.equal(agentState.workspaceInert, true);
+      assert.equal(agentState.workspaceAriaHidden, 'true');
       assert.ok(agentState.modalWidth <= viewport.width - 10, `${viewport.name} Agent 弹窗超出窗口宽度`);
       assert.ok(agentState.modalHeight <= viewport.height - 10, `${viewport.name} Agent 弹窗超出窗口高度`);
+      if (viewport.width >= 1024) {
+        assert.ok(agentState.modalWidth / viewport.width >= 0.75 && agentState.modalWidth / viewport.width <= 0.85, `${viewport.name} Agent 弹窗宽度不是约 80%`);
+        assert.ok(agentState.modalHeight / viewport.height >= 0.75 && agentState.modalHeight / viewport.height <= 0.85, `${viewport.name} Agent 弹窗高度不是约 80%`);
+      }
 
       const agentShot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
       await writeFile(join(screenshotDir, `${viewport.name}-agent.png`), Buffer.from(agentShot.data, 'base64'));
 
+      await cdp.evaluate(`document.querySelector('#agent-send').focus()`);
+      await pressTab(cdp);
+      assert.equal(await cdp.evaluate(`document.activeElement === document.querySelector('#agent-close')`), true, `${viewport.name} Tab 未从末尾循环到首项`);
+      await cdp.evaluate(`document.querySelector('#agent-close').focus()`);
+      await pressTab(cdp, true);
+      assert.equal(await cdp.evaluate(`document.activeElement === document.querySelector('#agent-send')`), true, `${viewport.name} Shift+Tab 未从首项循环到末尾`);
+
       await clickCenter(cdp, '#agent-close');
-      await waitFor(cdp, `document.querySelector('#agent-modal').hidden`, 'Agent 弹窗关闭');
+      await waitFor(cdp, `document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗关闭`);
+      const closedAgentState = await cdp.evaluate(`(() => ({
+        expanded: document.querySelector('#agent-fab').getAttribute('aria-expanded'),
+        focusReturned: document.activeElement === document.querySelector('#agent-fab'),
+        workspaceInert: document.querySelector('#app').inert,
+        workspaceAriaHidden: document.querySelector('#app').getAttribute('aria-hidden'),
+      }))()`);
+      assert.equal(closedAgentState.expanded, 'false');
+      assert.equal(closedAgentState.focusReturned, true);
+      assert.equal(closedAgentState.workspaceInert, false);
+      assert.equal(closedAgentState.workspaceAriaHidden, null);
       results.push({ viewport: viewport.name, outlineMetrics, draftMetrics, agentState });
     }
 

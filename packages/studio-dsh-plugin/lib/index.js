@@ -2,11 +2,15 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createStudioDshRuntime } from './runtime.js'
+import { STUDIO_APPLY_COMMANDS_SCHEMA, errorPayload } from '../vendor/packages/studio-contracts/index.mjs'
+import { createStandardProjectService } from '../vendor/apps/studio-local/standard-project.mjs'
+import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/asset-service.mjs'
 
 export const name = 'report-studio-dsh'
-export const inject = ['tools', 'webServer', 'systemPrompt']
+export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions']
+const SECURITY_MODE = 'local-single-user-only'
 
-const publicDir = fileURLToPath(new URL('../../../apps/studio-local/public/', import.meta.url))
+const publicDir = fileURLToPath(new URL('../vendor/apps/studio-local/public/', import.meta.url))
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -67,8 +71,8 @@ function toolOutput() {
 
 function registerTools(ctx, runtime) {
   ctx.tools.register({
-    name: 'studio_get_context',
-    description: '读取当前 DSH Session 绑定的 Report Studio v0.1.0 大纲、草案、批注轮次、Submission、Proposal 与 Revision 上下文。修改前必须先调用。',
+    name: 'studio_open_workspace_project',
+    description: '从当前 DSH Session 的 header.cwd 打开并验证 Presentation Standard Project Directory 0.1.0。不会接受浏览器或 Agent 提供的绝对路径。',
     parameters: {
       type: 'object',
       properties: {},
@@ -76,40 +80,45 @@ function registerTools(ctx, runtime) {
     },
     output: toolOutput(),
     async execute(_args, exec) {
-      return outputJson(await runtime.getContext(sessionIdOf(exec)))
+      return outputJson(await runtime.openWorkspace(sessionIdOf(exec)))
+    },
+  })
+
+  ctx.tools.register({
+    name: 'studio_reload_upstream',
+    description: '重新扫描当前 DSH Session Workspace 并执行 Contract 全量验证；存在待应用更新时由 Report Studio 界面决定是否载入。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    output: toolOutput(),
+    async execute(_args, exec) {
+      return outputJson(await runtime.reloadWorkspace(sessionIdOf(exec), { dirty: true }))
+    },
+  })
+
+  ctx.tools.register({
+    name: 'studio_get_context',
+    description: '按不可变 ReviewSubmission 的 baseRevision 读取 Report Studio v0.1.1 大纲、草案和批注快照。修改前必须先调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        submissionId: { type: 'string', description: 'ReviewSubmission 提示中提供的稳定 ID。' },
+      },
+      required: ['submissionId'],
+      additionalProperties: false,
+    },
+    output: toolOutput(),
+    async execute(args, exec) {
+      return outputJson(await runtime.getContext(sessionIdOf(exec), args.submissionId))
     },
   })
 
   ctx.tools.register({
     name: 'studio_apply_commands',
     description: '根据一个不可变 ReviewSubmission 提交结构化修改命令并创建 Proposal。该工具不会直接覆盖正式内容，仍需用户在 Report Studio 中确认。',
-    parameters: {
-      type: 'object',
-      properties: {
-        submissionId: {
-          type: 'string',
-          description: 'ReviewSubmission 提示中提供的稳定 ID。',
-        },
-        message: {
-          type: 'string',
-          description: '面向用户的修改说明。',
-        },
-        commands: {
-          type: 'array',
-          description: 'Report Studio 受控结构化命令数组。',
-          items: {
-            type: 'object',
-            properties: {
-              type: { type: 'string' },
-            },
-            required: ['type'],
-            additionalProperties: true,
-          },
-        },
-      },
-      required: ['submissionId', 'message', 'commands'],
-      additionalProperties: false,
-    },
+    parameters: structuredClone(STUDIO_APPLY_COMMANDS_SCHEMA),
     output: toolOutput(),
     async execute(args, exec) {
       return outputJson(await runtime.applyCommands(sessionIdOf(exec), args))
@@ -140,31 +149,66 @@ async function serveStatic(request, response, url) {
   }
 }
 
-function createRoute(runtime) {
+function createRoute(runtime, listenHost) {
   return async (request, response) => {
     const url = new URL(request.url ?? '/report-studio', 'http://dsh.local')
     try {
       if (url.pathname.startsWith('/report-studio/api/')) {
         const sessionId = sessionIdFrom(url)
+        if (request.method === 'GET' && url.pathname === '/report-studio/api/workspace/status') {
+          return sendJson(response, 200, await runtime.workspaceStatus(sessionId))
+        }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/workspace/reload') {
+          return sendJson(response, 200, await runtime.reloadWorkspace(sessionId, await readJson(request)))
+        }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/workspace/apply') {
+          return sendJson(response, 200, await runtime.applyWorkspaceCandidate(sessionId, await readJson(request)))
+        }
+        const repository = await runtime.repositoryFor(sessionId)
+        const standardProject = createStandardProjectService(repository)
         if (request.method === 'GET' && url.pathname === '/report-studio/api/health') {
           return sendJson(response, 200, {
             ok: true,
-            version: 'v0.1.0',
+            version: 'v0.1.1',
             agentConfigured: true,
             agentMode: 'dsh-native',
             sessionId,
+            securityMode: SECURITY_MODE,
+            listenHost,
+            networkSharedSecurity: false,
             dataRoot: runtime.dataRoot,
+            migrationStatus: repository.migrationStatus().status,
           })
         }
+        if (request.method === 'GET' && url.pathname === '/report-studio/api/migration/status') return sendJson(response, 200, repository.migrationStatus())
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/migration/apply') return sendJson(response, 200, await repository.applyMigration())
+        if (request.method === 'GET' && url.pathname === '/report-studio/api/standard/status') return sendJson(response, 200, standardProject.status())
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/standard/import') {
+          const input = await readJson(request)
+          return sendJson(response, 200, await standardProject.importProject(input.projectRoot))
+        }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/standard/export') return sendJson(response, 200, await standardProject.exportProject())
         if (request.method === 'GET' && url.pathname === '/report-studio/api/state') {
           return sendJson(response, 200, await runtime.getState(sessionId))
         }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/assets/ingest') {
+          const pageId = url.searchParams.get('pageId')
+          const mimeType = String(request.headers?.['content-type'] ?? '').split(';', 1)[0].toLowerCase()
+          const originalFileName = String(request.headers?.['x-file-name'] ?? 'upload').replace(/[\\/\0]/g, '_')
+          return sendJson(response, 200, await ingestAsset({ repository, request, pageId, mimeType, originalFileName }))
+        }
+        const contentMatch = url.pathname.match(/^\/report-studio\/api\/assets\/([^/]+)\/content$/)
+        if (request.method === 'GET' && contentMatch) return await serveReferencedAsset({ repository, assetId: decodeURIComponent(contentMatch[1]), response })
         if (request.method === 'POST' && url.pathname === '/report-studio/api/action') {
           return sendJson(response, 200, await runtime.executeAction(sessionId, await readJson(request)))
         }
         if (request.method === 'POST' && url.pathname === '/report-studio/api/review/submit') {
           return sendJson(response, 200, await runtime.submitReview(sessionId, await readJson(request)))
         }
+        const retryMatch = url.pathname.match(/^\/report-studio\/api\/review\/([^/]+)\/retry$/)
+        if (request.method === 'POST' && retryMatch) return sendJson(response, 200, await runtime.retrySubmission(sessionId, decodeURIComponent(retryMatch[1])))
+        const dispatchMatch = url.pathname.match(/^\/report-studio\/api\/review\/([^/]+)\/dispatch$/)
+        if (request.method === 'POST' && dispatchMatch) return sendJson(response, 200, await runtime.updateDispatch(sessionId, decodeURIComponent(dispatchMatch[1]), await readJson(request)))
         if (request.method === 'POST' && url.pathname === '/report-studio/api/agent/chat') {
           return sendJson(response, 200, await runtime.prepareChat(sessionId, await readJson(request)))
         }
@@ -172,31 +216,44 @@ function createRoute(runtime) {
         if (request.method === 'POST' && match) {
           return sendJson(response, 200, await runtime.acceptProposal(sessionId, decodeURIComponent(match[1])))
         }
+        const proposalActionMatch = url.pathname.match(/^\/report-studio\/api\/proposal\/([^/]+)\/(reject|return)$/)
+        if (request.method === 'POST' && proposalActionMatch) {
+          const proposalId = decodeURIComponent(proposalActionMatch[1])
+          return sendJson(response, 200, proposalActionMatch[2] === 'reject'
+            ? await runtime.rejectProposal(sessionId, proposalId)
+            : await runtime.returnProposal(sessionId, proposalId))
+        }
         return sendJson(response, 404, { error: 'not_found' })
       }
       if (await serveStatic(request, response, url)) return
       sendJson(response, 404, { error: 'not_found' })
     } catch (error) {
-      sendJson(response, error?.statusCode || 400, { error: error?.message || 'request_failed' })
+      sendJson(response, error?.statusCode || 400, error?.code ? errorPayload(error) : { error: error?.message || 'request_failed' })
     }
   }
 }
 
 export function apply(ctx, config = {}) {
-  const runtime = createStudioDshRuntime({ dataRoot: config.dataDir })
+  if (ctx.webServer.host !== '127.0.0.1') {
+    throw new Error(`${SECURITY_MODE} requires DSH webServer host 127.0.0.1`)
+  }
+  const runtime = createStudioDshRuntime({ dataRoot: config.dataDir, sessions: ctx.sessions })
   registerTools(ctx, runtime)
   ctx.systemPrompt.section({
-    name: 'report-studio-v0.1.0',
+    name: 'report-studio-v0.1.1',
     order: 130,
     text: [
-      'Report Studio v0.1.0 is available in this DSH Session.',
-      'For Report Studio review tasks, call studio_get_context before proposing changes.',
+      'Report Studio v0.1.1 is available in this DSH Session.',
+      'For Report Studio review tasks, call studio_get_context with the supplied submissionId before proposing changes.',
       'Use studio_apply_commands only with the ReviewSubmission ID supplied by the user task.',
       'studio_apply_commands creates a Proposal for human confirmation and never directly commits Project State.',
     ].join('\n'),
   })
-  ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime) }),
-    'report-studio-dsh: web route',
-  )
+  ctx.effect(() => {
+    const unregister = ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime, ctx.webServer.host) })
+    return async () => {
+      unregister?.()
+      await runtime.close()
+    }
+  }, 'report-studio-dsh: web route')
 }

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.architecture.world/presentation-standard-project/0.1.0/source-material-manifest.schema.json",
+  "$comment": "Presentation Standard Project Directory 0.1.0",
+  "title": "SourceMaterialManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://contracts.architecture.world/presentation-standard-project/0.1.0/source-material-manifest.schema.json"
+    },
+    "documentType": {
+      "const": "SourceMaterialManifest"
+    },
+    "standardVersion": {
+      "$ref": "common.schema.json#/$defs/standardVersion"
+    },
+    "projectId": {
+      "$ref": "common.schema.json#/$defs/projectId"
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceMaterialId": {
+            "$ref": "common.schema.json#/$defs/sourceMaterialId"
+          },
+          "originalFileName": {
+            "$ref": "common.schema.json#/$defs/fileName"
+          },
+          "alternateOriginalFileNames": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/fileName"
+            },
+            "uniqueItems": true
+          },
+          "category": {
+            "enum": [
+              "document",
+              "drawing",
+              "image",
+              "video",
+              "data",
+              "model",
+              "other"
+            ]
+          },
+          "relativePath": {
+            "$ref": "common.schema.json#/$defs/relativePath"
+          },
+          "mimeType": {
+            "$ref": "common.schema.json#/$defs/mimeType"
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "importedAt": {
+            "$ref": "common.schema.json#/$defs/dateTime"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "archived",
+              "missing",
+              "quarantined"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sourceMaterialId",
+          "originalFileName",
+          "category",
+          "relativePath",
+          "mimeType",
+          "sizeBytes",
+          "sha256",
+          "importedAt",
+          "status"
+        ]
+      }
+    }
+  },
+  "required": [
+    "$schema",
+    "documentType",
+    "standardVersion",
+    "projectId",
+    "materials"
+  ]
+}

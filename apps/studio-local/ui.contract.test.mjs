@@ -5,10 +5,10 @@ import { join } from 'node:path';
 
 const root = new URL('./public/', import.meta.url);
 
-test('UI exposes v0.1.0 outline draft workflow and defers layout', async () => {
+test('UI exposes v0.1.1 outline draft workflow, migration Gate and standard project controls', async () => {
   const html = await readFile(new URL('index.html', root), 'utf8');
   assert.match(html, /Report Studio/);
-  assert.match(html, /v0\.1\.0/);
+  assert.match(html, /v0\.1\.1/);
   assert.match(html, /<link rel="icon" href="data:,">/);
   assert.match(html, /data-stage="outline"/);
   assert.match(html, /data-stage="draft"/);
@@ -19,6 +19,17 @@ test('UI exposes v0.1.0 outline draft workflow and defers layout', async () => {
   assert.match(html, /project-brand/);
   assert.match(html, /workspace-shell/);
   assert.match(html, /comment-scroll-region/);
+  assert.match(html, /id="migration-gate"/);
+  assert.match(html, /id="migration-apply"/);
+  assert.match(html, /id="standard-project-modal"/);
+  assert.match(html, /id="standard-import-path"/);
+  assert.match(html, /id="standard-export"/);
+  assert.match(html, /id="workspace-sync-toggle"/);
+  assert.match(html, /id="workspace-sync-panel"/);
+  assert.match(html, /id="workspace-conflict-banner"/);
+  for (const action of ['workspace-view-update', 'workspace-save-reload', 'workspace-discard-reload', 'workspace-keep-current']) {
+    assert.match(html, new RegExp(`data-${action}`));
+  }
 });
 
 test('browser app contains production actions for outline, draft, review and proposal', async () => {
@@ -26,5 +37,14 @@ test('browser app contains production actions for outline, draft, review and pro
   for (const token of ['outline.add', 'outline.rename', 'draft.ensurePage', 'draft.update', 'annotation.add', '/api/review/submit', '/accept']) {
     assert.ok(app.includes(token), `missing ${token}`);
   }
+  assert.match(app, /baseRevision:\s*state\.project\.currentRevision/);
+  assert.match(app, /\/api\/migration\/apply/);
+  assert.match(app, /\/api\/standard\/import/);
+  assert.match(app, /\/api\/standard\/export/);
+  assert.match(app, /data-retry-submission/);
+  assert.match(app, /\/api\/workspace\/status/);
+  assert.match(app, /\/api\/workspace\/reload/);
+  assert.match(app, /\/api\/workspace\/apply/);
+  assert.match(app, /stale_revision/);
   assert.doesNotMatch(app, /generateAgentReply|setTimeout\([^)]*Agent/);
 });

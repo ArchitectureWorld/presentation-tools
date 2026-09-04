@@ -7,7 +7,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
   ERROR_CODES, STANDARD_NAME, STANDARD_VERSION, createProjectDirectoryPlan, createStableId,
-  isStableId, validateDocumentWithAjv, validateProjectDirectoryWithAjv,
+  isStableId, portabilityKey, validateDocumentWithAjv, validateProjectDirectoryWithAjv,
 } from '../src/index.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -78,9 +78,12 @@ test('speaker-note references are checked against page blocks and formal assets'
 test('Unicode NFC and case-folded path collisions are rejected', async () => {
   const { parent, target } = await tempCopy(minimal)
   try {
-    await writeFile(path.join(target, 'layouts', 'A.txt'), 'a')
-    await writeFile(path.join(target, 'layouts', 'a.txt'), 'b')
+    assert.equal(portabilityKey('layouts/A.txt'), portabilityKey('layouts/a.txt'))
+    const names = process.platform === 'win32' ? ['é.txt', 'e\u0301.txt'] : ['A.txt', 'a.txt']
+    await writeFile(path.join(target, 'layouts', names[0]), 'a')
+    await writeFile(path.join(target, 'layouts', names[1]), 'b')
     const result = await validateProjectDirectoryWithAjv(target, { allowGitKeep: true })
-    assert.ok(result.errors.some(error => error.code === ERROR_CODES.PATH_PORTABILITY_COLLISION))
+    const expectedCode = process.platform === 'win32' ? ERROR_CODES.PATH_NOT_NFC : ERROR_CODES.PATH_PORTABILITY_COLLISION
+    assert.ok(result.errors.some(error => error.code === expectedCode))
   } finally { await rm(parent, { recursive: true, force: true }) }
 })

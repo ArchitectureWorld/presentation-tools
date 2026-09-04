@@ -1,6 +1,6 @@
 {
   "plugin": "@architectureworld/report-studio-dsh",
-  "pluginVersion": "0.1.0",
+  "pluginVersion": "0.1.1",
   "testedDshVersion": "0.1.1-rc.2",
   "testedProfile": "web",
   "hostServices": ["tools", "webServer", "systemPrompt"],

@@ -1,69 +1,129 @@
-# Presentation Tools — Report Studio v0.1.0
+# Presentation Tools — Report Studio v0.1.1
 
-Report Studio `v0.1.0` 当前正式范围是大纲、草案、批注、DSH 原生 Agent、Proposal/Revision 与持久化。正式排版进入 `v0.2.0`。
+Report Studio `v0.1.1` 是已完成稳定化验证、等待人工验收合并的“大纲 + 草案”候选工作台：代码包含 A1.1 旧数据升级、Revision CAS、批注评审、DSH 原生 Proposal 流程，以及 Presentation Standard Project Directory `0.1.0` 的导入/导出。当前支线的双平台门禁、真实 DSH Web Shell、真实目标 Provider Proposal 闭环和 main required checks 均已有证据；PR 仍保持 Draft，未经人工验收不得合并 `main` 或发布 Release。正式排版、分页和 PPTX/PDF/HTML 成品导出属于后续范围，当前界面会明确显示为未开放能力。
 
-## 当前部署基线
+## 产品边界
 
 ```text
-Branch: main
-DSH plugin: @architectureworld/report-studio-dsh@0.1.0
-Tested DSH: 0.1.1-rc.2
-Profile: web
+标准项目目录 0.1.0  ←→  Studio Adapter  ←→  Canonical Revision
+                                              ├─ 大纲 / 草案 / 素材
+                                              └─ DSH Submission / Proposal（运行态）
 ```
 
-当前正式部署来源为 `main`。
+标准目录只承载可交换的项目内容；批注、Submission、Proposal、DSH Session、Head/CAS 和界面状态不会写入标准目录。这样既保持结构文件中立，也让当前 UI、产品架构和底层存储使用同一条受控数据链。
 
-## DSH 原生安装
+## 部署基线
+
+```text
+Branch: feat/report-studio-v0.1.1-hardening
+Report Studio: 0.1.1
+DSH plugin: @architectureworld/report-studio-dsh@0.1.1
+Tested DSH: 0.1.1-rc.2
+Profile: web
+Node.js: 22+
+```
+
+## 安装
 
 ```bash
 git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
-git checkout main
+git checkout feat/report-studio-v0.1.1-hardening
 git pull --ff-only
-corepack enable
-dsh plugin --profile web add ./packages/studio-dsh-plugin
+npm ci
+npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+npm run verify:all
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+dsh plugin --profile web add ./.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
 
-进入 DSH Session 后，选择 `Report Studio` 会话视图，或点击会话头部的 `Report Studio` 入口。
+正式入口统一为 `http://127.0.0.1:3080/`：先在 DSH 中选择或创建 Session，再点击会话顶部的 `Report Studio` 标签；模型和推理等级继续在 DSH 底部原生控制栏选择。不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。
 
-完整部署说明：[`DSH_INSTALL.md`](DSH_INSTALL.md)。
+会话头部的 `Report Studio · 独立打开` 只是带提示的备用动作。独立窗口不显示 DSH 模型、推理等级、Session 侧栏或主对话区。完整备份、升级和回滚说明见 [DSH_INSTALL.md](DSH_INSTALL.md)。
 
-## 原生 DSH 能力
+## A1.1 旧数据升级
+
+检测到旧 `state.json` 时，工作台保持只读并显示“备份并升级”。只有用户确认后才会：
+
+1. 逐字节备份旧文件；
+2. 生成并持久化稳定 ID 映射；
+3. 校验候选对象和引用；
+4. 原子发布新 `control.json`。
+
+旧 `state.json` 不会被覆盖或删除；失败时不会切换 Head，可使用同一映射重试。
+
+## DSH 原生能力
 
 ```text
-/report-studio              DSH 同源 UI/API 路由
+/report-studio              DSH 同源内部 UI/API 路由，不是正式入口
 conversation.view           Report Studio 会话视图
-session.header.actions      Report Studio 入口
-studio_get_context          受控项目上下文
-studio_apply_commands       生成待确认 Proposal
+session.header.actions      明确标注的独立打开备用动作
+studio_get_context          按 Submission 冻结 Revision 读取上下文
+studio_apply_commands       幂等生成待确认 Proposal
 ```
 
-项目 Agent 和批注提交通过当前 DSH Session 的 `session.prompt(..., 'queue')` 进入 Harness。正式 DSH 模式不需要 `REPORT_STUDIO_AGENT_URL`。
+正式模式不需要 `REPORT_STUDIO_AGENT_URL`，也不会启动第二套 Agent Runtime。
 
-## 完整验证
+### Workspace Live Link
+
+DSH 插件会把当前会话的 `SessionHeader.cwd` 作为唯一可信 Workspace，调用 `studio_open_workspace_project` 自动识别并全量验证其中的 Presentation Standard Project Directory `0.1.0`。浏览器不会提交任意绝对路径，插件也不会扫描磁盘或把 DSH Profile 误当成项目目录。
+
+验证通过后，Workspace Live Link 读取大纲、页面草案、讲解稿、source materials 与正式 assets，并以默认 `750 ms` 项目级防抖监听 Contract 托管文件。连续写入、Windows rename 或目录替换都会先触发完整重扫；只有整个项目再次通过 Contract 验证后，才会向界面发布新候选。无效或未完成的上游写入会保留上一份合法快照，并在后续合法写入时自动恢复。
+
+- 本地没有未保存编辑：自动载入合法上游快照，并尽量保持 active page、展开状态和滚动位置。
+- 本地存在 dirty 编辑：绝不静默覆盖，用户可查看摘要、保存后重新加载、明确放弃后重新加载，或暂时保留当前版本。
+- `layouts/` 始终由 Presentation 管理；Workspace 其他资料也不会被 Live Link 读取、删除或重建。
+- 手动重新扫描可使用界面中的“重新读取 Workspace”或 DSH 工具 `studio_reload_upstream`。
+
+正式入口仍是 `http://127.0.0.1:3080/`。切换 DSH Workspace 后应重新进入当前 Session 的 `Report Studio` 标签，不能继续使用上一个 Workspace 的内容。发布门禁：
+
+```bash
+npm run verify:workspace
+```
+
+成功时输出 `PRESENTATION_WORKSPACE_LIVE_LINK_PASS`。
+
+### Session 安全边界
+
+当前验证基线 DSH `0.1.1-rc.2` 的 `webServer` 只提供 HTTP 路由与监听地址，未提供可把 iframe 请求绑定到可信服务端 Session 身份的 capability hook。因此本版本明确运行在 `securityMode=local-single-user-only`：DSH Web 与独立调试服务都必须监听 `127.0.0.1`，配置为 `0.0.0.0` 会拒绝启动；不支持多人或网络共享安全，也不把 query `sessionId` 宣称为认证。`/api/health` 会返回 `securityMode`、`listenHost` 和 `networkSharedSecurity=false`。Agent 工具的 Session 仍只取自 DSH exec context，模型参数不能选择其他 Session。
+
+## 验证
 
 ```bash
 npm run verify:all
-npm run smoke:dsh
+npm run sync:vendor
+git diff --exit-code -- packages/studio-dsh-plugin/vendor
+rm -rf .tmp/report-studio-pack
+mkdir -p .tmp/report-studio-pack
+npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
-`smoke:dsh` 会用临时 DSH Home 真实安装插件、启动 Web Profile 并检查原生路由。
+`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 只安装 `REPORT_STUDIO_PLUGIN_PACKAGE` 明确指定的当前 checkout 新打 tarball，不会自动读取 `dist`。真实目标 Provider 已完成一次 `ReviewSubmission → Proposal → 人工接受 → 新 Revision → 重启恢复` 闭环；具体业务内容质量仍由实际项目验收决定。
 
-## 独立调试模式
+## 独立调试
 
-`npm start` 仍可用于独立调试；正式使用以 DSH 原生插件为准。
+```bash
+npm start
+```
+
+独立开发服务默认监听 `127.0.0.1:4173`，只用于源码调试，不得作为正式部署入口。正式使用始终从 `http://127.0.0.1:3080/` 进入 DSH 原生界面。同一数据目录只允许一个 Node.js 进程写入。
 
 <!-- PRESENTATION_STANDARD_PROJECT_V0_1_0_START -->
 
 ## Presentation 标准项目格式 0.1.0
 
-标准项目文件 Contract 位于 [`contracts/presentation-standard-project`](contracts/presentation-standard-project)，供 `pre-design` 等上游 DSH 插件以精确版本创建、填写和验证中立项目目录。该 Contract 不承担 Agent、审批、Revision、同步或调用方恢复职责。
+中立 Contract 位于 [`contracts/presentation-standard-project`](contracts/presentation-standard-project)。它定义版本、稳定 ID、引用、目录和文件校验，不承担 Agent、审批、Revision、同步或调用方恢复职责。
 
 ```bash
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
-npm run verify --prefix contracts/presentation-standard-project
+npm run verify:contracts
 ```
 
 <!-- PRESENTATION_STANDARD_PROJECT_V0_1_0_END -->
