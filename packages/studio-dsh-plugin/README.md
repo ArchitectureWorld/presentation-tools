@@ -21,3 +21,7 @@ dsh --profile web --no-open
 正式入口是 `http://127.0.0.1:3080/`。先选择或创建 DSH Session，再点击 `Report Studio` 标签；模型、推理等级与消息输入始终使用 DSH 原生控制栏。`/report-studio/?sessionId=...` 是 iframe/独立工作台内部地址，不得作为安装后的默认入口。
 
 数据目录沿用 `report-studio-v0.1.0` 兼容名称，以发现旧 Session 的 `state.json`；检测到旧数据后必须由用户在 UI 中确认 A1.1 备份迁移。
+
+## 安全模式
+
+DSH `0.1.1-rc.2` 的 host SDK 没有为插件 HTTP 路由提供可信 Session 身份或 iframe capability hook。本插件明确采用 `securityMode=local-single-user-only`，要求 `ctx.webServer.host === '127.0.0.1'`，否则拒绝启动。健康检查同时返回 `listenHost=127.0.0.1` 与 `networkSharedSecurity=false`。query `sessionId` 不是认证，不支持多人或网络共享部署；Agent 工具 Session 仅来自 DSH exec context。

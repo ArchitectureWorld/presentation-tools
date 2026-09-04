@@ -4,7 +4,7 @@
   const embedded = window.parent !== window
   const nativeMode = reportStudioRoute && Boolean(sessionId)
 
-  if (reportStudioRoute && !embedded) {
+  if (!embedded) {
     document.documentElement.classList.add('report-studio-standalone')
     const notice = document.querySelector('#report-studio-standalone-notice')
     if (notice) notice.hidden = false

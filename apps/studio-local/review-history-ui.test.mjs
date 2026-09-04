@@ -21,8 +21,11 @@ async function loadReviewHistory() {
   const htmlSource = await readFile(new URL('./public/index.html', import.meta.url), 'utf8')
   const listeners = new Map()
   let proposalScrollCount = 0
-  const proposalNode = element({
+  const proposalActionNode = element({
     scrollIntoView() { proposalScrollCount += 1 },
+  })
+  const proposalNode = element({
+    querySelector(selector) { return selector === '[data-accept-proposal]' ? proposalActionNode : null },
   })
   const filters = ['all', 'unfinished', 'completed'].map(value => element({ dataset: { filter: value } }))
   const reviewHistory = element()

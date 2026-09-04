@@ -65,6 +65,10 @@ studio_apply_commands       幂等生成待确认 Proposal
 
 正式模式不需要 `REPORT_STUDIO_AGENT_URL`，也不会启动第二套 Agent Runtime。
 
+### Session 安全边界
+
+当前验证基线 DSH `0.1.1-rc.2` 的 `webServer` 只提供 HTTP 路由与监听地址，未提供可把 iframe 请求绑定到可信服务端 Session 身份的 capability hook。因此本版本明确运行在 `securityMode=local-single-user-only`：DSH Web 与独立调试服务都必须监听 `127.0.0.1`，配置为 `0.0.0.0` 会拒绝启动；不支持多人或网络共享安全，也不把 query `sessionId` 宣称为认证。`/api/health` 会返回 `securityMode`、`listenHost` 和 `networkSharedSecurity=false`。Agent 工具的 Session 仍只取自 DSH exec context，模型参数不能选择其他 Session。
+
 ## 验证
 
 ```bash

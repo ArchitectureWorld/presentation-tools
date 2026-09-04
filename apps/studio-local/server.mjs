@@ -14,6 +14,11 @@ const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const isContentAction = type => ['project.', 'outline.', 'draft.'].some(prefix => String(type).startsWith(prefix));
+const SECURITY_MODE = 'local-single-user-only';
+
+function requireLoopback(host) {
+  if (host !== '127.0.0.1') throw new Error(`${SECURITY_MODE} requires listen host 127.0.0.1`);
+}
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);
@@ -34,6 +39,7 @@ async function readJson(req, limit = 20 * 1024 * 1024) {
 }
 
 export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_DATA_DIR || join(process.cwd(), '.report-studio-data'), port = Number(process.env.PORT || 4173), host = process.env.HOST || '127.0.0.1', agentBridge = undefined } = {}) {
+  requireLoopback(host);
   const repository = await createRepository(dataDir);
   const standardProject = createStandardProjectService(repository);
   const bridge = agentBridge === undefined ? createAgentBridge() : agentBridge;
@@ -109,7 +115,16 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   }
 
   async function handleApi(req, res, url) {
-    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, version: 'v0.1.1', dataPath: repository.statePath, migrationStatus: repository.migrationStatus().status, agentConfigured: Boolean(bridge?.configured) });
+    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, {
+      ok: true,
+      version: 'v0.1.1',
+      dataPath: repository.statePath,
+      migrationStatus: repository.migrationStatus().status,
+      agentConfigured: Boolean(bridge?.configured),
+      securityMode: SECURITY_MODE,
+      listenHost: host,
+      networkSharedSecurity: false,
+    });
     if (req.method === 'GET' && url.pathname === '/api/migration/status') return sendJson(res, 200, repository.migrationStatus());
     if (req.method === 'POST' && url.pathname === '/api/migration/apply') return sendJson(res, 200, await repository.applyMigration());
     if (req.method === 'GET' && url.pathname === '/api/standard/status') return sendJson(res, 200, standardProject.status());

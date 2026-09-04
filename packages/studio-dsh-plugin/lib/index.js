@@ -8,6 +8,7 @@ import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/a
 
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt']
+const SECURITY_MODE = 'local-single-user-only'
 
 const publicDir = fileURLToPath(new URL('../vendor/apps/studio-local/public/', import.meta.url))
 const contentTypes = {
@@ -120,7 +121,7 @@ async function serveStatic(request, response, url) {
   }
 }
 
-function createRoute(runtime) {
+function createRoute(runtime, listenHost) {
   return async (request, response) => {
     const url = new URL(request.url ?? '/report-studio', 'http://dsh.local')
     try {
@@ -135,6 +136,9 @@ function createRoute(runtime) {
             agentConfigured: true,
             agentMode: 'dsh-native',
             sessionId,
+            securityMode: SECURITY_MODE,
+            listenHost,
+            networkSharedSecurity: false,
             dataRoot: runtime.dataRoot,
             migrationStatus: repository.migrationStatus().status,
           })
@@ -193,6 +197,9 @@ function createRoute(runtime) {
 }
 
 export function apply(ctx, config = {}) {
+  if (ctx.webServer.host !== '127.0.0.1') {
+    throw new Error(`${SECURITY_MODE} requires DSH webServer host 127.0.0.1`)
+  }
   const runtime = createStudioDshRuntime({ dataRoot: config.dataDir })
   registerTools(ctx, runtime)
   ctx.systemPrompt.section({
@@ -206,7 +213,7 @@ export function apply(ctx, config = {}) {
     ].join('\n'),
   })
   ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime) }),
+    () => ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime, ctx.webServer.host) }),
     'report-studio-dsh: web route',
   )
 }

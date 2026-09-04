@@ -6,6 +6,7 @@ let commentFilter = 'all';
 let toastTimer = null;
 let migration = null;
 const revealedProposalIds = new Set();
+const agentFeedEvents = [];
 let draftEditBuffer = null;
 let draftAutosaveTimer = null;
 let draftFlushPromise = null;
@@ -607,7 +608,8 @@ function revealProposal(proposalId, force = false) {
   window.requestAnimationFrame(() => {
     const proposal = query(`[data-proposal-id="${proposalId}"]`);
     if (!proposal) return;
-    proposal.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const focusTarget = proposal.querySelector('[data-accept-proposal]') ?? proposal;
+    focusTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     proposal.classList.toggle('proposal-revealed', true);
     window.setTimeout(() => proposal.classList.toggle('proposal-revealed', false), 1600);
   });
@@ -713,23 +715,43 @@ function renderAgent() {
     : 'DSH Bridge 未配置 · 可正常人工编辑';
   query('#agent-context-stage').textContent = stageLabel();
   query('#agent-context-page').textContent = currentPageLabel();
+  const projectContext = query('#agent-context-project');
+  if (projectContext) projectContext.textContent = state.project.title;
+
+  const reviewStatus = status => ({
+    pending_dispatch: '等待投递',
+    dispatched: '已投递',
+    dispatch_failed: '投递失败',
+    proposal_created: 'Proposal 已返回',
+    accepted: 'Proposal 已接受',
+    rejected: 'Proposal 已拒绝',
+    stale: 'Proposal 已过期',
+  })[status] || status || '状态未知';
 
   const items = [
     ...state.reviewSubmissions.slice(-12).map(submission => ({
       time: submission.createdAt,
-      html: `<div class="agent-message system"><strong>系统 · 批注提交 #${submission.number}</strong><br>Round ${escapeHtml(submission.reviewRoundId.slice(-5))} · Revision ${submission.baseRevision}${submission.agentMessage ? `<br>${escapeHtml(submission.agentMessage)}` : ''}<span class="agent-message-meta">结构化 ReviewSubmission</span></div>`,
+      html: `<div class="agent-message system"><strong>系统 · 批注提交 #${submission.number}</strong><br>Round ${escapeHtml(submission.reviewRoundId.slice(-5))} · Revision ${submission.baseRevision}${submission.agentMessage ? `<br>${escapeHtml(submission.agentMessage)}` : ''}<span class="agent-message-meta">结构化 ReviewSubmission · ${escapeHtml(reviewStatus(submission.status))}</span></div>`,
+    })),
+    ...(state.reviewRuns ?? []).slice(-12).map(run => ({
+      time: run.createdAt || '',
+      html: `<div class="agent-message ${run.integrationState === 'dispatch_failed' ? 'error' : 'system'}"><strong>ReviewRun · 第 ${Number(run.dispatchAttempt || 1)} 次投递</strong><br>${escapeHtml(reviewStatus(run.integrationState))}${run.lastError ? `<br>${escapeHtml(run.lastError)}` : ''}<span class="agent-message-meta">${run.integrationState === 'dispatch_failed' ? '可重试' : 'DSH Session 时间线状态'}</span></div>`,
     })),
     ...state.proposals.slice(-12).map(proposal => ({
       time: proposal.createdAt,
       html: `<div class="agent-message proposal"><strong>Agent · ${escapeHtml(proposal.message || '已返回修改建议')}</strong><br>Proposal ${escapeHtml(proposal.id.slice(-5))}<span class="agent-message-meta">${escapeHtml(proposal.status)}</span></div>`,
     })),
-  ].sort((a, b) => a.time.localeCompare(b.time));
+    ...agentFeedEvents.map(event => ({
+      time: event.time,
+      html: `<div class="agent-message ${event.kind === 'user' ? 'user' : event.kind === 'error' ? 'error' : 'system'}"><strong>${event.kind === 'user' ? '你' : event.kind === 'error' ? '错误' : 'Agent'}</strong><br>${escapeHtml(event.text)}<span class="agent-message-meta">${escapeHtml(event.status)}</span></div>`,
+    })),
+  ].sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
 
   const welcome = `
     <div class="agent-welcome">
       <strong>项目级 Agent 会话</strong>
-      <p>${health?.agentConfigured
-        ? '普通提问和批注任务进入当前配置的 DSH Bridge。业务修改仍需通过 Proposal 确认。'
+      <p>${escapeHtml(state.project.title)} · ${health?.agentConfigured
+        ? '普通提问和批注任务进入当前 DSH Session。业务修改仍需通过 Proposal 确认。'
         : '当前未配置 DSH Bridge。大纲、草案、批注、Revision 与持久化仍可正常人工使用。'}</p>
     </div>`;
   query('#agent-feed').innerHTML = welcome + items.map(item => item.html).join('');
@@ -776,12 +798,15 @@ async function submitReview(reviewRoundId = selectedRoundId) {
 
 function openAgent() {
   query('#agent-modal').hidden = false;
+  query('#agent-fab').setAttribute('aria-expanded', 'true');
   renderAgent();
   window.requestAnimationFrame(() => query('#agent-input')?.focus());
 }
 
 function closeAgent() {
   query('#agent-modal').hidden = true;
+  query('#agent-fab').setAttribute('aria-expanded', 'false');
+  query('#agent-fab').focus();
 }
 
 document.addEventListener('click', async event => {
@@ -1095,16 +1120,34 @@ document.addEventListener('click', async event => {
   if (event.target.id === 'agent-send') {
     const text = query('#agent-input').value.trim();
     if (!text) return;
+    const userEvent = { kind: 'user', text, status: '发送中 · 当前 DSH Session', time: new Date().toISOString() };
+    agentFeedEvents.push(userEvent);
+    renderAgent();
     try {
       const result = await api('/api/agent/chat', {
         method: 'POST',
         body: JSON.stringify({ text, stage: state.ui.stage, pageId: state.ui.activePageId }),
       });
       query('#agent-input').value = '';
+      userEvent.status = '已投递 · 当前 DSH Session';
+      agentFeedEvents.push({
+        kind: 'agent',
+        text: result.message || '已发送到当前 DSH Session',
+        status: 'Bridge 回执 · 当前 DSH Session',
+        time: new Date(Date.now() + 1).toISOString(),
+      });
       toast(result.message || '已发送');
       await load();
     } catch (error) {
+      userEvent.status = '发送失败 · 可重试';
+      agentFeedEvents.push({
+        kind: 'error',
+        text: error.message,
+        status: '普通聊天投递失败 · 可重试',
+        time: new Date(Date.now() + 1).toISOString(),
+      });
       toast(error.message, true);
+      renderAgent();
     }
     return;
   }

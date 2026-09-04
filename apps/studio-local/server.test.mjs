@@ -21,12 +21,15 @@ test('repository persists state across reload', async () => {
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('HTTP API exposes health, state and persisted actions', async () => {
+test('HTTP API exposes loopback-only security health, state and persisted actions', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'report-studio-server-'));
   const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
   try {
     const base = `http://127.0.0.1:${app.port}`;
     const health = await fetch(`${base}/api/health`).then(r => r.json()); assert.equal(health.ok, true); assert.equal(health.version, 'v0.1.1');
+    assert.equal(health.securityMode, 'local-single-user-only');
+    assert.equal(health.listenHost, '127.0.0.1');
+    assert.equal(health.networkSharedSecurity, false);
     let state = await fetch(`${base}/api/state`).then(r => r.json()); assert.equal(state.outline.length, 0);
     const response = await fetch(`${base}/api/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'outline.add', parentId: null, title: '第一章', baseRevision: state.project.currentRevision }) });
     assert.equal(response.status, 200); state = await response.json(); assert.equal(state.outline[0].title, '第一章');
@@ -78,6 +81,20 @@ test('review submission through configured bridge creates a persisted proposal',
     assert.equal(receivedContext.taskScope.allowedCommands.includes('outline.delete'), false);
     assert.equal('pages' in receivedContext, false);
   } finally { await app.stop(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('standalone server refuses non-loopback binding in local-single-user-only mode', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-network-refusal-'));
+  let app;
+  try {
+    await assert.rejects(async () => {
+      app = await createStudioServer({ dataDir: dir, port: 0, host: '0.0.0.0' });
+      await app.start();
+    }, /local-single-user-only.*127\.0\.0\.1/i);
+  } finally {
+    await app?.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('HTTP Proposal reject and return actions are persisted without creating a Revision', async () => {

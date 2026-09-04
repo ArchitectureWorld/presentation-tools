@@ -166,7 +166,7 @@ try {
   const logs = () => `${stdout}\n${stderr}`
   const healthUrl = `http://127.0.0.1:${port}/report-studio/api/health?sessionId=smoke-session`
   const health = await waitForHealth(healthUrl, child, logs)
-  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true || health.migrationStatus !== 'ready') {
+  if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true || health.migrationStatus !== 'ready' || health.securityMode !== 'local-single-user-only' || health.listenHost !== '127.0.0.1' || health.networkSharedSecurity !== false) {
     throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
   }
 

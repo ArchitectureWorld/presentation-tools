@@ -80,6 +80,10 @@ DSH Web 的正式入口是 `http://127.0.0.1:3080/`。使用顺序固定为：
 
 不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。会话头部的 `Report Studio · 独立打开` 只用于备用独立窗口，点击前会说明该窗口不显示 DSH 模型、推理等级、会话侧栏和主对话区。独立页面顶部提供“返回 DSH 主界面”。
 
+### Session 安全边界
+
+当前 DSH `0.1.1-rc.2` 没有向插件路由提供可信服务端 Session 身份或 iframe capability 签发接口。本插件因此采用机器可读的 `securityMode=local-single-user-only`，只允许 DSH Web 监听 `127.0.0.1`；若 Profile 配置成 `0.0.0.0`，插件会拒绝启动。query `sessionId` 只是本机单用户路由键，不是认证令牌，本版本不支持多人或网络共享部署。Agent 工具仍只使用 DSH exec context 中的 Session，忽略模型提供的 Session 选择。
+
 ## 4. A1.1 旧数据无损升级
 
 每个 Session 的兼容数据目录是：
@@ -126,7 +130,7 @@ npm run smoke:dsh
 
 - 从 `http://127.0.0.1:3080/` 进入后，DSH 会话侧栏、模型选择器、推理等级和消息输入区保持可用；
 - 点击原生 `Report Studio` 标签后仍留在 DSH 外壳内，并以当前 Session ID 加载工作台；
-- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`；
+- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`、`securityMode=local-single-user-only`、`listenHost=127.0.0.1`、`networkSharedSecurity=false`；
 - 迁移前旧 `state.json` 与备份 SHA-256 一致；
 - 大纲、草案、批注、Submission、Proposal 接受和重启恢复可用；
 - 标准项目导出通过 Contract `0.1.0`；

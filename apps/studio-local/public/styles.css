@@ -1464,8 +1464,8 @@ button:disabled {
 }
 
 .agent-chat-card {
-  width: min(1180px, 82vw);
-  height: min(780px, 82dvh);
+  width: 82vw;
+  height: 82dvh;
   min-height: min(540px, calc(100dvh - 24px));
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -1683,11 +1683,6 @@ button:disabled {
 
 .report-studio-dsh-embedded .dsh-agent-guidance {
   display: inline-flex !important;
-}
-
-.report-studio-dsh-native #agent-fab,
-.report-studio-dsh-native #agent-modal {
-  display: none !important;
 }
 
 .migration-card,

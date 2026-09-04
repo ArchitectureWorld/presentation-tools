@@ -26,6 +26,8 @@ for (const token of [
   "name: 'studio_get_context'",
   "name: 'studio_apply_commands'",
   "agentMode: 'dsh-native'",
+  "securityMode: SECURITY_MODE",
+  "networkSharedSecurity: false",
   "schema: {}",
 ]) assert.ok(host.includes(token), `missing host integration token: ${token}`)
 assert.ok(!host.includes("from '@deepseek-ai/dsh-tools'"), 'native host must not require an uninstalled linked-package dependency')
@@ -69,7 +71,11 @@ assert.ok(html.indexOf('./dsh-native-runtime.js') < html.indexOf('./app.js'))
 assert.match(html, /id="report-studio-standalone-notice"/)
 assert.match(html, /当前为 Report Studio 独立工作台。模型、推理等级和 Agent 会话由 DSH 主界面管理。/)
 assert.match(html, /id="report-studio-return-dsh" href="\/"/)
+assert.match(html, /id="agent-fab"[^>]+aria-controls="agent-modal"[^>]+aria-expanded="false"/)
 assert.doesNotMatch(html, /<select[^>]+(?:model|reasoning|推理|模型)/i)
+
+const css = await read('apps/studio-local/public/styles.css')
+assert.doesNotMatch(css, /\.report-studio-dsh-native\s+#agent-fab[\s\S]{0,160}display:\s*none\s*!important/)
 
 console.log('Report Studio native DSH plugin verification PASS')
 console.log('plugin=@architectureworld/report-studio-dsh@0.1.1')

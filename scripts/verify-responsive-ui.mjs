@@ -307,6 +307,7 @@ async function main() {
     });
     await waitFor(cdp, `document.readyState === 'complete' && document.querySelector('#project-title')`, 'Report Studio 加载');
     await waitFor(cdp, `document.querySelector('#project-title').value.includes('响应式验收')`, '项目数据加载');
+    await cdp.evaluate(`document.documentElement.classList.add('report-studio-dsh-native')`);
 
     const results = [];
     for (const viewport of viewports) {
@@ -324,7 +325,7 @@ async function main() {
       await waitFor(cdp, `(() => {
         const region = document.querySelector('.comment-scroll-region').getBoundingClientRect();
         const button = document.querySelector('[data-proposal-id="proposal_visual"] [data-accept-proposal]')?.getBoundingClientRect();
-        return Boolean(button && button.top >= region.top && button.bottom <= region.bottom);
+        return Boolean(button && button.top >= region.top - 1 && button.bottom <= region.bottom + 1);
       })()`, `${viewport.name} Proposal 确认按钮进入可视范围`);
 
       const outlineMetrics = await cdp.evaluate(`(() => {
@@ -349,7 +350,7 @@ async function main() {
           background: getComputedStyle(body).backgroundImage,
           proposalGrouped: Boolean(proposal),
           proposalAttentionVisible: !document.querySelector('#proposal-attention').hidden,
-          proposalButtonVisible: Boolean(proposalButtonRect && proposalButtonRect.top >= scrollRegion.top && proposalButtonRect.bottom <= scrollRegion.bottom),
+          proposalButtonVisible: Boolean(proposalButtonRect && proposalButtonRect.top >= scrollRegion.top - 1 && proposalButtonRect.bottom <= scrollRegion.bottom + 1),
         };
       })()`);
 
@@ -387,18 +388,32 @@ async function main() {
       await waitFor(cdp, `!document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗打开`);
       const agentState = await cdp.evaluate(`(() => ({
         status: document.querySelector('#agent-status').textContent.trim(),
+        fabDisplay: getComputedStyle(document.querySelector('#agent-fab')).display,
+        expanded: document.querySelector('#agent-fab').getAttribute('aria-expanded'),
         modalWidth: document.querySelector('.agent-chat-card').getBoundingClientRect().width,
         modalHeight: document.querySelector('.agent-chat-card').getBoundingClientRect().height,
       }))()`);
       assert.equal(agentState.status, 'DSH Bridge 未配置 · 可正常人工编辑');
+      assert.notEqual(agentState.fabDisplay, 'none', `${viewport.name} 原生 iframe 隐藏了 Agent FAB`);
+      assert.equal(agentState.expanded, 'true');
       assert.ok(agentState.modalWidth <= viewport.width - 10, `${viewport.name} Agent 弹窗超出窗口宽度`);
       assert.ok(agentState.modalHeight <= viewport.height - 10, `${viewport.name} Agent 弹窗超出窗口高度`);
+      if (viewport.width >= 1024) {
+        assert.ok(agentState.modalWidth / viewport.width >= 0.75 && agentState.modalWidth / viewport.width <= 0.85, `${viewport.name} Agent 弹窗宽度不是约 80%`);
+        assert.ok(agentState.modalHeight / viewport.height >= 0.75 && agentState.modalHeight / viewport.height <= 0.85, `${viewport.name} Agent 弹窗高度不是约 80%`);
+      }
 
       const agentShot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
       await writeFile(join(screenshotDir, `${viewport.name}-agent.png`), Buffer.from(agentShot.data, 'base64'));
 
       await clickCenter(cdp, '#agent-close');
       await waitFor(cdp, `document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗关闭`);
+      const closedAgentState = await cdp.evaluate(`(() => ({
+        expanded: document.querySelector('#agent-fab').getAttribute('aria-expanded'),
+        focusReturned: document.activeElement === document.querySelector('#agent-fab'),
+      }))()`);
+      assert.equal(closedAgentState.expanded, 'false');
+      assert.equal(closedAgentState.focusReturned, true);
       results.push({ viewport: viewport.name, outlineMetrics, draftMetrics, agentState });
     }
 

@@ -116,7 +116,7 @@
     </section>
   </div>
 
-  <button id="agent-fab" class="agent-fab" type="button" aria-label="打开项目 Agent" title="项目 Agent">
+  <button id="agent-fab" class="agent-fab" type="button" aria-label="打开项目 Agent" aria-controls="agent-modal" aria-expanded="false" title="项目 Agent">
     <span class="agent-orb-image" aria-hidden="true"></span>
   </button>
 
@@ -132,10 +132,11 @@
             <span id="agent-status">检查 DSH Bridge…</span>
           </div>
         </div>
-        <button id="agent-close" class="icon-button" type="button" title="关闭 Agent">×</button>
+        <button id="agent-close" class="icon-button" type="button" aria-label="关闭 Agent" title="关闭 Agent">×</button>
       </header>
 
       <div class="agent-chat-context">
+        <span id="agent-context-project" class="context-chip">当前项目</span>
         <span id="agent-context-page" class="context-chip">整份大纲</span>
         <span id="agent-context-stage" class="context-chip">大纲阶段</span>
       </div>

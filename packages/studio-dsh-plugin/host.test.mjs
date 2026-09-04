@@ -29,6 +29,7 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
         },
       },
       webServer: {
+        host: '127.0.0.1',
         register(definition) {
           route = definition
           return () => undefined
@@ -80,6 +81,9 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     assert.equal(health.agentMode, 'dsh-native')
     assert.equal(health.agentConfigured, true)
     assert.equal(health.sessionId, 'session-host-test')
+    assert.equal(health.securityMode, 'local-single-user-only')
+    assert.equal(health.listenHost, '127.0.0.1')
+    assert.equal(health.networkSharedSecurity, false)
 
     const action = async value => {
       body = ''
@@ -113,6 +117,12 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     }), response)
     assert.equal(response.statusCode, 200, body)
     const submitted = JSON.parse(body)
+    const execBoundContext = await tools[0].execute({
+      submissionId: submitted.submission.id,
+      sessionId: 'other-session',
+    }, { agent: { id: 'session-host-test' } })
+    assert.equal(execBoundContext.submission.reviewSubmissionId, submitted.submission.id)
+    assert.equal(execBoundContext.project.id, state.project.id)
     const dispatch = async status => {
       body = ''
       await route.handler(Object.assign(Readable.from([Buffer.from(JSON.stringify({ status, reviewRunId: submitted.reviewRun.reviewRunId }))]), {
@@ -133,4 +143,17 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     await rm(dataDir, { recursive: true, force: true })
   }
 
+})
+
+test('native DSH host refuses a network-shared web server without a trusted identity hook', () => {
+  const ctx = {
+    tools: { register() {} },
+    systemPrompt: { section() {} },
+    webServer: { host: '0.0.0.0', register() {} },
+    effect(factory) { return factory() },
+  }
+  assert.throws(
+    () => apply(ctx),
+    /local-single-user-only.*127\.0\.0\.1/i,
+  )
 })
