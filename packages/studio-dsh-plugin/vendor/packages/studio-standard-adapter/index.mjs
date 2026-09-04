@@ -25,7 +25,7 @@ async function readJson(root, relativePath) {
   return JSON.parse(await readFile(join(root, ...relativePath.split('/')), 'utf8'))
 }
 
-async function archiveFiles(root, putBlob) {
+async function archiveFiles(root, putBlob, { managedFiles = null } = {}) {
   const files = []
   async function walk(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -34,10 +34,17 @@ async function archiveFiles(root, putBlob) {
       else if (entry.isFile()) {
         const relativePath = relative(root, path).split(sep).join('/')
         if (JSON_DOCUMENTS.includes(relativePath) || relativePath.startsWith('pages/drafts/')) continue
+        if (managedFiles && !managedFiles.has(relativePath)) continue
         if (typeof putBlob !== 'function') throw new StudioError(ERROR_CODES.STANDARD_IMPORT_UNSUPPORTED, '标准项目导入需要 Repository Blob 存储。', undefined, 500)
         const info = await stat(path)
-        const mimeType = relativePath.endsWith('.svg') ? 'image/svg+xml' : relativePath.endsWith('.csv') ? 'text/csv' : 'application/octet-stream'
-        const objectRef = await putBlob(createReadStream(path), { mimeType, originalFileName: basename(path), sizeBytes: info.size })
+        const declared = managedFiles?.get(relativePath)
+        const mimeType = declared?.mimeType ?? (relativePath.endsWith('.svg') ? 'image/svg+xml' : relativePath.endsWith('.csv') ? 'text/csv' : 'application/octet-stream')
+        const objectRef = await putBlob(createReadStream(path), {
+          mimeType,
+          originalFileName: basename(path),
+          sizeBytes: info.size,
+          ...(declared?.sha256 ? { sha256: declared.sha256 } : {}),
+        })
         files.push({ relativePath, objectRef, sizeBytes: objectRef.sizeBytes, mimeType: objectRef.mimeType, sha256: objectRef.sha256 })
       }
     }
@@ -75,7 +82,7 @@ function findAssetData(archive, asset) {
   return stored?.objectRef ?? null
 }
 
-export async function readStandardProject(projectRoot, { putBlob } = {}) {
+export async function readStandardProject(projectRoot, { putBlob, archiveScope = 'all' } = {}) {
   const root = rootPath(projectRoot)
   const validation = await validateProjectDirectoryWithAjv(root, { allowGitKeep: true })
   if (!validation.valid) {
@@ -86,7 +93,13 @@ export async function readStandardProject(projectRoot, { putBlob } = {}) {
   for (const page of documents['pages/manifest.json'].pages) {
     if (page.draftPath) pageDocuments[page.draftPath] = await readJson(root, page.draftPath)
   }
-  const archive = await archiveFiles(root, putBlob)
+  const managedFiles = archiveScope === 'managed'
+    ? new Map([
+      ...documents['source-materials/manifest.json'].materials,
+      ...documents['assets/manifest.json'].assets,
+    ].map(record => [record.relativePath, record]))
+    : null
+  const archive = await archiveFiles(root, putBlob, { managedFiles })
   const assets = new Map(documents['assets/manifest.json'].assets.map(asset => [asset.assetId, asset]))
   const snapshot = {
     project: {

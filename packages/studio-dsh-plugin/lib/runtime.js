@@ -18,6 +18,7 @@ import {
 } from '../vendor/packages/studio-core/index.mjs'
 import { ERROR_CODES, StudioError } from '../vendor/packages/studio-contracts/index.mjs'
 import { reviewSubmissionContext } from '../vendor/apps/studio-local/agent-context.mjs'
+import { createWorkspaceWatcher, resolveWorkspaceRoot } from '../vendor/apps/studio-local/workspace-live-link.mjs'
 
 const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
 const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))
@@ -83,18 +84,186 @@ function chatPrompt(sessionId, state, input) {
   ].join('\n')
 }
 
-export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {}) {
+export function createStudioDshRuntime({
+  dataRoot = defaultDshDataRoot(),
+  sessions = null,
+  repositoryFactory = createRepository,
+  workspaceWatcherFactory = createWorkspaceWatcher,
+  workspaceRootResolver = resolveWorkspaceRoot,
+} = {}) {
   const root = resolve(dataRoot)
   const repositories = new Map()
+  const workspaceEntries = new Map()
+  const sessionBindings = new Map()
+
+  function sessionWorkspace(sessionId) {
+    const session = sessions?.get(sessionId)
+    const cwd = session?.header?.cwd
+    if (typeof cwd !== 'string' || !cwd.trim()) {
+      throw new StudioError(ERROR_CODES.WORKSPACE_UNAVAILABLE, '当前 DSH Session 没有可用的 Workspace。', { sessionId }, 404)
+    }
+    return cwd
+  }
+
+  function statusFor(entry, override = {}) {
+    const source = entry.status ?? { status: 'watcher_disconnected', workspaceRoot: entry.workspaceRoot }
+    const { snapshot: _snapshot, ...safe } = source
+    return {
+      ...structuredClone(safe),
+      appliedFingerprint: entry.appliedFingerprint ?? null,
+      candidateFingerprint: entry.candidate?.fingerprint ?? null,
+      candidateSourceRevision: entry.candidate?.sourceRevision ?? null,
+      hasUpstreamCandidate: Boolean(entry.candidate && entry.candidate.fingerprint !== entry.appliedFingerprint),
+      ...structuredClone(override),
+    }
+  }
+
+  async function publishCandidate(entry) {
+    const candidate = entry.candidate
+    if (!candidate || candidate.fingerprint === entry.appliedFingerprint) {
+      entry.candidate = null
+      return statusFor(entry)
+    }
+    const repository = await entry.repository
+    await repository.publishUpstreamSnapshot({
+      snapshot: candidate.snapshot,
+      fingerprint: candidate.fingerprint,
+      workspaceRoot: candidate.workspaceRoot,
+      sourceRevision: candidate.sourceRevision,
+      sourceRevisions: candidate.sourceRevisions,
+    })
+    entry.appliedFingerprint = candidate.fingerprint
+    entry.candidate = null
+    entry.status = { ...candidate, status: 'connected' }
+    return statusFor(entry)
+  }
+
+  function lastAppliedFingerprint(repository) {
+    return [...(repository.getState().revisions ?? [])].reverse()
+      .find(revision => revision.detail?.actionType === 'workspace.upstream_publish')?.detail?.fingerprint ?? null
+  }
+
+  async function workspaceEntry(workspaceRoot) {
+    let entry = workspaceEntries.get(workspaceRoot)
+    if (entry) return entry.ready
+
+    entry = {
+      workspaceRoot,
+      sessions: new Set(),
+      repository: repositoryFactory(join(root, 'workspaces', sessionDirectoryName(workspaceRoot))),
+      watcher: null,
+      status: { status: 'watcher_disconnected', workspaceRoot },
+      candidate: null,
+      appliedFingerprint: null,
+      ready: null,
+    }
+    workspaceEntries.set(workspaceRoot, entry)
+    entry.ready = (async () => {
+      const repository = await entry.repository
+      entry.appliedFingerprint = lastAppliedFingerprint(repository)
+      entry.watcher = workspaceWatcherFactory({
+        workspaceRoot,
+        putBlob: repository.putBlob,
+        async onCandidate(candidate) {
+          entry.candidate = structuredClone(candidate)
+          if (!entry.appliedFingerprint) await publishCandidate(entry)
+        },
+        onStatus(status) {
+          entry.status = structuredClone(status)
+          if (entry.candidate && entry.candidate.fingerprint !== entry.appliedFingerprint && status.status === 'connected') {
+            entry.status.status = 'upstream_update_available'
+          }
+        },
+      })
+      await entry.watcher.start()
+      return entry
+    })().catch(async error => {
+      workspaceEntries.delete(workspaceRoot)
+      await entry.watcher?.close?.().catch(() => undefined)
+      await entry.repository.then(repository => repository.close()).catch(() => undefined)
+      throw error
+    })
+    return entry.ready
+  }
+
+  async function detachSession(sessionId) {
+    const workspaceRoot = sessionBindings.get(sessionId)
+    if (!workspaceRoot) return
+    sessionBindings.delete(sessionId)
+    const entry = workspaceEntries.get(workspaceRoot)
+    if (!entry) return
+    entry.sessions.delete(sessionId)
+    if (entry.sessions.size) return
+    workspaceEntries.delete(workspaceRoot)
+    const ready = await entry.ready.catch(() => entry)
+    await ready.watcher?.close?.()
+    await ready.repository.then(repository => repository.close())
+  }
+
+  async function openWorkspace(rawSessionId) {
+    const sessionId = cleanSessionId(rawSessionId)
+    let workspaceRoot
+    try {
+      workspaceRoot = await workspaceRootResolver(sessionWorkspace(sessionId))
+    } catch (error) {
+      await detachSession(sessionId)
+      throw error
+    }
+    const previousRoot = sessionBindings.get(sessionId)
+    if (previousRoot === workspaceRoot) return statusFor(await workspaceEntry(workspaceRoot))
+    await detachSession(sessionId)
+    const entry = await workspaceEntry(workspaceRoot)
+    entry.sessions.add(sessionId)
+    sessionBindings.set(sessionId, workspaceRoot)
+    return statusFor(entry)
+  }
 
   async function repositoryFor(rawSessionId) {
     const sessionId = cleanSessionId(rawSessionId)
+    if (sessions) {
+      await openWorkspace(sessionId)
+      return workspaceEntries.get(sessionBindings.get(sessionId)).repository
+    }
     let pending = repositories.get(sessionId)
     if (!pending) {
-      pending = createRepository(join(root, 'sessions', sessionDirectoryName(sessionId)))
+      pending = repositoryFactory(join(root, 'sessions', sessionDirectoryName(sessionId)))
       repositories.set(sessionId, pending)
     }
     return pending
+  }
+
+  async function workspaceStatus(sessionId) {
+    await openWorkspace(sessionId)
+    return statusFor(workspaceEntries.get(sessionBindings.get(cleanSessionId(sessionId))))
+  }
+
+  async function reloadWorkspace(sessionId, { dirty = false } = {}) {
+    await openWorkspace(sessionId)
+    const entry = workspaceEntries.get(sessionBindings.get(cleanSessionId(sessionId)))
+    await entry.watcher.rescan()
+    if (!entry.candidate || entry.candidate.fingerprint === entry.appliedFingerprint) return statusFor(entry)
+    if (dirty) return statusFor(entry, { status: ERROR_CODES.WORKSPACE_DIRTY_CONFLICT })
+    return publishCandidate(entry)
+  }
+
+  async function applyWorkspaceCandidate(sessionId, _input = {}) {
+    await openWorkspace(sessionId)
+    const entry = workspaceEntries.get(sessionBindings.get(cleanSessionId(sessionId)))
+    return publishCandidate(entry)
+  }
+
+  async function close() {
+    const entries = [...workspaceEntries.values()]
+    workspaceEntries.clear()
+    sessionBindings.clear()
+    await Promise.allSettled(entries.map(async entry => {
+      const ready = await entry.ready.catch(() => entry)
+      await ready.watcher?.close?.()
+      await ready.repository.then(repository => repository.close())
+    }))
+    const legacy = [...repositories.values()]
+    repositories.clear()
+    await Promise.allSettled(legacy.map(async pending => (await pending).close()))
   }
 
   async function getState(sessionId) {
@@ -268,6 +437,10 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
   return Object.freeze({
     dataRoot: root,
     repositoryFor,
+    openWorkspace,
+    workspaceStatus,
+    reloadWorkspace,
+    applyWorkspaceCandidate,
     getState,
     executeAction,
     submitReview,
@@ -279,5 +452,6 @@ export function createStudioDshRuntime({ dataRoot = defaultDshDataRoot() } = {})
     applyCommands,
     updateDispatch,
     retrySubmission,
+    close,
   })
 }

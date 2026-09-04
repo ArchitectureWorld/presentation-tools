@@ -519,7 +519,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     })
   }
 
-  async function initializeFromStandardProject({ snapshot: importedSnapshot, detail = null, ui = {} }) {
+  async function initializeFromStandardProject({ snapshot: importedSnapshot, detail = null, ui = {}, source = 'standard_import' }) {
     assertReady()
     return enqueue(async () => {
       const fresh = await readControlFresh()
@@ -551,7 +551,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
         parentRevision: null,
         parentRevisionRef: null,
         snapshotRef,
-        source: 'standard_import',
+        source,
         detail: clone(detail),
         idempotencyKey: null,
         createdAt,
@@ -586,6 +586,54 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
       return transactContent({ baseRevision, source: next.revisions?.at(-1)?.source ?? 'human', detail: next.revisions?.at(-1)?.detail ?? null }, () => next)
     }
     return transactOperational(() => next)
+  }
+
+  async function publishUpstreamSnapshot({ snapshot, fingerprint, workspaceRoot, sourceRevision = null, sourceRevisions = [] }) {
+    assertReady()
+    if (!snapshot || typeof snapshot !== 'object') {
+      throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Workspace 上游快照不能为空。', undefined, 400)
+    }
+    if (!/^[a-f0-9]{64}$/iu.test(String(fingerprint ?? ''))) {
+      throw new StudioError(ERROR_CODES.INVALID_COMMAND, 'Workspace 上游快照缺少稳定 SHA-256 指纹。', { fingerprint: fingerprint ?? null }, 400)
+    }
+    const detail = {
+      actionType: 'workspace.upstream_publish',
+      workspaceRoot: String(workspaceRoot ?? ''),
+      fingerprint: String(fingerprint),
+      sourceRevision,
+      sourceRevisions: clone(sourceRevisions),
+    }
+    const current = clone(state)
+    const activePageId = current.ui?.activePageId
+    const nextActivePageId = snapshot.pages?.some(page => page.id === activePageId)
+      ? activePageId
+      : snapshot.pages?.[0]?.id ?? null
+    const ui = {
+      ...clone(current.ui ?? {}),
+      stage: current.ui?.stage === 'draft' && !nextActivePageId
+        ? 'outline'
+        : current.ui?.stage ?? (nextActivePageId ? 'draft' : 'outline'),
+      activePageId: nextActivePageId,
+    }
+
+    if (isUnusedWorkspace(current, control)) {
+      return initializeFromStandardProject({
+        snapshot,
+        detail,
+        source: 'workspace_upstream',
+        ui: { ...ui, stage: nextActivePageId ? 'draft' : 'outline' },
+      })
+    }
+
+    return transactContent(
+      { baseRevision: current.project.currentRevision, source: 'workspace_upstream', detail },
+      state => projectStateFromParts({
+        snapshot,
+        currentRevision: state.project.currentRevision,
+        operational: operationalFromState(state, state.revisions),
+        ui,
+      }),
+    )
   }
 
   async function applyMigration() {
@@ -658,6 +706,7 @@ export async function createRepository(dataDir, { faultInjector = () => undefine
     recordOrphanBlob,
     migrateLegacyAssets,
     initializeFromStandardProject,
+    publishUpstreamSnapshot,
     transactContent,
     transactOperational,
     async replace(next) { return replace(next) },

@@ -18,6 +18,10 @@ export const ERROR_CODES = Object.freeze({
   STANDARD_EXPORT_FAILED: 'standard_export_failed',
   STANDARD_IMPORT_UNSUPPORTED: 'standard_import_unsupported',
   STANDARD_IMPORT_REQUIRES_NEW_WORKSPACE: 'standard_import_requires_new_workspace',
+  WORKSPACE_UNAVAILABLE: 'workspace_unavailable',
+  WORKSPACE_PROJECT_MISSING: 'workspace_project_missing',
+  WORKSPACE_CONTRACT_INVALID: 'workspace_contract_invalid',
+  WORKSPACE_DIRTY_CONFLICT: 'local_dirty_conflict',
   REPOSITORY_LOCKED: 'repository_locked',
   REPOSITORY_INTEGRITY_ERROR: 'repository_integrity_error',
 })

@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { createHash } from 'node:crypto'
 import { createRepository } from './repository.mjs'
-import { beginReviewDispatch, executeAction, submitReviewRound } from '../../packages/studio-core/index.mjs'
+import { beginReviewDispatch, createInitialState, executeAction, submitReviewRound } from '../../packages/studio-core/index.mjs'
+import { canonicalFromState } from '../../packages/studio-contracts/index.mjs'
 
 const importedSnapshot = () => ({
   project: {
@@ -20,6 +21,19 @@ const importedSnapshot = () => ({
   outline: [],
   pages: [],
 })
+
+function upstreamSnapshot() {
+  let state = createInitialState()
+  state = executeAction(state, { type: 'outline.add', parentId: null, title: '第一批次' }).state
+  const firstNodeId = state.outline[0].id
+  state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: firstNodeId }).state
+  state = executeAction(state, { type: 'outline.add', parentId: null, title: '第二批次' }).state
+  const secondNodeId = state.outline[1].id
+  state = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: secondNodeId }).state
+  const snapshot = canonicalFromState(state)
+  snapshot.project.title = 'Pre Workspace 项目'
+  return snapshot
+}
 
 function canonicalJson(value) {
   const sortValue = entry => Array.isArray(entry)
@@ -70,6 +84,70 @@ test('content transaction persists an immutable snapshot that reloads through Pr
     } finally {
       await reopened.close()
     }
+  })
+})
+
+test('upstream publishing adopts revision zero then preserves operational state and repairs activePageId', async () => {
+  await withRepository(async ({ repository }) => {
+    assert.equal(typeof repository.publishUpstreamSnapshot, 'function')
+    const first = upstreamSnapshot()
+    let state = await repository.publishUpstreamSnapshot({
+      snapshot: first,
+      fingerprint: '1'.repeat(64),
+      workspaceRoot: 'C:\\workspace-a',
+      sourceRevision: 42,
+      sourceRevisions: [{ provider: 'pre-design', sourceProjectId: 'project_001', sourceRevision: 42 }],
+    })
+    assert.equal(state.project.currentRevision, 0)
+    assert.equal(state.revisions[0].source, 'workspace_upstream')
+    assert.equal(state.revisions[0].detail.fingerprint, '1'.repeat(64))
+    assert.equal(state.ui.activePageId, first.pages[0].id)
+
+    state = await repository.transactOperational(current => executeAction(current, {
+      type: 'annotation.add',
+      scopeKey: 'outline:root',
+      instruction: '运行态必须保留',
+    }).state)
+    state = await repository.transactOperational(current => ({
+      ...current,
+      ui: { ...current.ui, stage: 'draft', activePageId: first.pages[1].id },
+    }))
+
+    const second = structuredClone(first)
+    second.pages[0].contentBlocks[0].content = 'Pre Revision 43 内容'
+    state = await repository.publishUpstreamSnapshot({
+      snapshot: second,
+      fingerprint: '2'.repeat(64),
+      workspaceRoot: 'C:\\workspace-a',
+      sourceRevision: 43,
+      sourceRevisions: [{ provider: 'pre-design', sourceProjectId: 'project_001', sourceRevision: 43 }],
+    })
+    assert.equal(state.project.currentRevision, 1)
+    assert.equal(state.revisions.at(-1).source, 'workspace_upstream')
+    assert.equal(state.annotations.length, 1)
+    assert.equal(state.ui.activePageId, first.pages[1].id)
+
+    const third = structuredClone(second)
+    third.pages = third.pages.filter(page => page.id !== first.pages[1].id)
+    state = await repository.publishUpstreamSnapshot({
+      snapshot: third,
+      fingerprint: '3'.repeat(64),
+      workspaceRoot: 'C:\\workspace-a',
+      sourceRevision: 44,
+      sourceRevisions: [{ provider: 'pre-design', sourceProjectId: 'project_001', sourceRevision: 44 }],
+    })
+    assert.equal(state.project.currentRevision, 2)
+    assert.equal(state.annotations.length, 1)
+    assert.equal(state.ui.activePageId, third.pages[0].id)
+
+    state = await repository.publishUpstreamSnapshot({
+      snapshot: third,
+      fingerprint: '3'.repeat(64),
+      workspaceRoot: 'C:\\workspace-a',
+      sourceRevision: 44,
+      sourceRevisions: [{ provider: 'pre-design', sourceProjectId: 'project_001', sourceRevision: 44 }],
+    })
+    assert.equal(state.project.currentRevision, 2)
   })
 })
 

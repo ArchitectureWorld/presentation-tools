@@ -11,6 +11,7 @@ const png = Buffer.from([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0
 
 test('native DSH host plugin loads, registers tools and serves a session-bound health route', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'report-studio-dsh-host-'))
+  let cleanup
   try {
     const tools = []
     const promptSections = []
@@ -35,29 +36,44 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
           return () => undefined
         },
       },
+      sessions: {
+        get(sessionId) {
+          return sessionId === 'session-host-test' ? { header: { cwd: dataDir } } : undefined
+        },
+      },
       effect(factory) {
-        return factory()
+        cleanup = factory()
+        return cleanup
       },
     }
 
     apply(ctx, { dataDir })
 
     assert.equal(name, 'report-studio-dsh')
-    assert.deepEqual(inject, ['tools', 'webServer', 'systemPrompt'])
-    assert.deepEqual(tools.map(tool => tool.name), ['studio_get_context', 'studio_apply_commands'])
-    assert.equal(tools[0].parameters.type, 'object')
-    assert.deepEqual(tools[0].parameters.required, ['submissionId'])
-    assert.deepEqual(tools[0].output.schema, {})
-    assert.deepEqual(tools[1].parameters.required, ['submissionId', 'projectId', 'baseRevision', 'scopeKey', 'message', 'commands'])
-    assert.equal(tools[1].parameters.additionalProperties, false)
-    assert.ok(Array.isArray(tools[1].parameters.properties.commands.items.oneOf))
-    assert.ok(tools[1].parameters.properties.commands.items.oneOf.every(branch => branch.additionalProperties === false))
-    assert.equal(JSON.stringify(tools[1].parameters).includes('outline.delete'), false)
+    assert.deepEqual(inject, ['tools', 'webServer', 'systemPrompt', 'sessions'])
+    assert.deepEqual(tools.map(tool => tool.name), ['studio_open_workspace_project', 'studio_reload_upstream', 'studio_get_context', 'studio_apply_commands'])
+    const openWorkspace = tools.find(tool => tool.name === 'studio_open_workspace_project')
+    const reloadWorkspace = tools.find(tool => tool.name === 'studio_reload_upstream')
+    const getContext = tools.find(tool => tool.name === 'studio_get_context')
+    const applyCommands = tools.find(tool => tool.name === 'studio_apply_commands')
+    assert.equal(openWorkspace.parameters.additionalProperties, false)
+    assert.equal('workspaceRoot' in openWorkspace.parameters.properties, false)
+    assert.equal(reloadWorkspace.parameters.additionalProperties, false)
+    assert.equal('workspaceRoot' in reloadWorkspace.parameters.properties, false)
+    assert.equal(getContext.parameters.type, 'object')
+    assert.deepEqual(getContext.parameters.required, ['submissionId'])
+    assert.deepEqual(getContext.output.schema, {})
+    assert.deepEqual(applyCommands.parameters.required, ['submissionId', 'projectId', 'baseRevision', 'scopeKey', 'message', 'commands'])
+    assert.equal(applyCommands.parameters.additionalProperties, false)
+    assert.ok(Array.isArray(applyCommands.parameters.properties.commands.items.oneOf))
+    assert.ok(applyCommands.parameters.properties.commands.items.oneOf.every(branch => branch.additionalProperties === false))
+    assert.equal(JSON.stringify(applyCommands.parameters).includes('outline.delete'), false)
     assert.equal(promptSections[0].name, 'report-studio-v0.1.1')
     assert.equal(route.kind, 'prefix')
     assert.equal(route.path, '/report-studio')
 
-    await assert.rejects(tools[0].execute({}, { agent: { id: 'session-host-test' } }), error => error.code === 'invalid_command')
+    assert.equal((await openWorkspace.execute({}, { agent: { id: 'session-host-test' } })).status, 'workspace_project_missing')
+    await assert.rejects(getContext.execute({}, { agent: { id: 'session-host-test' } }), error => error.code === 'invalid_command')
 
     const headers = new Map()
     let body = ''
@@ -84,6 +100,15 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     assert.equal(health.securityMode, 'local-single-user-only')
     assert.equal(health.listenHost, '127.0.0.1')
     assert.equal(health.networkSharedSecurity, false)
+
+    body = ''
+    await route.handler(Object.assign(Readable.from([Buffer.from(JSON.stringify({ workspaceRoot: 'C:\\must-not-open', dirty: true }))]), {
+      method: 'POST', url: '/report-studio/api/workspace/reload?sessionId=session-host-test', headers: { 'content-type': 'application/json' },
+    }), response)
+    assert.equal(response.statusCode, 200, body)
+    const workspaceReload = JSON.parse(body)
+    assert.equal(workspaceReload.workspaceRoot, dataDir)
+    assert.equal(workspaceReload.status, 'workspace_project_missing')
 
     const action = async value => {
       body = ''
@@ -117,7 +142,7 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     }), response)
     assert.equal(response.statusCode, 200, body)
     const submitted = JSON.parse(body)
-    const execBoundContext = await tools[0].execute({
+    const execBoundContext = await getContext.execute({
       submissionId: submitted.submission.id,
       sessionId: 'other-session',
     }, { agent: { id: 'session-host-test' } })
@@ -140,6 +165,7 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     assert.equal(regression.statusCode, 409)
     assert.equal(regression.payload.error.code, 'invalid_submission_transition')
   } finally {
+    await cleanup?.()
     await rm(dataDir, { recursive: true, force: true })
   }
 

@@ -1,10 +1,136 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createStudioDshRuntime } from './lib/runtime.js'
 import { createStudioId } from '../studio-contracts/index.mjs'
+import { readWorkspaceSnapshot, resolveWorkspaceRoot } from '../../apps/studio-local/workspace-live-link.mjs'
+
+const fixtureRoot = resolve(new URL('../../contracts/presentation-standard-project/examples/unformatted-project/project_01992a80-0000-7000-8000-000000000101-campus-renewal-brief/', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/u, '$1'))
+
+async function makeWorkspace(prefix) {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), prefix))
+  await cp(fixtureRoot, workspaceRoot, { recursive: true })
+  return workspaceRoot
+}
+
+function controlledWatcherHarness() {
+  const records = []
+  return {
+    records,
+    factory(options) {
+      const record = { options, closed: false, current: { status: 'watcher_disconnected', workspaceRoot: options.workspaceRoot } }
+      records.push(record)
+      const scan = async () => {
+        record.current = await readWorkspaceSnapshot(options.workspaceRoot, { putBlob: options.putBlob })
+        if (record.current.status === 'connected') await options.onCandidate(record.current)
+        await options.onStatus(record.current)
+        return structuredClone(record.current)
+      }
+      return {
+        start: scan,
+        rescan: scan,
+        status: () => structuredClone(record.current),
+        async close() { record.closed = true },
+      }
+    },
+  }
+}
+
+test('native DSH runtime keys one Repository and Watcher by the current Session Workspace', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'report-studio-workspace-runtime-'))
+  const workspaceA = await makeWorkspace('report-studio-workspace-a-')
+  const workspaceB = await makeWorkspace('report-studio-workspace-b-')
+  const workspaceWithoutProject = await mkdtemp(join(tmpdir(), 'report-studio-workspace-empty-'))
+  const sessionsById = new Map([
+    ['workspace-session-a', { header: { cwd: workspaceA } }],
+    ['workspace-session-b', { header: { cwd: workspaceA } }],
+  ])
+  const watchers = controlledWatcherHarness()
+  const runtime = createStudioDshRuntime({
+    dataRoot,
+    sessions: { get: sessionId => sessionsById.get(sessionId) },
+    workspaceWatcherFactory: watchers.factory,
+    workspaceRootResolver: resolveWorkspaceRoot,
+  })
+  try {
+    const opened = await runtime.openWorkspace('workspace-session-a')
+    assert.equal(opened.status, 'connected')
+    const repositoryA = await runtime.repositoryFor('workspace-session-a')
+    assert.equal(repositoryA.getState().project.currentRevision, 0)
+    assert.equal(repositoryA.getState().pages.length, 2)
+
+    await runtime.openWorkspace('workspace-session-b')
+    assert.equal(await runtime.repositoryFor('workspace-session-b'), repositoryA)
+    assert.equal(watchers.records.length, 1)
+
+    const projectPath = join(workspaceB, 'project.json')
+    const project = JSON.parse(await readFile(projectPath, 'utf8'))
+    project.name = '第二 Workspace 项目'
+    await writeFile(projectPath, `${JSON.stringify(project, null, 2)}\n`, 'utf8')
+    sessionsById.set('workspace-session-a', { header: { cwd: workspaceB } })
+    await runtime.openWorkspace('workspace-session-a')
+    const repositoryB = await runtime.repositoryFor('workspace-session-a')
+    assert.notEqual(repositoryB, repositoryA)
+    assert.equal(repositoryB.getState().project.title, '第二 Workspace 项目')
+    assert.equal(watchers.records.length, 2)
+    assert.equal(watchers.records[0].closed, false, 'session-b still owns Workspace A')
+
+    sessionsById.set('workspace-session-b', { header: { cwd: workspaceB } })
+    await runtime.openWorkspace('workspace-session-b')
+    assert.equal(await runtime.repositoryFor('workspace-session-b'), repositoryB)
+    assert.equal(watchers.records[0].closed, true)
+
+    sessionsById.set('workspace-session-a', { header: { cwd: workspaceWithoutProject } })
+    const missing = await runtime.openWorkspace('workspace-session-a')
+    assert.equal(missing.status, 'workspace_project_missing')
+    const emptyRepository = await runtime.repositoryFor('workspace-session-a')
+    assert.notEqual(emptyRepository, repositoryB)
+    assert.equal(emptyRepository.getState().outline.length, 0)
+  } finally {
+    await runtime.close?.()
+    assert.ok(watchers.records.every(record => record.closed))
+    await rm(workspaceA, { recursive: true, force: true })
+    await rm(workspaceB, { recursive: true, force: true })
+    await rm(workspaceWithoutProject, { recursive: true, force: true })
+    await rm(dataRoot, { recursive: true, force: true })
+  }
+})
+
+test('native DSH runtime stages an upstream candidate until the browser explicitly applies it', async () => {
+  const dataRoot = await mkdtemp(join(tmpdir(), 'report-studio-workspace-conflict-'))
+  const workspaceRoot = await makeWorkspace('report-studio-workspace-dirty-')
+  const watchers = controlledWatcherHarness()
+  const runtime = createStudioDshRuntime({
+    dataRoot,
+    sessions: { get: () => ({ header: { cwd: workspaceRoot } }) },
+    workspaceWatcherFactory: watchers.factory,
+    workspaceRootResolver: resolveWorkspaceRoot,
+  })
+  try {
+    await runtime.openWorkspace('dirty-session')
+    const before = await runtime.getState('dirty-session')
+    const outlinePath = join(workspaceRoot, 'outline.json')
+    const outline = JSON.parse(await readFile(outlinePath, 'utf8'))
+    outline.nodes[0].title = '上游待确认标题'
+    await writeFile(outlinePath, `${JSON.stringify(outline, null, 2)}\n`, 'utf8')
+
+    const pending = await runtime.reloadWorkspace('dirty-session', { dirty: true })
+    assert.equal(pending.status, 'local_dirty_conflict')
+    assert.equal((await runtime.getState('dirty-session')).project.currentRevision, before.project.currentRevision)
+
+    const applied = await runtime.applyWorkspaceCandidate('dirty-session', { discardLocalChanges: true })
+    assert.equal(applied.status, 'connected')
+    const after = await runtime.getState('dirty-session')
+    assert.equal(after.project.currentRevision, before.project.currentRevision + 1)
+    assert.equal(after.project.extensionPayload.standardArchive.documents['outline.json'].nodes[0].title, '上游待确认标题')
+  } finally {
+    await runtime.close?.()
+    await rm(workspaceRoot, { recursive: true, force: true })
+    await rm(dataRoot, { recursive: true, force: true })
+  }
+})
 
 test('native DSH runtime binds isolated Report Studio projects to session ids and creates proposals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'report-studio-dsh-runtime-'))

@@ -7,7 +7,7 @@ import { createStandardProjectService } from '../vendor/apps/studio-local/standa
 import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/asset-service.mjs'
 
 export const name = 'report-studio-dsh'
-export const inject = ['tools', 'webServer', 'systemPrompt']
+export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions']
 const SECURITY_MODE = 'local-single-user-only'
 
 const publicDir = fileURLToPath(new URL('../vendor/apps/studio-local/public/', import.meta.url))
@@ -71,6 +71,34 @@ function toolOutput() {
 
 function registerTools(ctx, runtime) {
   ctx.tools.register({
+    name: 'studio_open_workspace_project',
+    description: '从当前 DSH Session 的 header.cwd 打开并验证 Presentation Standard Project Directory 0.1.0。不会接受浏览器或 Agent 提供的绝对路径。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    output: toolOutput(),
+    async execute(_args, exec) {
+      return outputJson(await runtime.openWorkspace(sessionIdOf(exec)))
+    },
+  })
+
+  ctx.tools.register({
+    name: 'studio_reload_upstream',
+    description: '重新扫描当前 DSH Session Workspace 并执行 Contract 全量验证；存在待应用更新时由 Report Studio 界面决定是否载入。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    output: toolOutput(),
+    async execute(_args, exec) {
+      return outputJson(await runtime.reloadWorkspace(sessionIdOf(exec), { dirty: true }))
+    },
+  })
+
+  ctx.tools.register({
     name: 'studio_get_context',
     description: '按不可变 ReviewSubmission 的 baseRevision 读取 Report Studio v0.1.1 大纲、草案和批注快照。修改前必须先调用。',
     parameters: {
@@ -127,6 +155,15 @@ function createRoute(runtime, listenHost) {
     try {
       if (url.pathname.startsWith('/report-studio/api/')) {
         const sessionId = sessionIdFrom(url)
+        if (request.method === 'GET' && url.pathname === '/report-studio/api/workspace/status') {
+          return sendJson(response, 200, await runtime.workspaceStatus(sessionId))
+        }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/workspace/reload') {
+          return sendJson(response, 200, await runtime.reloadWorkspace(sessionId, await readJson(request)))
+        }
+        if (request.method === 'POST' && url.pathname === '/report-studio/api/workspace/apply') {
+          return sendJson(response, 200, await runtime.applyWorkspaceCandidate(sessionId, await readJson(request)))
+        }
         const repository = await runtime.repositoryFor(sessionId)
         const standardProject = createStandardProjectService(repository)
         if (request.method === 'GET' && url.pathname === '/report-studio/api/health') {
@@ -200,7 +237,7 @@ export function apply(ctx, config = {}) {
   if (ctx.webServer.host !== '127.0.0.1') {
     throw new Error(`${SECURITY_MODE} requires DSH webServer host 127.0.0.1`)
   }
-  const runtime = createStudioDshRuntime({ dataRoot: config.dataDir })
+  const runtime = createStudioDshRuntime({ dataRoot: config.dataDir, sessions: ctx.sessions })
   registerTools(ctx, runtime)
   ctx.systemPrompt.section({
     name: 'report-studio-v0.1.1',
@@ -212,8 +249,11 @@ export function apply(ctx, config = {}) {
       'studio_apply_commands creates a Proposal for human confirmation and never directly commits Project State.',
     ].join('\n'),
   })
-  ctx.effect(
-    () => ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime, ctx.webServer.host) }),
-    'report-studio-dsh: web route',
-  )
+  ctx.effect(() => {
+    const unregister = ctx.webServer.register({ kind: 'prefix', path: '/report-studio', handler: createRoute(runtime, ctx.webServer.host) })
+    return async () => {
+      unregister?.()
+      await runtime.close()
+    }
+  }, 'report-studio-dsh: web route')
 }

@@ -69,11 +69,11 @@
 - Runtime 新增 `openWorkspace(sessionId)`, `workspaceStatus(sessionId)`, `reloadWorkspace(sessionId, input)`, `applyWorkspaceCandidate(sessionId, input)`, `close()`。
 - DSH tools 新增 `studio_open_workspace_project`、`studio_reload_upstream`。
 
-- [ ] **Step 1: 写首次 Revision 0、后续 Revision、activePage 保持/回退、Operational 保留、同 Workspace 多 Session 共享、Session 切 Workspace 和工具绑定的失败测试。**
-- [ ] **Step 2: 运行 Repository/Runtime/Host 目标测试并确认正确失败。**
-- [ ] **Step 3: 实现 Workspace keyed Repository、候选状态机、上游安全发布和 host `sessions` 注入。**
-- [ ] **Step 4: 重跑目标测试，确认不同 Workspace 隔离、同 Workspace 不重复建项目，关闭时释放 watcher/repository。**
-- [ ] **Step 5: 提交 `feat(dsh): bind studio projects to session workspaces`。**
+- [x] **Step 1: 写首次 Revision 0、后续 Revision、activePage 保持/回退、Operational 保留、同 Workspace 多 Session 共享、Session 切 Workspace 和工具绑定的失败测试。**
+- [x] **Step 2: 运行 Repository/Runtime/Host 目标测试并确认正确失败。**
+- [x] **Step 3: 实现 Workspace keyed Repository、候选状态机、上游安全发布和 host `sessions` 注入。**
+- [x] **Step 4: 重跑目标测试，确认不同 Workspace 隔离、同 Workspace 不重复建项目，关闭时释放 watcher/repository。**
+- [x] **Step 5: 提交 `feat(dsh): bind studio projects to session workspaces`。**
 
 ### Task 4: 同步状态和 dirty 冲突 UI
 
