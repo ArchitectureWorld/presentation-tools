@@ -32,11 +32,11 @@
 - Produces: `resolveWorkspaceRoot(value)`, `readWorkspaceSnapshot(workspaceRoot, options)`, `createWorkspaceWatcher(options)`。
 - `readWorkspaceSnapshot()` 返回 `{status, workspaceRoot, projectId, standardVersion, fingerprint, sourceRevision, sourceRevisions, readAt, validation, snapshot}`。
 
-- [ ] **Step 1: 写 Workspace 解析、合法/缺失/无效项目、managed-only 读取和来源 Revision 的失败测试。**
-- [ ] **Step 2: 运行 `node --test apps/studio-local/workspace-live-link.test.mjs packages/studio-standard-adapter/index.test.mjs`，确认因接口不存在而失败。**
-- [ ] **Step 3: 实现绝对路径/realpath/符号链接边界、Contract 全量验证、managed-only archive、稳定指纹和 sourceRefs 汇总。**
-- [ ] **Step 4: 重跑测试，确认通过且 Contract 目录无内容变化。**
-- [ ] **Step 5: 提交 `feat(workspace): read current standard project safely`。**
+- [x] **Step 1: 写 Workspace 解析、合法/缺失/无效项目、managed-only 读取和来源 Revision 的失败测试。**
+- [x] **Step 2: 运行 `node --test apps/studio-local/workspace-live-link.test.mjs packages/studio-standard-adapter/index.test.mjs`，确认因接口不存在而失败。**
+- [x] **Step 3: 实现绝对路径/realpath/符号链接边界、Contract 全量验证、managed-only archive、稳定指纹和 sourceRefs 汇总。**
+- [x] **Step 4: 重跑测试，确认通过且 Contract 目录无内容变化。**
+- [x] **Step 5: 提交 `feat(workspace): read current standard project safely`。**
 
 ### Task 2: Watcher、防抖与错误恢复
 
