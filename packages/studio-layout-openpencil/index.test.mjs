@@ -125,12 +125,15 @@ test('OpenPencil create transaction is deterministic and does not mutate the ren
   assert.equal(first.operations.split('\n').length, 5)
 })
 
-test('transaction creates one root frame and deterministic element bindings', () => {
+test('transaction creates one root frame and declares deterministic element bindings in one sandbox', () => {
   const value = transaction()
   assert.equal(value.rootBinding, 'rs_page')
-  assert.match(value.operations.split('\n')[0], /^rs_page=I\(null,/u)
+  assert.match(value.operations.split('\n')[0], /^const rs_page=I\(null,/u)
   assert.equal(value.expectedBindings.length, 4)
-  for (const entry of value.expectedBindings) assert.match(entry.bindingKey, /^rs_el_[0-9a-f]{16}$/u)
+  for (const [index, entry] of value.expectedBindings.entries()) {
+    assert.match(entry.bindingKey, /^rs_el_[0-9a-f]{16}$/u)
+    assert.match(value.operations.split('\n')[index + 1], new RegExp(`^const ${entry.bindingKey}=I\\(rs_page,`, 'u'))
+  }
   assert.equal(new Set(value.expectedBindings.map(entry => entry.bindingKey)).size, 4)
 })
 
