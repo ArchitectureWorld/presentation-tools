@@ -47,6 +47,9 @@ permissions:
 jobs:
   verification:
     name: ${{ matrix.check-name }}
+    env:
+      REQUIRE_REAL_OPENPENCIL: '1'
+      REPORT_STUDIO_OPENPENCIL_PACKAGE_ROOT: ${{ github.workspace }}/.tmp/openpencil-runtime/node_modules/@zseven-w/dsh-openpencil
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -80,6 +83,9 @@ jobs:
           npm ci
           python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0
           npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+
+      - name: Install pinned OpenPencil runtime
+        run: npm install --prefix .tmp/openpencil-runtime --ignore-scripts --no-package-lock --no-save @zseven-w/dsh-openpencil@0.1.0-rc.9
 
       - name: Run the complete v0.2.0 convergence gate
         run: npm run verify:all

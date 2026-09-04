@@ -14,14 +14,15 @@
     "verify:contracts": "npm --prefix contracts/presentation-standard-project run verify",
     "verify:e2e": "node scripts/verify-e2e-v0.1.1.mjs",
     "verify:ui": "node scripts/verify-responsive-ui.mjs",
-    "verify:layout": "node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs packages/studio-layout-engine-binding/*.test.mjs packages/studio-layout-openpencil/*.test.mjs tools/layout-spike/*.test.mjs && node scripts/verify-layout-v0.2.0.mjs && node scripts/verify-layout-openpencil-v0.2.0.mjs",
+    "verify:layout": "node --test packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs packages/studio-layout-engine-binding/*.test.mjs packages/studio-layout-openpencil/*.test.mjs tools/layout-spike/*.test.mjs && node scripts/verify-layout-v0.2.0.mjs && node scripts/verify-layout-openpencil-v0.2.0.mjs && npm run verify:layout:runtime",
     "verify:layout:browser": "node scripts/verify-layout-spike.mjs",
     "verify:all": "npm test && npm run verify && npm run verify:contracts && npm run verify:e2e && npm run verify:ui && npm run verify:dsh && npm run verify:release && npm run verify:workspace && npm run verify:layout",
     "verify:dsh": "node scripts/verify-dsh-plugin.mjs",
     "verify:release": "node scripts/release-integrity.mjs --configuration true",
     "verify:workspace": "node scripts/verify-workspace-live-link.mjs",
     "sync:vendor": "node scripts/build-dsh-plugin-vendor.mjs",
-    "smoke:dsh": "node scripts/smoke-dsh-native.mjs"
+    "smoke:dsh": "node scripts/smoke-dsh-native.mjs",
+    "verify:layout:runtime": "node scripts/verify-layout-openpencil-runtime-v0.2.0.mjs"
   },
   "devDependencies": {
     "ajv": "8.17.1",
