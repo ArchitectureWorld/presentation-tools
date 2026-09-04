@@ -135,6 +135,13 @@ async function clickCenter(cdp, selector) {
   await delay(120);
 }
 
+async function pressTab(cdp, shift = false) {
+  const event = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, modifiers: shift ? 8 : 0 };
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
+  await delay(80);
+}
+
 async function waitFor(cdp, expression, description, timeoutMs = 7000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -390,12 +397,16 @@ async function main() {
         status: document.querySelector('#agent-status').textContent.trim(),
         fabDisplay: getComputedStyle(document.querySelector('#agent-fab')).display,
         expanded: document.querySelector('#agent-fab').getAttribute('aria-expanded'),
+        workspaceInert: document.querySelector('#app').inert,
+        workspaceAriaHidden: document.querySelector('#app').getAttribute('aria-hidden'),
         modalWidth: document.querySelector('.agent-chat-card').getBoundingClientRect().width,
         modalHeight: document.querySelector('.agent-chat-card').getBoundingClientRect().height,
       }))()`);
       assert.equal(agentState.status, 'DSH Bridge 未配置 · 可正常人工编辑');
       assert.notEqual(agentState.fabDisplay, 'none', `${viewport.name} 原生 iframe 隐藏了 Agent FAB`);
       assert.equal(agentState.expanded, 'true');
+      assert.equal(agentState.workspaceInert, true);
+      assert.equal(agentState.workspaceAriaHidden, 'true');
       assert.ok(agentState.modalWidth <= viewport.width - 10, `${viewport.name} Agent 弹窗超出窗口宽度`);
       assert.ok(agentState.modalHeight <= viewport.height - 10, `${viewport.name} Agent 弹窗超出窗口高度`);
       if (viewport.width >= 1024) {
@@ -406,14 +417,25 @@ async function main() {
       const agentShot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
       await writeFile(join(screenshotDir, `${viewport.name}-agent.png`), Buffer.from(agentShot.data, 'base64'));
 
+      await cdp.evaluate(`document.querySelector('#agent-send').focus()`);
+      await pressTab(cdp);
+      assert.equal(await cdp.evaluate(`document.activeElement === document.querySelector('#agent-close')`), true, `${viewport.name} Tab 未从末尾循环到首项`);
+      await cdp.evaluate(`document.querySelector('#agent-close').focus()`);
+      await pressTab(cdp, true);
+      assert.equal(await cdp.evaluate(`document.activeElement === document.querySelector('#agent-send')`), true, `${viewport.name} Shift+Tab 未从首项循环到末尾`);
+
       await clickCenter(cdp, '#agent-close');
       await waitFor(cdp, `document.querySelector('#agent-modal').hidden`, `${viewport.name} Agent 弹窗关闭`);
       const closedAgentState = await cdp.evaluate(`(() => ({
         expanded: document.querySelector('#agent-fab').getAttribute('aria-expanded'),
         focusReturned: document.activeElement === document.querySelector('#agent-fab'),
+        workspaceInert: document.querySelector('#app').inert,
+        workspaceAriaHidden: document.querySelector('#app').getAttribute('aria-hidden'),
       }))()`);
       assert.equal(closedAgentState.expanded, 'false');
       assert.equal(closedAgentState.focusReturned, true);
+      assert.equal(closedAgentState.workspaceInert, false);
+      assert.equal(closedAgentState.workspaceAriaHidden, null);
       results.push({ viewport: viewport.name, outlineMetrics, draftMetrics, agentState });
     }
 

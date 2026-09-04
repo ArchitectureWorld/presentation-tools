@@ -6,7 +6,6 @@ let commentFilter = 'all';
 let toastTimer = null;
 let migration = null;
 const revealedProposalIds = new Set();
-const agentFeedEvents = [];
 let draftEditBuffer = null;
 let draftAutosaveTimer = null;
 let draftFlushPromise = null;
@@ -741,17 +740,13 @@ function renderAgent() {
       time: proposal.createdAt,
       html: `<div class="agent-message proposal"><strong>Agent · ${escapeHtml(proposal.message || '已返回修改建议')}</strong><br>Proposal ${escapeHtml(proposal.id.slice(-5))}<span class="agent-message-meta">${escapeHtml(proposal.status)}</span></div>`,
     })),
-    ...agentFeedEvents.map(event => ({
-      time: event.time,
-      html: `<div class="agent-message ${event.kind === 'user' ? 'user' : event.kind === 'error' ? 'error' : 'system'}"><strong>${event.kind === 'user' ? '你' : event.kind === 'error' ? '错误' : 'Agent'}</strong><br>${escapeHtml(event.text)}<span class="agent-message-meta">${escapeHtml(event.status)}</span></div>`,
-    })),
   ].sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
 
   const welcome = `
     <div class="agent-welcome">
       <strong>项目级 Agent 会话</strong>
       <p>${escapeHtml(state.project.title)} · ${health?.agentConfigured
-        ? '普通提问和批注任务进入当前 DSH Session。业务修改仍需通过 Proposal 确认。'
+        ? '普通提问和批注任务进入当前 DSH Session。此处只显示持久化的评审状态；完整对话请在 DSH 原生时间线查看。'
         : '当前未配置 DSH Bridge。大纲、草案、批注、Revision 与持久化仍可正常人工使用。'}</p>
     </div>`;
   query('#agent-feed').innerHTML = welcome + items.map(item => item.html).join('');
@@ -796,15 +791,40 @@ async function submitReview(reviewRoundId = selectedRoundId) {
   }
 }
 
+function appendTransientAgentStatus({ kind, title, text, status }) {
+  const feed = query('#agent-feed');
+  const className = kind === 'user' ? 'user' : kind === 'error' ? 'error' : 'system';
+  feed.innerHTML += `<div class="agent-message ${className}" data-agent-transient="true"><strong>${escapeHtml(title)}</strong><br>${escapeHtml(text)}<span class="agent-message-meta">${escapeHtml(status)}</span></div>`;
+}
+
+function setAgentBackgroundBlocked(blocked) {
+  for (const selector of ['#app', '#agent-fab']) {
+    const node = query(selector);
+    if (!node) continue;
+    node.inert = blocked;
+    if (blocked) node.setAttribute('aria-hidden', 'true');
+    else node.removeAttribute('aria-hidden');
+  }
+}
+
+function agentModalFocusableElements() {
+  const modal = query('#agent-modal');
+  if (!modal) return [];
+  return [...modal.querySelectorAll('button:not(.modal-backdrop):not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+    .filter(node => !node.hidden);
+}
+
 function openAgent() {
   query('#agent-modal').hidden = false;
   query('#agent-fab').setAttribute('aria-expanded', 'true');
+  setAgentBackgroundBlocked(true);
   renderAgent();
   window.requestAnimationFrame(() => query('#agent-input')?.focus());
 }
 
 function closeAgent() {
   query('#agent-modal').hidden = true;
+  setAgentBackgroundBlocked(false);
   query('#agent-fab').setAttribute('aria-expanded', 'false');
   query('#agent-fab').focus();
 }
@@ -1120,34 +1140,28 @@ document.addEventListener('click', async event => {
   if (event.target.id === 'agent-send') {
     const text = query('#agent-input').value.trim();
     if (!text) return;
-    const userEvent = { kind: 'user', text, status: '发送中 · 当前 DSH Session', time: new Date().toISOString() };
-    agentFeedEvents.push(userEvent);
-    renderAgent();
+    appendTransientAgentStatus({ kind: 'user', title: '你', text, status: '本次窗口临时显示' });
     try {
-      const result = await api('/api/agent/chat', {
+      await api('/api/agent/chat', {
         method: 'POST',
         body: JSON.stringify({ text, stage: state.ui.stage, pageId: state.ui.activePageId }),
       });
       query('#agent-input').value = '';
-      userEvent.status = '已投递 · 当前 DSH Session';
-      agentFeedEvents.push({
-        kind: 'agent',
-        text: result.message || '已发送到当前 DSH Session',
-        status: 'Bridge 回执 · 当前 DSH Session',
-        time: new Date(Date.now() + 1).toISOString(),
+      appendTransientAgentStatus({
+        kind: 'system',
+        title: '系统 · 已排队',
+        text: '已交给当前 DSH Session 处理。',
+        status: '完整对话请在 DSH 原生时间线查看',
       });
-      toast(result.message || '已发送');
-      await load();
+      toast('已排队到当前 DSH Session');
     } catch (error) {
-      userEvent.status = '发送失败 · 可重试';
-      agentFeedEvents.push({
+      appendTransientAgentStatus({
         kind: 'error',
+        title: '错误',
         text: error.message,
         status: '普通聊天投递失败 · 可重试',
-        time: new Date(Date.now() + 1).toISOString(),
       });
       toast(error.message, true);
-      renderAgent();
     }
     return;
   }
@@ -1212,9 +1226,24 @@ window.addEventListener?.('beforeunload', event => {
 });
 
 document.addEventListener('keydown', async event => {
-  if (event.key === 'Escape' && !query('#agent-modal').hidden) {
-    closeAgent();
-    return;
+  if (!query('#agent-modal').hidden) {
+    if (event.key === 'Escape') {
+      event.preventDefault?.();
+      closeAgent();
+      return;
+    }
+    if (event.key === 'Tab') {
+      const focusable = agentModalFocusableElements();
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      const outside = !focusable.includes(document.activeElement);
+      if ((event.shiftKey && (document.activeElement === first || outside)) || (!event.shiftKey && (document.activeElement === last || outside))) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+      return;
+    }
   }
 
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
