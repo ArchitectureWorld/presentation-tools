@@ -19,20 +19,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Archive current checkout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Archive current checkout and dependencies
         shell: bash
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.tgz"
-          digest="$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.sha256"
+          source_archive="$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.tgz"
+          deps_archive="$RUNNER_TEMP/report-studio-node-modules-${GITHUB_SHA}.tgz"
           tar \
             --exclude=.git \
             --exclude=node_modules \
             --exclude='**/node_modules' \
             --exclude='.worktrees' \
-            -czf "$archive" \
+            -czf "$source_archive" \
             -C "$GITHUB_WORKSPACE" .
-          sha256sum "$archive" | sed "s#${RUNNER_TEMP}/##" > "$digest"
+          tar -czf "$deps_archive" -C "$GITHUB_WORKSPACE" node_modules
+          sha256sum "$source_archive" "$deps_archive" | sed "s#${RUNNER_TEMP}/##" > "$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.sha256"
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
@@ -40,6 +49,7 @@ jobs:
           name: report-studio-source-${{ github.sha }}
           path: |
             ${{ runner.temp }}/report-studio-source-${{ github.sha }}.tgz
+            ${{ runner.temp }}/report-studio-node-modules-${{ github.sha }}.tgz
             ${{ runner.temp }}/report-studio-source-${{ github.sha }}.sha256
           if-no-files-found: error
           retention-days: 1
