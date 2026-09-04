@@ -70,6 +70,33 @@ test('native DSH runtime binds isolated Report Studio projects to session ids an
   }
 })
 
+test('native DSH review prompt gives providers a closed executable draft.update contract', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'report-studio-dsh-prompt-contract-'))
+  try {
+    const runtime = createStudioDshRuntime({ dataRoot: root })
+    let state = await runtime.executeAction('prompt-contract-session', { type: 'outline.add', parentId: null, title: '原始标题', baseRevision: 0 })
+    state = await runtime.executeAction('prompt-contract-session', { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id, baseRevision: state.project.currentRevision })
+    const pageId = state.pages[0].id
+    await runtime.executeAction('prompt-contract-session', {
+      type: 'annotation.add',
+      scopeKey: `draft:${pageId}`,
+      target: { type: 'page', id: pageId, label: '原始标题' },
+      instruction: '把标题改为验收标题',
+    })
+
+    const submitted = await runtime.submitReview('prompt-contract-session', { scopeKey: `draft:${pageId}` })
+    const prompt = submitted.dshPrompt.text
+
+    assert.match(prompt, /顶层对象只允许 submissionId、projectId、baseRevision、scopeKey、idempotencyKey、message、commands/)
+    assert.match(prompt, /draft\.update 命令只允许 commandId、type、scopeKey、baseRevision、riskLevel、sourceAnnotationIds、pageId、patch/)
+    assert.match(prompt, /patch 只能且必须包含 heading、body、script 其中一个字段/)
+    assert.match(prompt, /不得在 draft\.update 命令中添加 title/)
+    assert.match(prompt, /不得搜索源码、写入临时文件或绕过 studio_apply_commands/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('native DSH retry reuses the immutable Submission and creates the next ReviewRun attempt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'report-studio-dsh-retry-'))
   try {
