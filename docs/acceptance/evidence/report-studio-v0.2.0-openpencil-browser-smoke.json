@@ -1,0 +1,40 @@
+{
+  "runId": "rs-op-20260904-final-50f8e870",
+  "recordedAt": "2026-09-04T10:38:06.000Z",
+  "branch": "feat/report-studio-v0.2.0-layout",
+  "sourceFingerprint": "sha256:50f8e870beec8c2ecf2ff43736bf176fc614639a043da02334005dd974d06f69",
+  "dsh": "0.1.2-rc.1",
+  "dshOpenPencil": "0.1.0-compat.1",
+  "platformPackage": "0.1.0-rc.9",
+  "dshWebStartup": true,
+  "browser": {
+    "canvasVisible": true,
+    "canvasNonBlank": true,
+    "canvasBackingWidth": 4212,
+    "canvasBackingHeight": 1586,
+    "canvasCssWidth": 2105.98974609375,
+    "canvasCssHeight": 792.9861450195312,
+    "zoom": true,
+    "zoomFromPercent": 67,
+    "zoomToPercent": 87,
+    "pan": true,
+    "fitView": true,
+    "fitViewPercent": 67,
+    "selectedNodeIds": ["n6"],
+    "mappedLayoutElementIds": ["layout_element_runtime_title"],
+    "selectionMapped": true,
+    "dirtyTransition": true,
+    "saveCount": 1,
+    "reopenCount": 1,
+    "reopenNodeIdentityStable": true,
+    "consoleErrors": [],
+    "consoleWarnings": ["[op-collab] event stream unavailable; falling back to polling"]
+  },
+  "cleanup": {
+    "browserHarnessStopped": true,
+    "browserPortsReleased": true,
+    "isolatedDshStopped": true,
+    "isolatedDshPortReleased": true
+  },
+  "productionDataTouched": "NO"
+}
