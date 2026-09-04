@@ -64,6 +64,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.11.0'
+          cache: npm
+      - name: Install root dependencies from lockfile
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run convergence, layout foundation, adapter, OpenPencil and spike model tests
         run: node --test scripts/verify-v0.2.0-convergence.test.mjs packages/studio-layout-contracts/*.test.mjs packages/studio-layout-core/*.test.mjs packages/studio-layout-adapter/*.test.mjs packages/studio-layout-integration/*.test.mjs packages/studio-layout-engine-binding/*.test.mjs packages/studio-layout-openpencil/*.test.mjs tools/layout-spike/*.test.mjs
       - name: Run deterministic layout verification
