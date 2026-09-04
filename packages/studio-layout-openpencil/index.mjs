@@ -237,7 +237,7 @@ export function compileOpenPencilCreateTransaction(renderPlan, options = {}) {
     width: renderPlan.canvas.width,
     height: renderPlan.canvas.height,
   }
-  const operations = [`${ROOT_BINDING}=I(null,${JSON.stringify(rootNode)})`]
+  const operations = [`const ${ROOT_BINDING}=I(null,${JSON.stringify(rootNode)})`]
   const expectedBindings = []
   const bindingKeys = new Set()
   for (const element of sortedElements) {
@@ -247,7 +247,7 @@ export function compileOpenPencilCreateTransaction(renderPlan, options = {}) {
     }
     bindingKeys.add(bindingKey)
     expectedBindings.push({ bindingKey, layoutElementId: element.layoutElementId })
-    operations.push(`${bindingKey}=I(${ROOT_BINDING},${JSON.stringify(nodeForElement(element, options))})`)
+    operations.push(`const ${bindingKey}=I(${ROOT_BINDING},${JSON.stringify(nodeForElement(element, options))})`)
   }
   return {
     adapterVersion: OPENPENCIL_ADAPTER_VERSION,
