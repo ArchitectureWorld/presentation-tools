@@ -17,7 +17,16 @@ async function fixture() {
   const titleBlockId = createStudioId('contentBlock')
   const bodyBlockId = createStudioId('contentBlock')
   await repository.transactContent({ baseRevision: initial.project.currentRevision, source: 'test', detail: { actionType: 'fixture' } }, state => {
-    state.outline = [{ id: outlineNodeId, outlineNodeId, parentOutlineNodeId: null, title: '目标', order: 0, children: [] }]
+    state.outline = [{
+      id: outlineNodeId,
+      outlineNodeId,
+      parentOutlineNodeId: null,
+      title: '目标',
+      order: 0,
+      sourceRefs: [],
+      opaqueExtension: null,
+      children: [],
+    }]
     state.pages = [{
       id: pageId,
       pageId,

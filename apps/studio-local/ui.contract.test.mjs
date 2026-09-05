@@ -5,10 +5,10 @@ import { join } from 'node:path';
 
 const root = new URL('./public/', import.meta.url);
 
-test('UI exposes v0.1.1 outline draft workflow, migration Gate and standard project controls', async () => {
+test('UI exposes the v0.2.0 outline draft layout workflow, migration Gate and standard project controls', async () => {
   const html = await readFile(new URL('index.html', root), 'utf8');
   assert.match(html, /Report Studio/);
-  assert.match(html, /v0\.1\.1/);
+  assert.match(html, /<title>Report Studio v0\.2\.0<\/title>/);
   assert.match(html, /<link rel="icon" href="data:,">/);
   assert.match(html, /data-stage="outline"/);
   assert.match(html, /data-stage="draft"/);
