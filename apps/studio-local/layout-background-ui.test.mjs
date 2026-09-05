@@ -27,3 +27,12 @@ test('new text wrapping and metric content are rendered while existing text styl
   assert.match(html, /word-break:break-all/)
   assert.doesNotMatch(context.elementHtml({ ...element, style: { fontSize: 28 } }), /word-break:/)
 })
+
+test('layout images use a definite block-sized box instead of an intrinsic grid track', async () => {
+  const css = await readFile(new URL('./public/layout.css', import.meta.url), 'utf8')
+  assert.match(css, /\.layout-image\s*\{[^}]*display:\s*block\s*;/u)
+  const imageRule = /\.layout-image\s*>\s*img\s*\{([^}]*)\}/u.exec(css)?.[1] ?? ''
+  for (const declaration of ['width: 100%', 'height: 100%', 'min-width: 0', 'min-height: 0']) {
+    assert.ok(imageRule.includes(declaration), `layout image must constrain ${declaration}`)
+  }
+})
