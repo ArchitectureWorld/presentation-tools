@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 
 import {
@@ -12,8 +12,9 @@ import {
 } from './runtime.mjs'
 
 const digest = value => String(value).repeat(64).slice(0, 64)
+const runtimeRoot = resolve('runtime-fixture')
 
-function descriptor(root = '/runtime') {
+function descriptor(root = runtimeRoot) {
   return {
     root,
     packageVersion: PINNED_DSH_OPENPENCIL_VERSION,
@@ -49,24 +50,24 @@ function passedEvidence(overrides = {}) {
 
 test('resolveDshOpenPencilPackage accepts only the pinned package and managed runtime modules', async () => {
   const files = new Map([
-    ['/runtime/package.json', JSON.stringify({ name: '@zseven-w/dsh-openpencil', version: PINNED_DSH_OPENPENCIL_VERSION })],
-    ['/runtime/platforms.json', JSON.stringify({ openPencil: { version: '0.8.5', revision: PINNED_OPENPENCIL_REVISION } })],
+    [join(runtimeRoot, 'package.json'), JSON.stringify({ name: '@zseven-w/dsh-openpencil', version: PINNED_DSH_OPENPENCIL_VERSION })],
+    [join(runtimeRoot, 'platforms.json'), JSON.stringify({ openPencil: { version: '0.8.5', revision: PINNED_OPENPENCIL_REVISION } })],
   ])
   const result = await resolveDshOpenPencilPackage({
-    packageRoot: '/runtime',
+    packageRoot: runtimeRoot,
     readText: async path => {
       if (!files.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
       return files.get(path)
     },
     statPath: async path => ({ isFile: () => path.endsWith('editor-host.js') || path.endsWith('editor-recovery.js') }),
   })
-  assert.deepEqual(result, descriptor('/runtime'))
+  assert.deepEqual(result, descriptor())
 })
 
 test('resolveDshOpenPencilPackage rejects version drift', async () => {
   await assert.rejects(
     resolveDshOpenPencilPackage({
-      packageRoot: '/runtime',
+      packageRoot: runtimeRoot,
       readText: async path => path.endsWith('package.json')
         ? JSON.stringify({ name: '@zseven-w/dsh-openpencil', version: '0.1.0-rc.10' })
         : JSON.stringify({ openPencil: { version: '0.8.5', revision: PINNED_OPENPENCIL_REVISION } }),
@@ -90,27 +91,28 @@ test('assertOpenPencilRuntimeEvidence requires real batch, editor, selection, pa
 test('runOpenPencilRuntimeSmoke executes the managed lifecycle in an isolated DSH home and cleans it', async () => {
   let cleaned = false
   let observedDshHome = null
+  const expectedTemporaryRoot = resolve('layout-runtime-smoke')
   const before = process.env.DSH_HOME
   process.env.DSH_HOME = '/production-dsh-home'
   try {
     const result = await runOpenPencilRuntimeSmoke({
-      runtime: descriptor('/runtime'),
-      makeTemporaryDirectory: async () => '/tmp/layout-runtime-smoke',
+      runtime: descriptor(),
+      makeTemporaryDirectory: async () => expectedTemporaryRoot,
       executeLifecycle: async ({ runtime, temporaryRoot, signal }) => {
-        assert.deepEqual(runtime, descriptor('/runtime'))
-        assert.equal(temporaryRoot, '/tmp/layout-runtime-smoke')
+        assert.deepEqual(runtime, descriptor())
+        assert.equal(temporaryRoot, expectedTemporaryRoot)
         assert.equal(signal.aborted, false)
         observedDshHome = process.env.DSH_HOME
         return passedEvidence({ packageVersion: 'ignored-by-lifecycle' })
       },
       removeDirectory: async path => {
-        assert.equal(path, '/tmp/layout-runtime-smoke')
+        assert.equal(path, expectedTemporaryRoot)
         cleaned = true
       },
     })
     assert.equal(result.status, 'passed')
     assert.equal(result.packageVersion, PINNED_DSH_OPENPENCIL_VERSION)
-    assert.equal(observedDshHome, '/tmp/layout-runtime-smoke/dsh-home')
+    assert.equal(observedDshHome, join(expectedTemporaryRoot, 'dsh-home'))
     assert.equal(cleaned, true)
     assert.equal(process.env.DSH_HOME, '/production-dsh-home')
   } finally {
@@ -121,15 +123,16 @@ test('runOpenPencilRuntimeSmoke executes the managed lifecycle in an isolated DS
 
 test('runOpenPencilRuntimeSmoke restores DSH_HOME and cleans the temporary directory after failure', async () => {
   let cleaned = false
+  const expectedTemporaryRoot = resolve('layout-runtime-fail')
   const before = process.env.DSH_HOME
   delete process.env.DSH_HOME
   try {
     await assert.rejects(
       runOpenPencilRuntimeSmoke({
-        runtime: descriptor('/runtime'),
-        makeTemporaryDirectory: async () => '/tmp/layout-runtime-fail',
+        runtime: descriptor(),
+        makeTemporaryDirectory: async () => expectedTemporaryRoot,
         executeLifecycle: async () => { throw new OpenPencilRuntimeError('layout_engine_runtime_failed', 'managed daemon failed', { diagnostic: 'safe' }) },
-        removeDirectory: async path => { assert.equal(path, '/tmp/layout-runtime-fail'); cleaned = true },
+        removeDirectory: async path => { assert.equal(path, expectedTemporaryRoot); cleaned = true },
       }),
       error => error.code === 'layout_engine_runtime_failed' && error.details.diagnostic === 'safe',
     )

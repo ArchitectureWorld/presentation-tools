@@ -19,7 +19,7 @@ function fixture() {
     layoutEngineBindingId: 'layout_engine_binding_01992a80-0000-7000-8000-000000000901',
     layoutPageId: 'layout_page_01992a80-0000-7000-8000-000000000101',
     engine: 'openpencil',
-    engineAdapterVersion: '0.2.0-alpha.2',
+    engineAdapterVersion: '0.2.0-alpha.3',
     engineDocumentRef: {
       provider: 'openpencil',
       documentId: 'document-001',

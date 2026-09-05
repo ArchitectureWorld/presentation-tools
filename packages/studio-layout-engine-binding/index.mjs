@@ -1,7 +1,7 @@
 import { randomBytes as cryptoRandomBytes } from 'node:crypto'
 
 export const ENGINE_BINDING_SCHEMA_VERSION = 'report-studio.layout-engine-binding.v0.2.0-alpha.2'
-export const OPENPENCIL_ENGINE_ADAPTER_VERSION = '0.2.0-alpha.2'
+export const OPENPENCIL_ENGINE_ADAPTER_VERSION = '0.2.0-alpha.3'
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 const BINDING_ID = new RegExp(`^layout_engine_binding_${UUID_V7.source.slice(1, -1)}$`, 'u')
