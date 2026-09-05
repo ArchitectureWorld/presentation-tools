@@ -84,11 +84,13 @@ export async function serveReferencedAsset({ repository, assetId, response }) {
   const asset = repository.getState().pages.flatMap(page => page.assets ?? []).find(item => item.id === assetId)
   if (!asset?.objectRef) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '未找到当前项目引用的素材。', undefined, 404)
   const stream = await repository.openBlob(asset.objectRef)
-  response.writeHead?.(200, { 'content-type': asset.mimeType, 'content-length': asset.sizeBytes, 'x-content-type-options': 'nosniff' })
+  const mimeType = asset.mimeType ?? asset.objectRef.mimeType
+  const sizeBytes = asset.sizeBytes ?? asset.objectRef.sizeBytes
+  response.writeHead?.(200, { 'content-type': mimeType, 'content-length': sizeBytes, 'x-content-type-options': 'nosniff' })
   if (!response.writeHead) {
     response.statusCode = 200
-    response.setHeader('content-type', asset.mimeType)
-    response.setHeader('content-length', asset.sizeBytes)
+    response.setHeader('content-type', mimeType)
+    response.setHeader('content-length', sizeBytes)
     response.setHeader('x-content-type-options', 'nosniff')
   }
   stream.pipe(response)

@@ -72,6 +72,7 @@ function resolvedPageAssets(page) {
         durationMs: asset.durationMs,
         pageCount: asset.pageCount,
         altText: asset.altText,
+        semanticRole: asset.extensionPayload?.standard?.semanticRole ?? asset.semanticRole,
       },
     }
   })
@@ -109,6 +110,42 @@ function sourceText(payload) {
   return null
 }
 
+function estimatedTextHeight(content, width, fontSize) {
+  // New default text uses break-all, so a conservative em budget also covers long URLs and formulae.
+  const columns = Math.max(1, Math.floor((width - 16) / (fontSize * 1.04)))
+  const lines = String(content).split(/\r\n?|\n/u).reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / columns)), 0)
+  return Math.ceil(lines * fontSize * 1.25) + 4
+}
+
+function fitTextEntries(entries, width, availableHeight, maximumFontSize = 28, minimumFontSize = 18, gap = 12) {
+  for (let fontSize = maximumFontSize; fontSize >= minimumFontSize; fontSize -= 1) {
+    const heights = entries.map(([, payload]) => estimatedTextHeight(sourceText(payload), width, fontSize))
+    if (heights.reduce((sum, height) => sum + height, 0) + Math.max(0, entries.length - 1) * gap <= availableHeight) {
+      return { fontSize, heights }
+    }
+  }
+  fail('layout_text_overflow', '当前页面正文超过可读的单页容量，请先拆分草案内容再创建排版。', { sourceCount: entries.length }, 409)
+}
+
+function fitBodyEntries(entries, startY, imageCount) {
+  const imageBottom = startY + Math.max(0, imageCount - 1) * 296 + 264
+  for (const compact of [false, true]) {
+    const gap = compact ? 8 : 12
+    for (let fontSize = 28; fontSize >= 18; fontSize -= 1) {
+      let y = startY
+      const frames = entries.map(([, payload]) => {
+        const width = !imageCount || (compact && y >= imageBottom + gap) ? 1416 : 790
+        const height = estimatedTextHeight(sourceText(payload), width, fontSize)
+        const frame = { x: 96, y, width, height, rotation: 0 }
+        y += height + gap
+        return frame
+      })
+      if (y - gap <= 860) return { fontSize, frames }
+    }
+  }
+  fail('layout_text_overflow', '当前页面正文超过可读的单页容量，请先拆分草案内容再创建排版。', { sourceCount: entries.length }, 409)
+}
+
 function defaultLayout(projection) {
   let layout = createLayoutPage({
     projectId: projection.projectId,
@@ -119,45 +156,59 @@ function defaultLayout(projection) {
   layout.layoutRevision = -1
   layout = addDetachedLayoutElement(layout, {
     type: 'shape',
-    localPayload: { shapeKind: 'rectangle', label: 'Page background' },
+    localPayload: { shapeKind: 'rectangle', label: 'Page background', decorative: true },
     frame: { x: 0, y: 0, width: 1600, height: 900, rotation: 0 },
     style: { fill: '#f7f5f0', opacity: 1 },
     zIndex: 0,
   })
 
   const entries = Object.entries(projection.sources)
+  const pageImages = entries.filter(([, payload]) => payload.kind === 'asset'
+    && /^image\/(?:avif|bmp|gif|jpeg|png|svg\+xml|webp|x-icon|vnd\.microsoft\.icon)$/iu.test(payload.objectRef?.mimeType ?? ''))
+  const background = pageImages.find(([, payload]) => payload.role === 'background')
+  if (background) {
+    layout = addLiveLayoutElement(layout, {
+      type: 'image', sourceRef: sourceRefFromKey(background[0]),
+      frame: { x: 0, y: 0, width: 1600, height: 900, rotation: 0 },
+      style: { fit: /photo|photograph|摄影|照片/iu.test(background[1].metadata?.semanticRole ?? '') ? 'cover' : 'contain', opacity: 1 }, zIndex: 1,
+    })
+    layout = addDetachedLayoutElement(layout, {
+      type: 'shape', localPayload: { shapeKind: 'rectangle', label: '文字可读性遮罩', decorative: true },
+      frame: { x: 0, y: 0, width: 1600, height: 900, rotation: 0 },
+      style: { fill: '#101820', opacity: 0.8 }, zIndex: 2,
+    })
+  }
   const title = entries.find(([, payload]) => payload.kind === 'text' && payload.role === 'page_title')
+  let bodyY = 198
   if (title) {
+    const fitted = fitTextEntries([title], 1416, 128, 48, 28)
+    const titleHeight = Math.max(96, fitted.heights[0])
+    bodyY = 70 + titleHeight + 32
     layout = addLiveLayoutElement(layout, {
       type: 'text', sourceRef: sourceRefFromKey(title[0]),
-      frame: { x: 92, y: 70, width: 1416, height: 96, rotation: 0 },
-      style: { fontSize: 48, fontWeight: 700, textColor: '#17191d', opacity: 1 }, zIndex: 20,
+      frame: { x: 92, y: 70, width: 1416, height: titleHeight, rotation: 0 },
+      style: { fontSize: fitted.fontSize, fontWeight: 700, textColor: background ? '#f5f5f7' : '#17191d', opacity: 1, wordBreak: 'break-all' }, zIndex: 20,
     })
   }
 
-  const images = entries.filter(([, payload]) => payload.kind === 'asset').slice(0, 2)
+  const images = pageImages.filter(([, payload]) => ['primary', 'supporting'].includes(payload.role)).slice(0, 2)
   const textEntries = entries.filter(([key, payload]) => key !== title?.[0]
-    && !['list', 'metric-group', 'table', 'asset'].includes(payload.kind)
-    && sourceText(payload) !== null).slice(0, images.length ? 7 : 10)
-  const textWidth = images.length ? 790 : 1416
-  let y = 198
-  for (const [key, payload] of textEntries) {
-    const isScript = payload.kind === 'script-block'
-    const height = isScript ? 104 : 74
+    && ['text', 'list-item', 'metric'].includes(payload.kind)
+    && sourceText(payload) !== null)
+  const fitted = fitBodyEntries(textEntries, bodyY, images.length)
+  for (const [index, [key, payload]] of textEntries.entries()) {
     layout = addLiveLayoutElement(layout, {
       type: 'text', sourceRef: sourceRefFromKey(key),
-      frame: { x: 96, y, width: textWidth, height, rotation: 0 },
-      style: { fontSize: isScript ? 22 : 28, fontWeight: payload.kind === 'metric' ? 650 : 400, textColor: '#30343b', opacity: 1 },
+      frame: fitted.frames[index],
+      style: { fontSize: fitted.fontSize, fontWeight: payload.kind === 'metric' ? 650 : 400, textColor: background ? '#f5f5f7' : '#30343b', opacity: 1, wordBreak: 'break-all' },
       zIndex: 10,
     })
-    y += height + 18
-    if (y > 820) break
   }
   images.forEach(([key], index) => {
     layout = addLiveLayoutElement(layout, {
       type: 'image', sourceRef: sourceRefFromKey(key),
-      frame: { x: 930, y: 198 + index * 296, width: 578, height: 264, rotation: 0 },
-      style: { fit: 'cover', cornerRadius: 18, opacity: 1 }, zIndex: 12 + index,
+      frame: { x: 930, y: bodyY + index * 296, width: 578, height: 264, rotation: 0 },
+      style: { fit: 'contain', cornerRadius: 18, opacity: 1 }, zIndex: 12 + index,
     })
   })
   return reconcileLayoutSources(layout, projection.sources, projection.projectRevision)

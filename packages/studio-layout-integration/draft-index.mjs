@@ -265,7 +265,7 @@ function assertObjectRef(objectRef, pageAssetId) {
 
 function safeMetadata(metadata) {
   if (!isObject(metadata)) return {}
-  const allowed = ['widthPx', 'heightPx', 'durationMs', 'pageCount', 'frameRate', 'colorSpace', 'altText']
+  const allowed = ['widthPx', 'heightPx', 'durationMs', 'pageCount', 'frameRate', 'colorSpace', 'altText', 'semanticRole']
   return Object.fromEntries(allowed.filter(key => Object.hasOwn(metadata, key)).map(key => [key, clone(metadata[key])]))
 }
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { createRepository } from './repository.mjs';
 import { createStudioServer } from './server.mjs';
 import { createStudioId } from '../../packages/studio-contracts/index.mjs';
@@ -148,6 +149,35 @@ test('controlled asset ingestion stores binary outside state and serves only ref
     assert.equal(state.pages[0].assets[0].heightPx, 1);
     assert.equal((await fetch(`${base}/api/assets/${asset.assetId}/content`)).status, 200);
     assert.equal((await fetch(`${base}/api/assets/not-current/content`)).status, 404);
+  } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
+});
+
+test('imported PDF originals and images are served intact when size metadata lives only in ObjectRef', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-original-content-'));
+  const app = await createStudioServer({ dataDir: dir, port: 0 }); await app.start();
+  try {
+    const base = `http://127.0.0.1:${app.port}`;
+    let state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'outline.add', parentId:null, title:'原件页', baseRevision:0 }) }).then(r=>r.json());
+    state = await fetch(`${base}/api/action`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ type:'draft.ensurePage', outlineNodeId:state.outline[0].id, baseRevision:state.project.currentRevision }) }).then(r=>r.json());
+    for (const [mimeType, name, bytes] of [
+      ['application/pdf', '工程量原件.pdf', Buffer.from('%PDF-1.4\nOriginal reference bytes\n%%EOF')],
+      ['image/png', '总平面.png', png()],
+    ]) {
+      const objectRef = await app.repository.putBlob(Readable.from([bytes]), { mimeType, originalFileName: name });
+      const assetId = createStudioId('asset');
+      state = await app.repository.transactContent({ baseRevision: state.project.currentRevision, source: 'standard_import' }, current => {
+        current.pages[0].pageAssets.push({ id: assetId, assetId, pageAssetId: createStudioId('pageAsset'), name, mimeType, objectRef,
+          role: 'reference', caption: '', order: current.pages[0].pageAssets.length, sourceRefs: [] });
+        return current;
+      });
+      assert.equal(state.pages[0].assets.find(asset => asset.id === assetId).sizeBytes, undefined);
+      const response = await fetch(`${base}/api/assets/${assetId}/content`);
+      assert.equal(response.status, 200, response.status === 200 ? undefined : await response.text());
+      assert.equal(response.headers.get('content-type'), mimeType);
+      assert.equal(response.headers.get('content-length'), String(bytes.length));
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    }
   } finally { await app.stop(); await rm(dir, { recursive:true, force:true }); }
 });
 

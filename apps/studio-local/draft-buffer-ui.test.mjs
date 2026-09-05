@@ -83,6 +83,28 @@ test('asset caption input is buffered and saved with the original PageAsset iden
   assert.deepEqual([saved.pageAssetId, saved.assetId, saved.caption], ['pageAsset_caption', 'asset_caption', '更新后的说明'])
 })
 
+test('the current page asset library offers an original-file link for PDF documents and preserves the session URL', async () => {
+  const app = await loadBrowser()
+  app.context.window.location = { pathname: '/report-studio/', origin: 'http://localhost', search: '?sessionId=session-test' }
+  const markup = app.context.renderAsset({ id: 'asset_pdf', pageAssetId: 'pageAsset_pdf', name: '工程量清单.pdf', mimeType: 'application/pdf', role: 'reference' }, 0)
+  assert.match(markup, /href="\/report-studio\/api\/assets\/asset_pdf\/content\?sessionId=session-test"/)
+  assert.match(markup, /target="_blank"/)
+  assert.match(markup, /rel="noopener noreferrer"/)
+  assert.match(markup, /打开原件/)
+  assert.match(markup, /application\/pdf/)
+  assert.doesNotMatch(markup, /<img/)
+})
+
+test('CAD and unknown image MIME types use original-file links instead of broken image previews', async () => {
+  const app = await loadBrowser()
+  for (const mimeType of ['image/vnd.dwg', 'image/vnd.dxf', 'image/unknown']) {
+    const markup = app.context.renderAsset({ id: 'asset_original', mimeType, name: '专业原件', role: 'reference' }, 0)
+    assert.doesNotMatch(markup, /<img/)
+    assert.match(markup, /打开原件/)
+  }
+  assert.match(app.context.renderAsset({ id: 'asset_png', mimeType: 'image/png', name: '现场.png' }, 0), /<img/)
+})
+
 test('editing the body then adding a list item flushes the body before the structural action', async () => {
   const app = await loadBrowser()
   const body = app.elements.get('#draft-body'); body.value = '先保存的正文'

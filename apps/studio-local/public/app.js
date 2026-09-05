@@ -570,7 +570,7 @@ function renderOutline() {
 
 function renderAsset(asset, index) {
   const caption = draftEditBuffer?.assetCaptions.find(item => item.pageAssetId === asset.pageAssetId)?.caption ?? asset.caption ?? '';
-  const preview = asset.id && String(asset.mimeType || asset.type || '').startsWith('image/')
+  const preview = asset.id && /^image\/(?:avif|bmp|gif|jpeg|png|svg\+xml|webp|x-icon|vnd\.microsoft\.icon)$/iu.test(asset.mimeType || asset.type || '')
     ? `<img src="${escapeAttr(assetContentUrl(asset.id))}" alt="${escapeAttr(asset.name || `素材 ${index + 1}`)}">`
     : `<div class="empty-state" style="min-height:110px;padding:18px"><div><strong>素材预览</strong><p>当前文件没有可显示的图片预览。</p></div></div>`;
 
@@ -580,7 +580,8 @@ function renderAsset(asset, index) {
       <div class="asset-item-footer">
         <div class="asset-item-copy">
           <strong>${escapeHtml(asset.name || `素材 ${index + 1}`)}</strong>
-          <small>${escapeHtml(asset.type || 'image')}</small>
+          <small>${escapeHtml(asset.mimeType || asset.type || 'application/octet-stream')}</small>
+          ${asset.id ? `<a href="${escapeAttr(assetContentUrl(asset.id))}" target="_blank" rel="noopener noreferrer">打开原件</a>` : ''}
           <input class="asset-caption-input" data-asset-caption="${escapeAttr(asset.pageAssetId || '')}" value="${escapeAttr(caption)}" aria-label="素材 ${index + 1} 说明">
         </div>
         <button class="small-button" data-remove-asset="${escapeAttr(asset.pageAssetId || '')}" type="button">移出本页</button>

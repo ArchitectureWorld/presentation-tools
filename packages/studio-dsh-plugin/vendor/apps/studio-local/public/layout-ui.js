@@ -82,11 +82,13 @@ function elementHtml(element) {
   ].join(';')
   let content = ''
   if (element.type === 'text') {
-    content = `<div class="layout-text-content" style="color:${escapeHtml(style.textColor ?? '#24262d')};font-size:${Number(style.fontSize ?? 28)}px;font-weight:${Number(style.fontWeight ?? 400)};text-align:${escapeHtml(style.textAlign ?? 'left')}">${escapeHtml(element.payload?.content ?? '')}</div>`
+    const payload = element.payload ?? {}
+    const text = payload.kind === 'metric' ? `${payload.label} ${String(payload.value)}${payload.unit ? ` ${payload.unit}` : ''}` : payload.content ?? ''
+    content = `<div class="layout-text-content" style="color:${escapeHtml(style.textColor ?? '#24262d')};font-size:${Number(style.fontSize ?? 28)}px;font-weight:${Number(style.fontWeight ?? 400)};text-align:${escapeHtml(style.textAlign ?? 'left')}${style.wordBreak === 'break-all' ? ';word-break:break-all' : ''}">${escapeHtml(text)}</div>`
   } else if (element.type === 'image') {
     const src = assetUrl(element)
     content = src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(elementLabel(element))}" style="object-fit:${escapeHtml(style.fit ?? 'cover')}">` : '<span>图片素材</span>'
-  } else {
+  } else if (element.type !== 'shape' || element.payload?.decorative !== true) {
     content = `<span>${escapeHtml(elementLabel(element))}</span>`
   }
   const fill = element.type === 'shape' || element.type === 'group' ? `background:${escapeHtml(style.fill ?? 'transparent')};border-radius:${Number(style.cornerRadius ?? 0)}px` : ''
