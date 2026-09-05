@@ -488,7 +488,7 @@ function flattenOutline(nodes, depth = 0, result = []) {
 
 function renderPageStrip() {
   const strip = query('#page-strip');
-  const visible = state.ui.stage === 'draft' && state.pages.length > 0;
+  const visible = ['draft', 'layout'].includes(state.ui.stage) && state.pages.length > 0;
   strip.hidden = !visible;
   if (!visible) {
     strip.innerHTML = '';
@@ -946,13 +946,21 @@ function render() {
   query('#project-title').value = state.project.title;
   query('#revision-number').textContent = state.project.currentRevision;
   queryAll('.stage-tab').forEach(button => button.classList.toggle('active', button.dataset.stage === state.ui.stage));
+  query('#stage-workspace')?.classList.toggle('layout-workspace-active', state.ui.stage === 'layout');
   renderPageStrip();
   renderOutline();
   renderDraft();
   renderAnnotations();
   renderAgent();
   renderWorkspaceStatus();
+  window.reportStudioLayoutSync?.(structuredClone(state));
 }
+
+window.reportStudioApplyExternalState = nextState => {
+  if (!nextState?.project || !Array.isArray(nextState.pages)) return;
+  state = nextState;
+  render();
+};
 
 async function saveDraft() {
   const saved = await flushDraftBuffer({ reason: '显式保存' });

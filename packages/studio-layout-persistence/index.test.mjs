@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 
 import {
@@ -102,9 +102,11 @@ test('Presentation layout writes preserve unknown files in layouts/', async () =
 })
 
 test('production layout root must be the workspace layouts/ directory', () => {
-  assert.equal(assertLayoutRootOwnedByPresentation('/workspace/layouts', '/workspace'), '/workspace/layouts')
+  const workspaceRoot = resolve('workspace')
+  const layoutRoot = join(workspaceRoot, 'layouts')
+  assert.equal(assertLayoutRootOwnedByPresentation(layoutRoot, workspaceRoot), layoutRoot)
   assert.throws(
-    () => assertLayoutRootOwnedByPresentation('/workspace/pages', '/workspace'),
+    () => assertLayoutRootOwnedByPresentation(join(workspaceRoot, 'pages'), workspaceRoot),
     error => error instanceof LayoutPersistenceError && error.code === 'layout_root_invalid',
   )
 })

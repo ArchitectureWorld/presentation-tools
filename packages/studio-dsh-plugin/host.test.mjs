@@ -101,6 +101,17 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     assert.equal(health.listenHost, '127.0.0.1')
     assert.equal(health.networkSharedSecurity, false)
 
+    for (const [assetPath, contentType] of [
+      ['/report-studio/layout.css', 'text/css; charset=utf-8'],
+      ['/report-studio/layout-ui.js', 'text/javascript; charset=utf-8'],
+    ]) {
+      body = ''
+      await route.handler({ method: 'GET', url: assetPath }, response)
+      assert.equal(response.statusCode, 200, `${assetPath} must be packaged with the DSH plugin`)
+      assert.equal(headers.get('content-type'), contentType)
+      assert.ok(body.length > 100, `${assetPath} must not be empty`)
+    }
+
     body = ''
     await route.handler(Object.assign(Readable.from([Buffer.from(JSON.stringify({ workspaceRoot: 'C:\\must-not-open', dirty: true }))]), {
       method: 'POST', url: '/report-studio/api/workspace/reload?sessionId=session-host-test', headers: { 'content-type': 'application/json' },
