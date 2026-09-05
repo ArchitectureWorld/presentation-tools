@@ -7,6 +7,7 @@ import { createStandardProjectService } from '../vendor/apps/studio-local/standa
 import { ingestAsset, serveReferencedAsset } from '../vendor/apps/studio-local/asset-service.mjs'
 import { createLayoutService } from '../vendor/apps/studio-local/layout-service.mjs'
 import { executeLayoutApi, layoutApiErrorPayload, matchLayoutApiPath } from '../vendor/apps/studio-local/layout-api.mjs'
+import { createAgentBridge } from '../vendor/apps/studio-local/agent-bridge.mjs'
 
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions']
@@ -255,7 +256,8 @@ export function apply(ctx, config = {}) {
   if (ctx.webServer.host !== '127.0.0.1') {
     throw new Error(`${SECURITY_MODE} requires DSH webServer host 127.0.0.1`)
   }
-  const runtime = createStudioDshRuntime({ dataRoot: config.dataDir, sessions: ctx.sessions })
+  const agentBridge = createAgentBridge({ url: config.agentUrl || process.env.REPORT_STUDIO_AGENT_URL || '' })
+  const runtime = createStudioDshRuntime({ dataRoot: config.dataDir, sessions: ctx.sessions, agentBridge })
   registerTools(ctx, runtime)
   ctx.systemPrompt.section({
     name: 'report-studio-v0.1.1',

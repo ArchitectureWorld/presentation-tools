@@ -14,9 +14,9 @@ test('bridge sends structured review envelope and validates commands', async () 
     request = { url, options };
     return new Response(JSON.stringify({ message: '已处理', commands: [{ type: 'outline.rename', nodeId: 'o1', title: '新标题' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   } });
-  const result = await bridge.submit({ submission: { id: 's1' }, context: { projectId: 'p1' } });
+  const result = await bridge.submit({ submission: { id: 's1' }, context: { projectId: 'p1' }, taskId: 'task-1', parentSessionId: 'parent-1' });
   assert.equal(bridge.configured, true); assert.equal(request.url, 'http://dsh.local/bridge');
-  const body = JSON.parse(request.options.body); assert.equal(body.kind, 'report_studio.review_submission'); assert.equal(body.submission.id, 's1'); assert.equal(result.commands[0].type, 'outline.rename');
+  const body = JSON.parse(request.options.body); assert.equal(body.kind, 'report_studio.review_submission'); assert.equal(body.submission.id, 's1'); assert.equal(body.taskId, 'task-1'); assert.equal(body.parentSessionId, 'parent-1'); assert.equal(body.executionMode, 'isolated'); assert.equal(result.commands[0].type, 'outline.rename');
 });
 
 test('bridge rejects malformed agent responses', async () => {

@@ -917,6 +917,16 @@ function renderAgent() {
     stale: 'Proposal 已过期',
   })[status] || status || '状态未知';
 
+  const taskPhase = phase => ({
+    queued: '排队中',
+    reading_context: '读取基线',
+    processing: '处理中',
+    proposal_created: '等待确认',
+    completed: '已完成',
+    failed: '处理失败',
+    timed_out: '已超时',
+  })[phase] || phase || '未启动';
+
   const items = [
     ...state.reviewSubmissions.slice(-12).map(submission => ({
       time: submission.createdAt,
@@ -924,7 +934,7 @@ function renderAgent() {
     })),
     ...(state.reviewRuns ?? []).slice(-12).map(run => ({
       time: run.createdAt || '',
-      html: `<div class="agent-message ${run.integrationState === 'dispatch_failed' ? 'error' : 'system'}"><strong>ReviewRun · 第 ${Number(run.dispatchAttempt || 1)} 次投递</strong><br>${escapeHtml(reviewStatus(run.integrationState))}${run.lastError ? `<br>${escapeHtml(run.lastError)}` : ''}<span class="agent-message-meta">${run.integrationState === 'dispatch_failed' ? '可重试' : 'DSH Session 时间线状态'}</span></div>`,
+      html: `<div class="agent-message ${run.integrationState === 'dispatch_failed' ? 'error' : 'system'}"><strong>批注任务 · ${escapeHtml(run.taskId || `第 ${Number(run.dispatchAttempt || 1)} 次投递`)}</strong><br>${escapeHtml(taskPhase(run.phase))} · ${escapeHtml(reviewStatus(run.integrationState))}${run.summary ? `<br>${escapeHtml(run.summary)}` : ''}${run.lastError ? `<br>${escapeHtml(run.lastError)}` : ''}<span class="agent-message-meta">${run.closedAt ? '任务已结束' : run.integrationState === 'dispatch_failed' ? '可重试' : '等待本轮确认'}</span></div>`,
     })),
     ...state.proposals.slice(-12).map(proposal => ({
       time: proposal.createdAt,

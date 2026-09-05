@@ -15,10 +15,22 @@ import {
 const now = () => new Date().toISOString();
 const ID_KINDS = Object.freeze({
   project: 'project', projectRules: 'projectRules', outlineDocument: 'outlineDocument', outline: 'outlineNode', page: 'page', draftDocument: 'draftDocument', contentBlock: 'contentBlock', listItem: 'listItem', scriptBlock: 'scriptBlock', pageAsset: 'pageAsset', revision: 'revision',
-  annotation: 'annotation', round: 'reviewRound', submission: 'reviewSubmission', reviewRun: 'reviewRun', proposal: 'proposal',
+  annotation: 'annotation', round: 'reviewRound', submission: 'reviewSubmission', reviewRun: 'reviewRun', reviewTask: 'reviewTask', proposal: 'proposal',
 });
 const id = prefix => createStudioId(ID_KINDS[prefix]);
 const clone = value => structuredClone(value);
+
+export const REVIEW_TASK_PHASES = Object.freeze([
+  'queued',
+  'reading_context',
+  'processing',
+  'proposal_created',
+  'completed',
+  'failed',
+  'timed_out',
+]);
+
+const TERMINAL_REVIEW_TASK_PHASES = new Set(['completed', 'failed', 'timed_out']);
 
 function contentBlock(page, type, role) {
   return page.contentBlocks.find(block => block.type === type && block.role === role) ?? null;
@@ -688,6 +700,13 @@ export function beginReviewDispatch(state, submissionId, {
     resultProposalId: null,
     lastError: null,
     leaseExpiresAt,
+    taskId: id('reviewTask'),
+    parentSessionId: cleanSessionId,
+    workerSessionRef: null,
+    phase: 'queued',
+    summary: null,
+    finishedAt: null,
+    closedAt: null,
   }
   submission.dispatchAttempts = dispatchAttempt
   submission.activeReviewRunId = reviewRunId
@@ -695,6 +714,33 @@ export function beginReviewDispatch(state, submissionId, {
   submission.lastDispatchError = null
   next.reviewRuns.push(reviewRun)
   return { state: next, submission: clone(submission), reviewRun: clone(reviewRun), idempotent: false }
+}
+
+export function updateReviewTask(state, reviewRunId, {
+  phase,
+  workerSessionRef,
+  summary,
+  finishedAt,
+  closedAt,
+  at = now(),
+} = {}) {
+  const next = clone(state)
+  const run = (next.reviewRuns ?? []).find(item => item.reviewRunId === reviewRunId)
+  if (!run) throw new StudioError(ERROR_CODES.INVALID_REFERENCE, '未找到 ReviewRun。', { reviewRunId }, 404)
+  if (phase !== undefined) {
+    const cleanPhase = String(phase)
+    if (!REVIEW_TASK_PHASES.includes(cleanPhase)) throw new StudioError(ERROR_CODES.INVALID_COMMAND, '无效的 ReviewTask 阶段。', { phase: cleanPhase }, 400)
+    run.phase = cleanPhase
+    if (TERMINAL_REVIEW_TASK_PHASES.has(cleanPhase)) {
+      run.finishedAt ??= String(finishedAt ?? at)
+      run.closedAt ??= String(closedAt ?? at)
+    }
+  }
+  if (workerSessionRef !== undefined) run.workerSessionRef = workerSessionRef == null ? null : String(workerSessionRef)
+  if (summary !== undefined) run.summary = summary == null ? null : String(summary)
+  if (finishedAt !== undefined) run.finishedAt = finishedAt == null ? null : String(finishedAt)
+  if (closedAt !== undefined) run.closedAt = closedAt == null ? null : String(closedAt)
+  return { state: next, reviewRun: clone(run) }
 }
 
 export function transitionReviewSubmission(state, submissionId, to, {
@@ -795,7 +841,21 @@ export function acceptProposal(state, proposalId) {
   const stored = next.proposals.find(item => item.id === proposalId);
   stored.status = 'accepted'; stored.acceptedRevision = next.project.currentRevision; stored.acceptedAt = now();
   const transitioned = transitionReviewSubmission(next, stored.submissionId, 'accepted', { resultProposalId: stored.id })
-  return { state: transitioned.state, revision: clone(transitioned.state.revisions.at(-1)) };
+  const closed = closeReviewTasksForSubmission(transitioned.state, stored.submissionId, '本轮批注已接受')
+  return { state: closed, revision: clone(closed.revisions.at(-1)) };
+}
+
+function closeReviewTasksForSubmission(state, submissionId, summary) {
+  const next = clone(state)
+  const at = now()
+  for (const run of next.reviewRuns ?? []) {
+    if (run.reviewSubmissionId !== submissionId || run.closedAt) continue
+    run.phase = 'completed'
+    run.summary = String(summary)
+    run.finishedAt ??= at
+    run.closedAt = at
+  }
+  return next
 }
 
 function closeProposalWithoutRevision(state, proposalId, status) {
@@ -809,7 +869,10 @@ function closeProposalWithoutRevision(state, proposalId, status) {
   if (status === 'returned_to_agent') proposal.returnedAt = proposal.updatedAt
   const submissionStatus = status === 'returned_to_agent' ? 'rejected' : status
   const transitioned = transitionReviewSubmission(next, proposal.submissionId, submissionStatus, { resultProposalId: proposal.id })
-  return { state: transitioned.state, proposal: clone(proposal) }
+  const closed = status === 'returned_to_agent'
+    ? transitioned.state
+    : closeReviewTasksForSubmission(transitioned.state, proposal.submissionId, status === 'rejected' ? '本轮批注已拒绝' : '本轮批注已完成')
+  return { state: closed, proposal: clone(proposal) }
 }
 
 export function rejectProposal(state, proposalId) {
@@ -829,5 +892,6 @@ export function markProposalStale(state, proposalId) {
   proposal.updatedAt = now()
   proposal.staleAt = proposal.updatedAt
   const transitioned = transitionReviewSubmission(next, proposal.submissionId, 'stale', { resultProposalId: proposal.id })
-  return { state: transitioned.state, proposal: clone(proposal) }
+  const closed = closeReviewTasksForSubmission(transitioned.state, proposal.submissionId, '本轮批注已过期')
+  return { state: closed, proposal: clone(proposal) }
 }

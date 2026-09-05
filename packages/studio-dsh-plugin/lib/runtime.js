@@ -19,6 +19,7 @@ import {
 import { ERROR_CODES, StudioError } from '../vendor/packages/studio-contracts/index.mjs'
 import { reviewSubmissionContext } from '../vendor/apps/studio-local/agent-context.mjs'
 import { createWorkspaceWatcher, resolveWorkspaceRoot } from '../vendor/apps/studio-local/workspace-live-link.mjs'
+import { createReviewTaskRunner } from '../vendor/apps/studio-local/review-task-runner.mjs'
 
 const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
 const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))
@@ -90,11 +91,13 @@ export function createStudioDshRuntime({
   repositoryFactory = createRepository,
   workspaceWatcherFactory = createWorkspaceWatcher,
   workspaceRootResolver = resolveWorkspaceRoot,
+  agentBridge = undefined,
 } = {}) {
   const root = resolve(dataRoot)
   const repositories = new Map()
   const workspaceEntries = new Map()
   const sessionBindings = new Map()
+  const taskRunner = createReviewTaskRunner({ getRepository: repositoryFor, agentBridge })
 
   function sessionWorkspace(sessionId) {
     const session = sessions?.get(sessionId)
@@ -298,11 +301,15 @@ export function createStudioDshRuntime({
       begun = beginReviewDispatch(submitted.state, submitted.submission.id, { sessionId: id })
       return begun.state
     })
+    const task = agentBridge?.configured
+      ? await taskRunner.start({ sessionId: id, submissionId: submitted.submission.id, reviewRunId: begun.reviewRun.reviewRunId })
+      : { ...begun.reviewRun, executionMode: 'isolated' }
     return {
       state: structuredClone(repository.getState()),
       round: structuredClone(submitted.round),
       submission: structuredClone(begun.submission),
       reviewRun: structuredClone(begun.reviewRun),
+      task: structuredClone(task),
       dshPrompt: {
         kind: 'report_studio.review_submission',
         sessionId: id,
@@ -332,10 +339,13 @@ export function createStudioDshRuntime({
         { baseRevision: proposal.baseRevision, source: 'agent', detail: { proposalId, submissionId: proposal.submissionId } },
         current => acceptCoreProposal(current, proposalId).state,
       )
-      return { state, revision: structuredClone(state.revisions.at(-1)) }
+      await taskRunner.closeSubmission({ sessionId, submissionId: proposal.submissionId })
+      const closedState = repository.getState()
+      return { state: closedState, revision: structuredClone(closedState.revisions.at(-1)) }
     } catch (error) {
       if (error?.code !== ERROR_CODES.STALE_REVISION && error?.message !== 'stale_revision') throw error
       await repository.transactOperational(current => markProposalStale(current, proposalId).state)
+      await taskRunner.closeSubmission({ sessionId, submissionId: proposal.submissionId })
       throw error
     }
   }
@@ -347,7 +357,8 @@ export function createStudioDshRuntime({
       result = action === 'reject' ? rejectCoreProposal(current, proposalId) : returnCoreProposalToAgent(current, proposalId)
       return result.state
     })
-    return { state, proposal: result.proposal }
+    if (action === 'reject') await taskRunner.closeSubmission({ sessionId, submissionId: result.proposal.submissionId })
+    return { state: repository.getState(), proposal: result.proposal }
   }
 
   async function getContext(sessionId, submissionId) {
@@ -426,10 +437,14 @@ export function createStudioDshRuntime({
     })
     const current = repository.getState()
     const round = current.reviewRounds.find(item => item.id === result.submission.reviewRoundId)
+    const task = agentBridge?.configured
+      ? await taskRunner.start({ sessionId: id, submissionId, reviewRunId: result.reviewRun.reviewRunId })
+      : { ...result.reviewRun, executionMode: 'isolated' }
     return {
       state: current,
       submission: result.submission,
       reviewRun: result.reviewRun,
+      task: structuredClone(task),
       dshPrompt: { kind: 'report_studio.review_submission', sessionId: id, text: reviewPrompt(id, current, round, result.submission) },
     }
   }
@@ -452,6 +467,6 @@ export function createStudioDshRuntime({
     applyCommands,
     updateDispatch,
     retrySubmission,
-    close,
+    close: async () => { await taskRunner.close(); return close() },
   })
 }

@@ -121,12 +121,14 @@
     if (!response.ok || !originalPath || !(isReviewRequest || originalPath === '/api/agent/chat')) return response
     const payload = await response.clone().json().catch(() => null)
     if (!payload?.dshPrompt) return response
-    try {
-      await requestPrompt(payload.dshPrompt, { submissionId: payload.submission?.id, reviewRunId: payload.reviewRun?.reviewRunId })
-      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatched', null, payload.reviewRun?.reviewRunId)
-    } catch (error) {
-      if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatch_failed', error.message, payload.reviewRun?.reviewRunId).catch(() => undefined)
-      throw error
+    if (!isReviewRequest || !payload.task) {
+      try {
+        await requestPrompt(payload.dshPrompt, { submissionId: payload.submission?.id, reviewRunId: payload.reviewRun?.reviewRunId })
+        if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatched', null, payload.reviewRun?.reviewRunId)
+      } catch (error) {
+        if (isReviewRequest) await reportDispatch(payload.submission?.id, 'dispatch_failed', error.message, payload.reviewRun?.reviewRunId).catch(() => undefined)
+        throw error
+      }
     }
     const currentState = isReviewRequest
       ? await nativeFetch(apiPath('/api/state'), { headers: { accept: 'application/json' } }).then(result => result.json())
@@ -136,7 +138,7 @@
           ...payload,
           state: currentState,
           submission: currentState.reviewSubmissions.find(item => item.id === payload.submission?.id) ?? payload.submission,
-          bridgeResult: { message: '已提交到当前 DSH Session', proposalId: null, sessionRef: sessionId },
+          bridgeResult: { message: payload.task ? '已创建隔离批注任务' : '批注已记录，等待独立任务执行器', proposalId: null, sessionRef: payload.task?.workerSessionRef ?? null },
         }
       : { ...payload, message: '已发送到当前 DSH Session', sessionRef: sessionId }
     return new Response(JSON.stringify(adapted), {

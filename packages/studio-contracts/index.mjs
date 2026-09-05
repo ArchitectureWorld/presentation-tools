@@ -76,6 +76,7 @@ const STUDIO_PREFIXES = Object.freeze({
   reviewRound: 'review_round',
   reviewSubmission: 'review_submission',
   reviewRun: 'review_run',
+  reviewTask: 'review_task',
   proposal: 'proposal',
   command: 'command',
   changeSet: 'change_set',

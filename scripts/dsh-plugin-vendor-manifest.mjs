@@ -3,6 +3,8 @@ export const DSH_PLUGIN_VENDOR_ENTRIES = Object.freeze([
   'apps/studio-local/migration.mjs',
   'apps/studio-local/standard-project.mjs',
   'apps/studio-local/agent-context.mjs',
+  'apps/studio-local/review-task-runner.mjs',
+  'apps/studio-local/agent-bridge.mjs',
   'apps/studio-local/asset-service.mjs',
   'apps/studio-local/workspace-live-link.mjs',
   'apps/studio-local/layout-api.mjs',

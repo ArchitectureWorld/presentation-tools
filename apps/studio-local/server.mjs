@@ -7,10 +7,11 @@ import { createAgentBridge } from './agent-bridge.mjs';
 import { beginReviewDispatch, executeAction, submitReviewRound, acceptProposal, createProposalFromAgent, markProposalStale, markSubmissionDispatch, recoverExpiredReviewDispatches, rejectProposal, retryReviewSubmission, returnProposalToAgent, transitionReviewSubmission } from '../../packages/studio-core/index.mjs';
 import { ERROR_CODES, StudioError, errorPayload } from '../../packages/studio-contracts/index.mjs';
 import { createStandardProjectService } from './standard-project.mjs';
-import { projectAgentContext, reviewSubmissionContext } from './agent-context.mjs';
+import { projectAgentContext } from './agent-context.mjs';
 import { ingestAsset, serveReferencedAsset } from './asset-service.mjs';
 import { createLayoutService } from './layout-service.mjs';
 import { executeLayoutApi, layoutApiErrorPayload, matchLayoutApiPath } from './layout-api.mjs';
+import { createReviewTaskRunner } from './review-task-runner.mjs';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(rootDir, 'public');
@@ -46,6 +47,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   const standardProject = createStandardProjectService(repository);
   const layoutService = createLayoutService({ repository, layoutRoot: join(dataDir, 'layouts') });
   const bridge = agentBridge === undefined ? createAgentBridge() : agentBridge;
+  const taskRunner = createReviewTaskRunner({ getRepository: async () => repository, agentBridge: bridge });
   let actualPort = port;
   let server;
 
@@ -62,45 +64,31 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
   }
 
   async function dispatchSubmission(submissionId) {
-    let begun
-    await repository.transactOperational(state => {
-      begun = beginReviewDispatch(state, submissionId, { sessionId: bridgeSessionId })
-      return begun.state
-    })
     const before = repository.getState();
     const submission = before.reviewSubmissions.find(item => item.id === submissionId);
     if (!submission) throw new Error('未找到 ReviewSubmission');
+    let begun = before.reviewRuns?.find(item => item.reviewRunId === submission.activeReviewRunId)
+    if (!begun) {
+      let created
+      await repository.transactOperational(state => {
+        created = beginReviewDispatch(state, submissionId, { sessionId: bridgeSessionId })
+        return created.state
+      })
+      begun = created.reviewRun
+    }
     try {
       if (!bridge?.configured) throw new StudioError(ERROR_CODES.DISPATCH_FAILED, 'DSH Bridge 未配置。', { submissionId }, 503);
-      const snapshot = await repository.getSnapshotAt(submission.baseRevision);
-      const agentResult = await bridge.submit({
-        submission,
-        context: reviewSubmissionContext(snapshot, submission),
-      });
-      let proposal = null;
-      await repository.transactOperational(state => {
-        let next = markSubmissionDispatch(state, submissionId, { status: 'dispatched', reviewRunId: begun.reviewRun.reviewRunId, sessionId: agentResult.sessionRef ?? bridgeSessionId }).state;
-        if (agentResult.commands.length) {
-          const proposed = createProposalFromAgent(next, submissionId, {
-            submissionId: agentResult.submissionId,
-            projectId: agentResult.projectId,
-            baseRevision: agentResult.baseRevision,
-            scopeKey: agentResult.scopeKey,
-            idempotencyKey: agentResult.idempotencyKey ?? submission.idempotencyKey,
-            message: agentResult.message,
-            commands: agentResult.commands,
-          });
-          next = proposed.state;
-          proposal = proposed.proposal;
-        } else {
-          const stored = next.reviewSubmissions.find(item => item.id === submissionId);
-          stored.agentMessage = agentResult.message;
-        }
-        return next;
-      });
+      const task = await taskRunner.start({ sessionId: bridgeSessionId, submissionId, reviewRunId: begun.reviewRunId });
+      const outcome = await taskRunner.wait(task.taskId);
+      if (outcome?.error) throw new StudioError(ERROR_CODES.DISPATCH_FAILED, outcome.error.message || '独立任务执行失败。', { submissionId, taskId: task.taskId }, 502);
+      const current = repository.getState();
+      const currentRun = current.reviewRuns.find(item => item.reviewRunId === begun.reviewRunId);
+      const proposal = currentRun?.resultProposalId ? current.proposals.find(item => item.id === currentRun.resultProposalId) : null;
+      const agentResult = outcome?.result || { message: currentRun?.summary || '', sessionRef: currentRun?.workerSessionRef ?? null };
       return {
-        state: repository.getState(),
-        submission: repository.getState().reviewSubmissions.find(item => item.id === submissionId),
+        state: current,
+        submission: current.reviewSubmissions.find(item => item.id === submissionId),
+        reviewRun: currentRun,
         bridgeResult: { message: agentResult.message, proposalId: proposal?.id ?? null, sessionRef: agentResult.sessionRef ?? null },
       };
     } catch (error) {
@@ -108,7 +96,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
       await repository.transactOperational(state => {
         const current = state.reviewSubmissions.find(item => item.id === submissionId)
         if (current?.status !== 'pending_dispatch') return state
-        const marked = markSubmissionDispatch(state, submissionId, { status: 'dispatch_failed', error: error.message, reviewRunId: begun.reviewRun.reviewRunId, sessionId: bridgeSessionId });
+        const marked = markSubmissionDispatch(state, submissionId, { status: 'dispatch_failed', error: error.message, reviewRunId: begun.reviewRunId, sessionId: bridgeSessionId });
         failed = marked.submission;
         return marked.state;
       });
@@ -235,7 +223,9 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
           { baseRevision: proposal.baseRevision, source: 'agent', detail: { proposalId, submissionId: proposal.submissionId } },
           current => acceptProposal(current, proposalId).state,
         );
-        return sendJson(res, 200, { state, revision: state.revisions.at(-1) });
+        await taskRunner.closeSubmission({ sessionId: bridgeSessionId, submissionId: proposal.submissionId });
+        const closedState = repository.getState();
+        return sendJson(res, 200, { state: closedState, revision: closedState.revisions.at(-1) });
       } catch (error) {
         if (error?.code !== ERROR_CODES.STALE_REVISION && error?.message !== 'stale_revision') throw error
         let stale
@@ -243,6 +233,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
           stale = markProposalStale(current, proposalId)
           return stale.state
         })
+        await taskRunner.closeSubmission({ sessionId: bridgeSessionId, submissionId: proposal.submissionId })
         throw new StudioError(ERROR_CODES.STALE_REVISION, 'Proposal 基线已过期。', { proposalId, state }, 409)
       }
     }
@@ -254,7 +245,8 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
         result = proposalActionMatch[2] === 'reject' ? rejectProposal(current, proposalId) : returnProposalToAgent(current, proposalId);
         return result.state;
       });
-      return sendJson(res, 200, { state, proposal: result.proposal });
+      if (proposalActionMatch[2] === 'reject') await taskRunner.closeSubmission({ sessionId: bridgeSessionId, submissionId: result.proposal.submissionId });
+      return sendJson(res, 200, { state: repository.getState(), proposal: result.proposal });
     }
     return false;
   }
@@ -300,6 +292,7 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     },
     async stop() {
       if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      await taskRunner.close();
       await repository.close();
     },
   };
