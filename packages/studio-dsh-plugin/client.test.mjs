@@ -144,26 +144,35 @@ test('native DSH client registers session-scoped views and sends prompts through
   }
   iframe.props.ref.current = { contentWindow: frameWindow }
 
-  const event = {
+  const events = ['report_studio.chat', 'report_studio.review_submission'].map((kind, index) => ({
     source: frameWindow,
     origin: window.location.origin,
     data: {
       type: 'report-studio.prompt',
-      requestId: 'prompt-1',
+      requestId: `prompt-${index + 1}`,
       sessionId: 'session-native',
-      text: '请读取当前 Report Studio 项目并处理批注。',
+      kind,
+      text: index === 0 ? '普通聊天' : '请读取当前 Report Studio 项目并处理批注。',
     },
-  }
-  for (const listener of windowListeners.get('message') ?? []) await listener(event)
+  }))
+  for (const event of events) for (const listener of windowListeners.get('message') ?? []) await listener(event)
 
-  assert.deepEqual(plain(promptCalls), [{
-    content: [{ type: 'text', text: '请读取当前 Report Studio 项目并处理批注。' }],
-    mode: 'queue',
-  }])
+  assert.deepEqual(plain(promptCalls), [
+    { content: [{ type: 'text', text: '普通聊天' }], mode: 'queue' },
+    { content: [{ type: 'text', text: '请读取当前 Report Studio 项目并处理批注。' }], mode: 'queue' },
+  ])
   assert.deepEqual(plain(promptResults), [{
     payload: {
       type: 'report-studio.prompt-result',
       requestId: 'prompt-1',
+      sessionId: 'session-native',
+      ok: true,
+    },
+    origin: window.location.origin,
+  }, {
+    payload: {
+      type: 'report-studio.prompt-result',
+      requestId: 'prompt-2',
       sessionId: 'session-native',
       ok: true,
     },

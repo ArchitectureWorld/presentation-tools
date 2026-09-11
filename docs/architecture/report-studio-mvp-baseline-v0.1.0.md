@@ -8,7 +8,7 @@ repository: ArchitectureWorld/presentation-tools
 
 # Report Studio MVP 基线 v0.1.0
 
-> 本文件仅保留为 v0.1.0 历史实现参考，不是当前产品基线。当前生产版本为 Report Studio v0.1.1；唯一架构母文件为 `docs/architecture/report-studio-architecture.md`，v0.1.1 实现设计为 `docs/superpowers/specs/2026-09-03-report-studio-v0.1.1-production-hardening-design.md`。
+> 本文件仅保留为 v0.1.0 历史实现参考，不是当前产品基线。Report Studio v0.1.1 当前为 candidate / stabilization-required；唯一架构母文件为 `docs/architecture/report-studio-architecture.md`，本轮实现设计为 `docs/superpowers/specs/2026-09-03-report-studio-v0.1.1-stabilization-design.md`。
 
 ## 0. 版本规则
 

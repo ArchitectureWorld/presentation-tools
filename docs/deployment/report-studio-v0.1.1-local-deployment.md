@@ -33,6 +33,10 @@ dsh --profile web --no-open
 
 `/report-studio/?sessionId=...` 是 DSH iframe 和备用独立窗口使用的内部地址。独立页面会提示返回 DSH 主界面，且不会复制或伪造模型选择器。端口 `4173` 仅供源码调试，不是部署入口。
 
+## 安全边界
+
+当前 DSH `0.1.1-rc.2` 没有向插件 HTTP 路由暴露可信 Session 身份或 iframe capability hook，因此本版本只支持 `securityMode=local-single-user-only`。DSH Web 与独立调试服务必须监听 `127.0.0.1`，非 loopback 配置会被拒绝。query `sessionId` 只是本机路由键，不是认证；不得把该版本部署为多人或网络共享服务。健康检查以 `securityMode`、`listenHost` 和 `networkSharedSecurity=false` 公开这一边界，Agent 工具 Session 则始终来自 DSH exec context。
+
 ## 产品链路
 
 ```text

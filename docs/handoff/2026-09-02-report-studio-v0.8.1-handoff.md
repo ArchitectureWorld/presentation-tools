@@ -1,5 +1,7 @@
 # Report Studio v0.8.1 Handoff
 
+> **historical-reference**：此文件只保留 v0.8.1 原型记录，不是当前版本、发布状态或部署说明。请改读 `2026-09-03-report-studio-v0.1.1-stabilization-handoff.md`。
+
 > 面向下一位产品、前端或 DSH 插件开发 Agent 的可执行交接文档。阅读本文件后，应能直接理解当前成果、稳定决策、代码结构、验收基线、正式集成边界和下一阶段实施顺序，无需重新讨论已冻结内容。
 
 ## 0. 交接摘要

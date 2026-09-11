@@ -1,6 +1,6 @@
 {
   "name": "@architectureworld/studio-layout-adapter",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.3",
   "private": true,
   "type": "module",
   "main": "index.mjs",
@@ -8,7 +8,7 @@
     ".": "./index.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24.11.0"
   },
   "scripts": {
     "test": "node --test index.test.mjs"

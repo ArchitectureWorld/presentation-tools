@@ -1,0 +1,66 @@
+# Reproducible offline development snapshot; never contains credentials or user workspaces.
+name: Temporary Report Studio Source Snapshot
+
+on:
+  push:
+    branches:
+      - feat/report-studio-v0.2.0-layout
+    paths:
+      - .github/workflows/report-studio-source-snapshot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.0
+          cache: npm
+
+      - name: Install locked dependencies and pinned verification runtime
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
+          npm install --prefix .tmp/openpencil-runtime --ignore-scripts --no-package-lock --no-save @zseven-w/dsh-openpencil@0.1.0-rc.9
+
+      - name: Archive current checkout and public dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_archive="$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.tgz"
+          deps_archive="$RUNNER_TEMP/report-studio-node-modules-${GITHUB_SHA}.tgz"
+          runtime_archive="$RUNNER_TEMP/report-studio-runtime-${GITHUB_SHA}.tgz"
+          tar \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude='**/node_modules' \
+            --exclude='.tmp' \
+            --exclude='.worktrees' \
+            -czf "$source_archive" \
+            -C "$GITHUB_WORKSPACE" .
+          tar -czf "$deps_archive" -C "$GITHUB_WORKSPACE" node_modules contracts/presentation-standard-project/node_modules .tmp/openpencil-runtime/node_modules
+          mkdir -p "$RUNNER_TEMP/studio-runtime/bin"
+          cp "$(command -v node)" "$RUNNER_TEMP/studio-runtime/bin/node"
+          node --version > "$RUNNER_TEMP/studio-runtime/node-version.txt"
+          tar -czf "$runtime_archive" -C "$RUNNER_TEMP/studio-runtime" .
+          sha256sum "$source_archive" "$deps_archive" "$runtime_archive" | sed "s#${RUNNER_TEMP}/##" > "$RUNNER_TEMP/report-studio-source-${GITHUB_SHA}.sha256"
+
+      - name: Upload reproducible snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-studio-source-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/report-studio-source-${{ github.sha }}.tgz
+            ${{ runner.temp }}/report-studio-node-modules-${{ github.sha }}.tgz
+            ${{ runner.temp }}/report-studio-runtime-${{ github.sha }}.tgz
+            ${{ runner.temp }}/report-studio-source-${{ github.sha }}.sha256
+          if-no-files-found: error
+          retention-days: 1

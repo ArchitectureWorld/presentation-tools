@@ -22,6 +22,8 @@ test('production shell preserves the approved prototype hierarchy', async () => 
     'comment-composer',
     'agent-chat-card',
     'agent-context-stage',
+    'workspace-sync-toggle',
+    'workspace-conflict-banner',
   ]) {
     assert.ok(html.includes(token), `missing prototype shell token: ${token}`);
   }
@@ -40,6 +42,14 @@ test('visual system is dark, fluid and does not lock the app to a design canvas'
   assert.doesNotMatch(css, /min-width:\s*1080px/);
   assert.doesNotMatch(css, /width:\s*1600px/);
   assert.doesNotMatch(css, /height:\s*900px/);
+});
+
+test('embedded low-height layouts keep the annotation history and task dialog inside the viewport', async () => {
+  const css = await read('styles.css');
+  assert.match(css, /\.agent-chat-card\s*\{[\s\S]*?height:\s*min\(82dvh,\s*calc\(100dvh\s*-\s*48px\)\);[\s\S]*?min-height:\s*0;/);
+  assert.match(css, /\.modal\s*\{[\s\S]*?overflow:\s*auto;/);
+  assert.match(css, /@media\s*\(max-height:\s*720px\)[\s\S]*?\.comment-panel\s*\{[\s\S]*?minmax\(96px,\s*1fr\)/);
+  assert.match(css, /\.selected-target\s*\{[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?line-height:\s*1\.45;/);
 });
 
 test('browser rendering includes responsive page strip and comment filtering', async () => {

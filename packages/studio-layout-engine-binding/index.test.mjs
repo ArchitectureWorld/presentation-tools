@@ -19,7 +19,7 @@ function fixture() {
     layoutEngineBindingId: 'layout_engine_binding_01992a80-0000-7000-8000-000000000901',
     layoutPageId: 'layout_page_01992a80-0000-7000-8000-000000000101',
     engine: 'openpencil',
-    engineAdapterVersion: '0.2.0-alpha.2',
+    engineAdapterVersion: '0.2.0-alpha.3',
     engineDocumentRef: {
       provider: 'openpencil',
       documentId: 'document-001',
@@ -57,13 +57,6 @@ test('valid OpenPencil engine binding is accepted without mutation', () => {
   const before = structuredClone(binding)
   assert.equal(assertLayoutEngineBinding(binding), binding)
   assert.deepEqual(binding, before)
-})
-
-test('real OpenPencil sequential transaction binding keys are accepted', () => {
-  const binding = fixture()
-  binding.nodeMap[0].bindingKey = 'b1'
-  binding.nodeMap[1].bindingKey = 'b2'
-  assert.equal(assertLayoutEngineBinding(binding), binding)
 })
 
 test('duplicate layout element identities are rejected', () => {

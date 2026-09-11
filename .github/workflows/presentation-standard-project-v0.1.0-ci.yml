@@ -40,6 +40,7 @@ jobs:
 
       - name: Install locked validation dependencies
         run: |
+          npm ci --ignore-scripts --no-audit --no-fund
           python -m pip install --disable-pip-version-check --no-input jsonschema==4.26.0 referencing==0.37.0
           npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 

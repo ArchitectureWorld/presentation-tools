@@ -1,6 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialState, executeAction, submitReviewRound, createProposalFromAgent, acceptProposal, markSubmissionDispatch, retryReviewSubmission } from './index.mjs';
+import { createStudioId } from '../studio-contracts/index.mjs'
+
+function agentCommandInput(state, submission, command) {
+  const common = {
+    commandId: createStudioId('command'), scopeKey: submission.scopeKey, baseRevision: submission.baseRevision,
+    riskLevel: 'ordinary_reversible', sourceAnnotationIds: [submission.annotationSnapshots[0].annotationId],
+  }
+  return {
+    submissionId: submission.id, projectId: state.project.id, baseRevision: submission.baseRevision,
+    scopeKey: submission.scopeKey, idempotencyKey: submission.idempotencyKey, message: '结构化修改建议',
+    commands: [{ ...common, ...command }],
+  }
+}
+
+function delivered(submitted) {
+  return { ...submitted, state: markSubmissionDispatch(submitted.state, submitted.submission.id, { status: 'dispatched', sessionId: 'core-test' }).state }
+}
 
 test('outline nodes receive stable ids and draft page keeps source outline id', () => {
   let state = createInitialState();
@@ -42,12 +59,86 @@ test('agent proposal is explicit and acceptance creates revision without auto re
   let state = createInitialState();
   ({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: 'A' })); const nodeId = state.outline[0].id;
   ({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', target: { type: 'outline-node', id: nodeId, label: 'A' }, instruction: '标题更明确' }));
-  const submitted = submitReviewRound(state, { scopeKey: 'outline:root' }); state = submitted.state;
-  const proposalResult = createProposalFromAgent(state, submitted.submission.id, { message: '建议修改标题', commands: [{ type: 'outline.rename', nodeId, title: 'A：明确目标' }] });
+  const submitted = delivered(submitReviewRound(state, { scopeKey: 'outline:root' })); state = submitted.state;
+  const proposalResult = createProposalFromAgent(state, submitted.submission.id, agentCommandInput(state, submitted.submission, { type: 'outline.rename', nodeId, title: 'A：明确目标' }));
   state = proposalResult.state; assert.equal(state.outline[0].title, 'A'); const before = state.project.currentRevision;
   const accepted = acceptProposal(state, proposalResult.proposal.id);
   assert.equal(accepted.state.outline[0].title, 'A：明确目标'); assert.equal(accepted.state.project.currentRevision, before + 1); assert.equal(accepted.state.annotations[0].resolution, 'open');
 });
+
+function stateWithList() {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '列表页' }))
+  ;({ state } = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }))
+  const pageId = state.pages[0].id
+  ;({ state } = executeAction(state, { type: 'draft.update', pageId, patch: { bullets: ['甲', '乙', '丙'] } }))
+  return { state, pageId }
+}
+
+test('draft.list.insert gives the new item an identity without replacing existing list items', () => {
+  let { state, pageId } = stateWithList()
+  const originalIds = state.pages[0].contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId)
+  ;({ state } = executeAction(state, { type: 'draft.list.insert', pageId, afterListItemId: originalIds[0], content: '新项' }))
+  const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
+  assert.deepEqual(items.map(item => item.content), ['甲', '新项', '乙', '丙'])
+  assert.equal(items[0].listItemId, originalIds[0])
+  assert.equal(items[2].listItemId, originalIds[1])
+  assert.equal(items[3].listItemId, originalIds[2])
+  assert.match(items[1].listItemId, /^list_item_/)
+})
+
+test('draft.list.insert creates the first list item for a new page', () => {
+  let state = createInitialState()
+  ;({ state } = executeAction(state, { type: 'outline.add', parentId: null, title: '空列表页' }))
+  ;({ state } = executeAction(state, { type: 'draft.ensurePage', outlineNodeId: state.outline[0].id }))
+  const pageId = state.pages[0].id
+  ;({ state } = executeAction(state, { type: 'draft.list.insert', pageId, content: '首项' }))
+  const list = state.pages[0].contentBlocks.find(block => block.type === 'list')
+  assert.equal(list.items[0].content, '首项')
+  assert.match(list.items[0].listItemId, /^list_item_/)
+})
+
+test('draft.list.delete removes only the selected list item identity', () => {
+  let { state, pageId } = stateWithList()
+  const originalIds = state.pages[0].contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId)
+  ;({ state } = executeAction(state, { type: 'draft.list.delete', pageId, listItemId: originalIds[1] }))
+  const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
+  assert.deepEqual(items.map(item => item.listItemId), [originalIds[0], originalIds[2]])
+})
+
+test('draft.list.move reorders by list item identity while retaining every identity', () => {
+  let { state, pageId } = stateWithList()
+  const originalIds = state.pages[0].contentBlocks.find(block => block.type === 'list').items.map(item => item.listItemId)
+  ;({ state } = executeAction(state, { type: 'draft.list.move', pageId, listItemId: originalIds[2], direction: 'up' }))
+  const items = state.pages[0].contentBlocks.find(block => block.type === 'list').items
+  assert.deepEqual(items.map(item => item.listItemId), [originalIds[0], originalIds[2], originalIds[1]])
+})
+
+test('draft.update edits list and script nodes by their stable ids and preserves empty content', () => {
+  let { state, pageId } = stateWithList()
+  ;({ state } = executeAction(state, { type: 'draft.update', pageId, patch: { body: '待清空正文' } }))
+  const page = state.pages[0]
+  const list = page.contentBlocks.find(block => block.type === 'list')
+  const firstScript = { scriptBlockId: createStudioId('scriptBlock'), order: 0, content: '第一段', estimatedDurationSeconds: null, referencedContentBlockIds: [page.titleBlockId], referencedAssetIds: [], sourceRefs: [] }
+  const secondScript = { ...structuredClone(firstScript), scriptBlockId: createStudioId('scriptBlock'), order: 1, content: '第二段' }
+  page.scriptBlocks = [firstScript, secondScript]
+  ;({ state } = executeAction(state, {
+    type: 'draft.update', pageId,
+    patch: {
+      body: '',
+      listBlockId: list.contentBlockId,
+      listItems: [
+        { ...list.items[2], content: '丙已编辑', order: 0 },
+        { ...list.items[0], content: '', order: 1 },
+      ],
+      scriptBlocks: [{ ...firstScript, content: '' }, { ...secondScript, content: '第二段已编辑' }],
+    },
+  }))
+  const updated = state.pages[0]
+  assert.equal(updated.contentBlocks.find(block => block.type === 'text' && block.role === 'body').content, '')
+  assert.deepEqual(updated.contentBlocks.find(block => block.contentBlockId === list.contentBlockId).items.map(item => [item.listItemId, item.content]), [[list.items[2].listItemId, '丙已编辑'], [list.items[0].listItemId, '']])
+  assert.deepEqual(updated.scriptBlocks.map(script => [script.scriptBlockId, script.content]), [[firstScript.scriptBlockId, ''], [secondScript.scriptBlockId, '第二段已编辑']])
+})
 
 test('deleting an outline parent removes descendant pages and repairs active page', () => {
   let state = createInitialState()
@@ -79,8 +170,8 @@ test('ReviewSubmission delivery failure can retry the same immutable submission'
 test('repeating Agent commands for one submission returns the existing Proposal', () => {
   let state = createInitialState()
   ;({ state } = executeAction(state, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '幂等意见' }))
-  const submitted = submitReviewRound(state, { scopeKey: 'outline:root' })
-  const input = { message: '同一结果', commands: [{ type: 'project.rename', title: '幂等项目' }], idempotencyKey: submitted.submission.idempotencyKey }
+  const submitted = delivered(submitReviewRound(state, { scopeKey: 'outline:root' }))
+  const input = agentCommandInput(submitted.state, submitted.submission, { type: 'project.rename', projectId: submitted.state.project.id, title: '幂等项目' })
   const first = createProposalFromAgent(submitted.state, submitted.submission.id, input)
   const repeated = createProposalFromAgent(first.state, submitted.submission.id, input)
   assert.equal(repeated.proposal.id, first.proposal.id)

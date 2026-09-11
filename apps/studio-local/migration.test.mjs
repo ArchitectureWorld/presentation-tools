@@ -76,3 +76,38 @@ test('migration failure does not publish control and can be retried with the sam
   try { assert.equal(reopened.migrationStatus().status, 'ready') }
   finally { await reopened.close(); await rm(dir, { recursive: true, force: true }) }
 })
+
+test('v0.1.1 simplified pages migrate once to stable canonical identities', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'report-studio-v011-migration-'))
+  const legacy = legacyState()
+  legacy.schemaVersion = 'report-studio.v0.1.1'
+  const originalBytes = `${JSON.stringify(legacy, null, 2)}\n`
+  await writeFile(join(dir, 'state.json'), originalBytes, 'utf8')
+  const repository = await createRepository(dir)
+  try {
+    assert.equal(repository.migrationStatus().status, 'migration_required')
+    const result = await repository.applyMigration()
+    const page = repository.getState().pages[0]
+    const list = page.contentBlocks.find(block => block.type === 'list')
+    assert.match(repository.getState().project.projectId, /^project_[0-9a-f-]{36}$/)
+    assert.match(repository.getState().project.projectRulesId, /^project_rules_[0-9a-f-]{36}$/)
+    assert.match(repository.getState().project.outlineDocumentId, /^outline_[0-9a-f-]{36}$/)
+    assert.match(page.pageId, /^page_[0-9a-f-]{36}$/)
+    assert.match(page.draftDocumentId, /^draft_page_[0-9a-f-]{36}$/)
+    assert.match(page.titleBlockId, /^content_block_[0-9a-f-]{36}$/)
+    assert.match(list.items[0].listItemId, /^list_item_[0-9a-f-]{36}$/)
+    assert.match(page.scriptBlocks[0].scriptBlockId, /^script_block_[0-9a-f-]{36}$/)
+    assert.match(page.pageAssets[0].pageAssetId, /^page_asset_[0-9a-f-]{36}$/)
+    assert.equal(await readFile(join(dir, 'state.json'), 'utf8'), originalBytes)
+    const mapBytes = await readFile(join(dir, 'migration-map.json'), 'utf8')
+    assert.ok(result.backupPath.endsWith('state.v0.1.1.json'))
+    await repository.close()
+    const reopened = await createRepository(dir)
+    try { assert.equal(reopened.getState().pages[0].draftDocumentId, page.draftDocumentId) }
+    finally { await reopened.close() }
+    assert.equal(await readFile(join(dir, 'migration-map.json'), 'utf8'), mapBytes)
+  } finally {
+    await repository.close().catch(() => undefined)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
