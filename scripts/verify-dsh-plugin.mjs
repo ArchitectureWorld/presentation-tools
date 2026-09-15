@@ -4,6 +4,25 @@ import {registerDesignTools} from '../packages/studio-dsh-plugin/lib/design-tool
 import {getDesignRules} from '../packages/studio-dsh-plugin/vendor/apps/studio-local/design-rules.mjs'
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
+
+const activeDeploymentFiles = [
+  '.github/workflows/report-studio-v0.1.1-ci.yml',
+  '.github/workflows/presentation-standard-project-v0.1.0-ci.yml',
+  '.github/workflows/report-studio-ci.yml',
+  'package.json',
+  'packages/studio-dsh-plugin/package.json',
+  'packages/studio-dsh-plugin/compatibility/dsh-baseline.json',
+  'scripts/smoke-dsh-native.mjs',
+  'scripts/release-integrity.mjs',
+  'scripts/release-integrity.test.mjs',
+]
+for (const path of activeDeploymentFiles) {
+  const source = await read(path)
+  assert.ok(!source.includes('0.1.1-rc.2'), `${path} still contains the legacy DSH baseline`)
+  assert.ok(!source.includes('@deepseek-ai/dsh-client-runtime'), `${path} still contains the legacy DSH client runtime package`)
+  assert.doesNotMatch(source, /node-version:\s*['"]?22(?:\.\d+)?['"]?/u, `${path} still contains the legacy Node 22 CI baseline`)
+}
+
 const packageJson = JSON.parse(await read('packages/studio-dsh-plugin/package.json'))
 assert.equal(packageJson.name, '@architectureworld/report-studio-dsh')
 assert.equal(packageJson.version, '0.1.1')
@@ -35,6 +54,13 @@ assert.deepEqual(baseline.clientPackages, packageJson.dsh.client.inject)
 assert.deepEqual(baseline.clientSlots, ['conversation.view', 'conversation.session.header.actions'])
 assert.deepEqual(baseline.tools, ['studio_open_workspace_project', 'studio_reload_upstream', 'studio_get_context', 'studio_apply_commands'])
 assert.equal(baseline.designToolFamily, true)
+
+const activeWorkflow = await read('.github/workflows/report-studio-v0.1.1-ci.yml')
+assert.match(activeWorkflow, /REPORT_STUDIO_DSH_VERSION:\s*'0\.1\.5-rc\.1'/)
+assert.match(activeWorkflow, /@deepseek-ai\/dsh@0\.1\.5-rc\.1/)
+assert.match(activeWorkflow, /node-version:\s*'24\.11\.0'/)
+const standardWorkflow = await read('.github/workflows/presentation-standard-project-v0.1.0-ci.yml')
+assert.match(standardWorkflow, /node-version:\s*'24\.11\.0'/)
 
 const patch = await read('packages/studio-dsh-plugin/cordis.patch.yml')
 assert.match(patch, /id: report-studio-dsh/)
@@ -91,7 +117,7 @@ for (const token of [
   "Report Studio · 独立打开",
   'window.confirm(',
 ]) assert.ok(client.includes(token), `missing client integration token: ${token}`)
-assert.ok(!packageJson.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'), 'DSH 0.1.5 no longer composes dsh-client-runtime')
+assert.ok(!packageJson.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'), 'DSH 0.1.5 no longer composes the legacy client runtime package')
 
 const browser = await read('apps/studio-local/public/dsh-native-runtime.js')
 for (const token of [
@@ -118,6 +144,8 @@ assert.match(smoke, /resolveRequiredPluginPackage/)
 assert.match(smoke, /DEFAULT_DSH_VERSION = '0\.1\.5-rc\.1'/)
 assert.match(smoke, /DSH version mismatch/)
 assert.match(smoke, /Node >=24\.11\.0/)
+assert.match(smoke, /playwright-core/)
+assert.match(smoke, /Report Studio Web Client was not loaded/)
 assert.doesNotMatch(smoke, /dist.+architectureworld-report-studio-dsh-0\.1\.1\.tgz/s)
 
 const html = await read('apps/studio-local/public/index.html')
