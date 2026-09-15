@@ -7,6 +7,9 @@ import test from 'node:test'
 
 const root = resolve(new URL('..', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1'))
 const integrity = await import('./release-integrity.mjs').catch(() => null)
+const DSH_VERSION = '0.1.5-rc.1'
+const REPORT_STUDIO_WORKFLOW = 'report-studio-v0.1.1-ci.yml'
+const STANDARD_WORKFLOW = 'presentation-standard-project-v0.1.0-ci.yml'
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -20,177 +23,123 @@ function run(command, args, options = {}) {
   })
 }
 
+async function workflowFixture(t, prefix = 'report-studio-release-config-') {
+  const configurationRoot = await mkdtemp(join(tmpdir(), prefix))
+  t.after(() => rm(configurationRoot, { recursive: true, force: true }))
+  await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
+  const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, 'package-lock.json'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', REPORT_STUDIO_WORKFLOW), 'utf8'),
+    readFile(join(root, '.github', 'workflows', STANDARD_WORKFLOW), 'utf8'),
+  ])
+  async function write({ report = reportStudioWorkflow, standard = standardWorkflow } = {}) {
+    await Promise.all([
+      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
+      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', REPORT_STUDIO_WORKFLOW), report, 'utf8'),
+      writeFile(join(configurationRoot, '.github', 'workflows', STANDARD_WORKFLOW), standard, 'utf8'),
+    ])
+  }
+  return { configurationRoot, reportStudioWorkflow, standardWorkflow, write }
+}
+
 test('release integrity API is available to enforce the packaging boundary', () => {
   assert.ok(integrity, 'scripts/release-integrity.mjs must exist')
 })
 
 if (integrity) {
-  test('release configuration enforces clean installs and the single v0.1.1 workflow', async () => {
+  test('release configuration enforces clean installs and the active runtime workflow', async () => {
     const result = await integrity.verifyReleaseConfiguration(root)
     assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
     assert.equal(result.platforms.sort().join(','), 'ubuntu-latest,windows-latest')
   })
 
   test('release configuration requires the vendor manifest to trigger push verification', async t => {
-    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-release-configuration-test-'))
-    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
-    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
-    const [packageJson, packageLock, workflow] = await Promise.all([
-      readFile(join(root, 'package.json'), 'utf8'),
-      readFile(join(root, 'package-lock.json'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
-    ])
+    const fixture = await workflowFixture(t)
     const manifestPathLine = "      - 'scripts/dsh-plugin-vendor-manifest.mjs'"
-    const workflowMissingPushPath = workflow.replace(new RegExp(`${manifestPathLine.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}\\r?\\n`), '')
-    assert.notEqual(workflowMissingPushPath, workflow, 'fixture must remove the push path filter')
-    await Promise.all([
-      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
-      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), workflowMissingPushPath, 'utf8'),
-    ])
-
+    const report = fixture.reportStudioWorkflow.replace(
+      new RegExp(`${manifestPathLine.replace(/[\\^$.*+?()[\]{}|]/gu, '\\$&')}\\r?\\n`),
+      '',
+    )
+    assert.notEqual(report, fixture.reportStudioWorkflow, 'fixture must remove the push path filter')
+    await fixture.write({ report })
     await assert.rejects(
-      integrity.verifyReleaseConfiguration(configurationRoot),
+      integrity.verifyReleaseConfiguration(fixture.configurationRoot),
       /push path filter missing scripts\/dsh-plugin-vendor-manifest\.mjs/,
     )
   })
 
   test('release configuration keeps Report Studio checks available on every pull request', async t => {
-    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-unconditional-pr-test-'))
-    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
-    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
-    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
-      readFile(join(root, 'package.json'), 'utf8'),
-      readFile(join(root, 'package-lock.json'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
-    ])
-    const filteredWorkflow = reportStudioWorkflow.replace(
+    const fixture = await workflowFixture(t, 'report-studio-unconditional-pr-test-')
+    const report = fixture.reportStudioWorkflow.replace(
       /^  pull_request:\r?\n/m,
       "  pull_request:\n    paths:\n      - 'package.json'\n",
     )
-    await Promise.all([
-      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
-      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), filteredWorkflow, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow, 'utf8'),
-    ])
-
+    await fixture.write({ report })
     await assert.rejects(
-      integrity.verifyReleaseConfiguration(configurationRoot),
+      integrity.verifyReleaseConfiguration(fixture.configurationRoot),
       /Report Studio workflow pull_request must run without path filters/,
     )
   })
 
   test('release configuration rejects the Standard Project workflow when root dependencies are absent before verify:all', async t => {
-    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-standard-workflow-test-'))
-    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
-    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
-    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
-      readFile(join(root, 'package.json'), 'utf8'),
-      readFile(join(root, 'package-lock.json'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
-    ])
-    const rootlessStandardWorkflow = standardWorkflow.replace(
+    const fixture = await workflowFixture(t, 'report-studio-standard-workflow-test-')
+    const standard = fixture.standardWorkflow.replace(
       /^          npm ci --ignore-scripts --no-audit --no-fund\r?\n/m,
       '',
     )
-    await Promise.all([
-      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
-      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), reportStudioWorkflow, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), rootlessStandardWorkflow, 'utf8'),
-    ])
-
+    await fixture.write({ standard })
     await assert.rejects(
-      integrity.verifyReleaseConfiguration(configurationRoot),
+      integrity.verifyReleaseConfiguration(fixture.configurationRoot),
       /Standard Project workflow must install root dependencies before verify:all/,
     )
   })
 
-  test('release configuration requires the Report Studio workflow to prepare pinned Python Contract dependencies before verify:all', async t => {
-    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-python-workflow-test-'))
-    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
-    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
-    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
-      readFile(join(root, 'package.json'), 'utf8'),
-      readFile(join(root, 'package-lock.json'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
-    ])
-    const writeConfiguration = async workflow => {
-      await Promise.all([
-        writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
-        writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-        writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), workflow, 'utf8'),
-        writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow, 'utf8'),
-      ])
-    }
-
-    await writeConfiguration(reportStudioWorkflow.replace(
-      /      - uses: actions\/setup-python@v5\r?\n        with:\r?\n          python-version: '3\.12'\r?\n/,
-      '',
-    ))
+  test('release configuration requires pinned Python Contract dependencies before verify:all', async t => {
+    const fixture = await workflowFixture(t, 'report-studio-python-workflow-test-')
+    await fixture.write({
+      report: fixture.reportStudioWorkflow.replace(
+        /      - uses: actions\/setup-python@v5\r?\n        with:\r?\n          python-version: '3\.12'\r?\n/,
+        '',
+      ),
+    })
     await assert.rejects(
-      integrity.verifyReleaseConfiguration(configurationRoot),
+      integrity.verifyReleaseConfiguration(fixture.configurationRoot),
       /Report Studio workflow must set up Python 3\.12 before verify:all/,
     )
 
-    await writeConfiguration(reportStudioWorkflow.replace(
-      /^          python -m pip install --disable-pip-version-check --no-input jsonschema==4\.26\.0 referencing==0\.37\.0\r?\n/m,
-      '',
-    ))
+    await fixture.write({
+      report: fixture.reportStudioWorkflow.replace(
+        /^          python -m pip install --disable-pip-version-check --no-input jsonschema==4\.26\.0 referencing==0\.37\.0\r?\n/m,
+        '',
+      ),
+    })
     await assert.rejects(
-      integrity.verifyReleaseConfiguration(configurationRoot),
+      integrity.verifyReleaseConfiguration(fixture.configurationRoot),
       /Report Studio workflow must install pinned Python Contract dependencies before verify:all/,
     )
   })
 
   test('release configuration accepts CRLF workflow files', async t => {
-    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-crlf-workflow-test-'))
-    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
-    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
-    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
-      readFile(join(root, 'package.json'), 'utf8'),
-      readFile(join(root, 'package-lock.json'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
-    ])
-    await Promise.all([
-      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
-      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), reportStudioWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'), 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'), 'utf8'),
-    ])
-
-    const result = await integrity.verifyReleaseConfiguration(configurationRoot)
+    const fixture = await workflowFixture(t, 'report-studio-crlf-workflow-test-')
+    await fixture.write({
+      report: fixture.reportStudioWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'),
+      standard: fixture.standardWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'),
+    })
+    const result = await integrity.verifyReleaseConfiguration(fixture.configurationRoot)
     assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
   })
 
   test('release configuration rejects a Report Studio workflow that omits pinned pnpm before DSH smoke', async t => {
-    const configurationRoot = await mkdtemp(join(tmpdir(), 'report-studio-pnpm-workflow-test-'))
-    t.after(() => rm(configurationRoot, { recursive: true, force: true }))
-    await mkdir(join(configurationRoot, '.github', 'workflows'), { recursive: true })
-    const [packageJson, packageLock, reportStudioWorkflow, standardWorkflow] = await Promise.all([
-      readFile(join(root, 'package.json'), 'utf8'),
-      readFile(join(root, 'package-lock.json'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), 'utf8'),
-    ])
-    const workflowWithoutPnpm = reportStudioWorkflow.replace(
+    const fixture = await workflowFixture(t, 'report-studio-pnpm-workflow-test-')
+    const report = fixture.reportStudioWorkflow.replace(
       /      - uses: pnpm\/action-setup@v4\r?\n        with:\r?\n          version: '9\.15\.4'\r?\n/,
       '',
     )
-    await Promise.all([
-      writeFile(join(configurationRoot, 'package.json'), packageJson, 'utf8'),
-      writeFile(join(configurationRoot, 'package-lock.json'), packageLock, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml'), workflowWithoutPnpm, 'utf8'),
-      writeFile(join(configurationRoot, '.github', 'workflows', 'presentation-standard-project-v0.1.0-ci.yml'), standardWorkflow, 'utf8'),
-    ])
-
+    await fixture.write({ report })
     await assert.rejects(
-      integrity.verifyReleaseConfiguration(configurationRoot),
+      integrity.verifyReleaseConfiguration(fixture.configurationRoot),
       /Report Studio workflow must install pnpm 9\.15\.4 before DSH smoke/,
     )
   })
@@ -213,14 +162,13 @@ if (integrity) {
     assert.equal((await run('git', ['commit', '-m', 'fixture'], { cwd: repository })).code, 0)
     const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: repository })).stdout.trim()
     await writeFile(join(repository, 'artifact.txt'), 'changed\n', 'utf8')
-
     await assert.rejects(
       integrity.verifyFilesAtCommit(repository, ['artifact.txt'], head),
       /does not match source commit/,
     )
   })
 
-  test('vendor tree and a freshly packed plugin are tied to the current source commit', async t => {
+  test('vendor tree and a freshly packed plugin are tied to the current source commit and DSH baseline', async t => {
     const output = await mkdtemp(join(tmpdir(), 'report-studio-pack-test-'))
     t.after(() => rm(output, { recursive: true, force: true }))
 
@@ -239,11 +187,12 @@ if (integrity) {
       root,
       packagePath: join(output, packageName),
       sourceCommit: head,
-      dshVersion: '0.1.1-rc.2',
+      dshVersion: DSH_VERSION,
       buildCommand: 'npm pack ./packages/studio-dsh-plugin',
     })
 
     assert.equal(artifact.sourceCommit, head)
+    assert.equal(artifact.dshVersion, DSH_VERSION)
     assert.equal(artifact.vendorSourceHash, vendor.vendorSourceHash)
     assert.equal(artifact.contractSchemaHash, '5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc')
     assert.ok(artifact.fileCount > 0)
@@ -251,7 +200,6 @@ if (integrity) {
     assert.match(artifact.sha256, /^[a-f0-9]{64}$/)
   })
 }
-
 
 test('package verification treats a colon in an archive name as a local path, not a remote host', async t => {
   if (process.platform === 'win32') { t.skip('Windows drive paths are covered by the full pack verification'); return }
@@ -266,7 +214,17 @@ test('package verification treats a colon in an archive name as a local path, no
   const previous = process.cwd()
   try {
     process.chdir(output)
-    const artifact = await integrity.verifyPackedPlugin({ root, packagePath: 'C:archive.tgz', sourceCommit: head, dshVersion: '0.1.1-rc.2', buildCommand: 'npm pack', allowDirtySource: true })
+    const artifact = await integrity.verifyPackedPlugin({
+      root,
+      packagePath: 'C:archive.tgz',
+      sourceCommit: head,
+      dshVersion: DSH_VERSION,
+      buildCommand: 'npm pack',
+      allowDirtySource: true,
+    })
+    assert.equal(artifact.dshVersion, DSH_VERSION)
     assert.ok(artifact.fileCount > 0)
-  } finally { process.chdir(previous) }
+  } finally {
+    process.chdir(previous)
+  }
 })
