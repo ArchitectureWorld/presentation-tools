@@ -1,3 +1,4 @@
+# Active convergence gate for Report Studio 0.2.0; legacy v0.1.0 CI has been removed.
 name: Report Studio v0.1.1 CI
 
 on:
