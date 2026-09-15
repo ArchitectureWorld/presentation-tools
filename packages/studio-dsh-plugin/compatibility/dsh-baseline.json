@@ -6,7 +6,7 @@
   "testedProfile": "web",
   "testedNodeVersion": ">=24.11.0",
   "sessionFormat": "V3",
-  "hostServices": ["tools", "webServer", "systemPrompt", "sessions", "llm", "apiProxy"],
+  "hostServices": ["tools", "webServer", "systemPrompt", "sessions", "llm", "sessionController", "sessionProjections", "agentDefaultModel"],
   "clientServices": ["slots", "sessions"],
   "clientPackages": [
     "@deepseek-ai/dsh-api-remotes",
