@@ -21,6 +21,8 @@ const publicDir = join(rootDir, 'public');
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const isContentAction = type => ['project.', 'outline.', 'draft.'].some(prefix => String(type).startsWith(prefix));
 const SECURITY_MODE = 'local-single-user-only';
+const PLUGIN_VERSION = '0.1.1';
+const PRODUCT_VERSION = '0.2.0-alpha.3';
 
 function requireLoopback(host) {
   if (host !== '127.0.0.1') throw new Error(`${SECURITY_MODE} requires listen host 127.0.0.1`);
@@ -116,8 +118,9 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
     }
     if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, {
       ok: true,
-      version: 'v0.1.1',
-      productVersion: '0.2.0-beta.1',
+      version: `v${PLUGIN_VERSION}`,
+      pluginVersion: PLUGIN_VERSION,
+      productVersion: PRODUCT_VERSION,
       layoutStage: true,
       dataPath: repository.statePath,
       layoutPath: layoutService.root,
@@ -309,6 +312,6 @@ export async function createStudioServer({ dataDir = process.env.REPORT_STUDIO_D
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const app = await createStudioServer(); await app.start();
-  console.log(`Report Studio v0.2.0-beta.1 running at http://${process.env.HOST || '127.0.0.1'}:${app.port}`);
+  console.log(`Report Studio ${PRODUCT_VERSION} running at http://${process.env.HOST || '127.0.0.1'}:${app.port}`);
   console.log(`Data: ${app.repository.statePath}`);
 }
