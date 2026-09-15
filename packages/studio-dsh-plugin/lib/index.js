@@ -17,6 +17,8 @@ import { executeDesignApi, readDesignImage } from '../vendor/apps/studio-local/d
 export const name = 'report-studio-dsh'
 export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy']
 const SECURITY_MODE = 'local-single-user-only'
+const PLUGIN_VERSION = '0.1.1'
+const PRODUCT_VERSION = '0.2.0-alpha.3'
 
 const publicDir = fileURLToPath(new URL('../vendor/apps/studio-local/public/', import.meta.url))
 const contentTypes = {
@@ -25,7 +27,7 @@ const contentTypes = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
-  '.jpg': 'image/jpeg',
+  '.jpg': 'image/jpg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
 }
@@ -108,7 +110,7 @@ function registerTools(ctx, runtime) {
 
   ctx.tools.register({
     name: 'studio_get_context',
-    description: '按不可变 ReviewSubmission 的 baseRevision 读取 Report Studio v0.1.1 大纲、草案和批注快照。修改前必须先调用。',
+    description: '按不可变 ReviewSubmission 的 baseRevision 读取 Report Studio 0.2.0 大纲、草案和批注快照。修改前必须先调用。',
     parameters: {
       type: 'object',
       properties: {
@@ -201,8 +203,9 @@ function createRoute(runtime, listenHost) {
         if (request.method === 'GET' && url.pathname === '/report-studio/api/health') {
           return sendJson(response, 200, {
             ok: true,
-            version: 'v0.1.1',
-            productVersion: '0.2.0-beta.1',
+            version: `v${PLUGIN_VERSION}`,
+            pluginVersion: PLUGIN_VERSION,
+            productVersion: PRODUCT_VERSION,
             layoutStage: true,
             agentConfigured: true,
             agentMode: 'dsh-native',
@@ -303,7 +306,7 @@ export function apply(ctx, config = {}) {
   registerTools(ctx, runtime)
   registerDesignTools(ctx,{runtime})
   const visualBridgeReady = value => value?.designVisualBridge?.protocol === 'pre-design.page-visual.v1'
-  // DSH 0.1.x may load Pre without the optional visual bridge. Keep the
+  // DSH may load Pre without the optional visual bridge. Keep the
   // Report Studio host bootable; visual tools fail explicitly when invoked.
   ctx.inject?.(['preplanning'], scope => {
     const preplanning = scope.get('preplanning')
@@ -315,7 +318,7 @@ export function apply(ctx, config = {}) {
     name: 'report-studio-v0.1.1',
     order: 130,
     text: [
-      'Report Studio v0.2.0 layout workspace is available in this DSH Session.',
+      'Report Studio 0.2.0-alpha.3 layout workspace is available in this DSH Session.',
       'DSH remains the only Agent runtime; the Layout workspace does not choose its own model.',
       'For host-authorized report design runs, use studio_get_context with scope=design and pageId to load report-studio.design-rules.v1 and actual source payloads. No ReviewSubmission is needed for this scope. For an existing direct grant, use studio_begin_design_batch then studio_next_design_batch repeatedly; candidate → actual image preview → observations → direct save. Resume the original batch after interruption. Only the Host grants scope and paid generation.',
       'For visuals in a Studio design run, call studio_generate_design_visual, inspect its actual image and proposal.id, then call studio_adopt_design_visual with that proposalId within an effective existing direct Host grant. Do not substitute preplanning_generate_page_visual for this Proposal-registering path. A pre-existing Pre candidate can be registered by repeating the exact run/page/sourceStateHash/requestId/prompt/style through studio_generate_design_visual; the same brief reuses the prior asset without another paid generation, and changed briefs fail closed.',
