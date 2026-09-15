@@ -5,15 +5,15 @@ import { join } from 'node:path';
 
 const root = new URL('./public/', import.meta.url);
 
-test('UI exposes the v0.2.0 outline draft layout workflow, migration Gate and standard project controls', async () => {
+test('UI exposes the v0.2.0-alpha.3 outline draft layout workflow, migration Gate and standard project controls', async () => {
   const html = await readFile(new URL('index.html', root), 'utf8');
   assert.match(html, /Report Studio/);
-  assert.match(html, /<title>Report Studio v0\.2\.0<\/title>/);
+  assert.match(html, /<title>Report Studio v0\.2\.0-alpha\.3<\/title>/);
   assert.match(html, /<link rel="icon" href="data:,">/);
   assert.match(html, /data-stage="outline"/);
   assert.match(html, /data-stage="draft"/);
   assert.match(html, /data-stage="layout"/);
-  assert.match(html, /v0\.2\.0/);
+  assert.match(html, /v0\.2\.0-alpha\.3/);
   assert.match(html, /annotation-panel/);
   assert.match(html, /agent-fab/);
   assert.match(html, /project-brand/);
