@@ -30,6 +30,7 @@ import { createDesignVisualService } from '../vendor/apps/studio-local/design-vi
 import { createDesignContentService } from '../vendor/apps/studio-local/design-content.mjs'
 import { projectAssetCatalog } from '../vendor/apps/studio-local/asset-service.mjs'
 
+const PRODUCT_VERSION = '0.2.0-alpha.3'
 const CONTENT_ACTION_PREFIXES = ['project.', 'outline.', 'draft.']
 const isContentAction = type => CONTENT_ACTION_PREFIXES.some(prefix => String(type).startsWith(prefix))
 
@@ -50,7 +51,7 @@ export function defaultDshDataRoot() {
 
 function reviewPrompt(sessionId, state, round, submission, reviewRun) {
   return [
-    '[Report Studio v0.1.1 · DSH Native Review]',
+    `[Report Studio ${PRODUCT_VERSION} · DSH Native Review]`,
     `DSH Session ID: ${sessionId}`,
     `Project ID: ${state.project.id}`,
     `Project title: ${state.project.title}`,
@@ -80,7 +81,7 @@ function chatPrompt(sessionId, state, input) {
   const text = String(input?.text ?? '').trim()
   if (!text) throw Object.assign(new Error('消息不能为空'), { statusCode: 400 })
   return [
-    '[Report Studio v0.1.1 · DSH Native Chat]',
+    `[Report Studio ${PRODUCT_VERSION} · DSH Native Chat]`,
     `DSH Session ID: ${sessionId}`,
     `Project ID: ${state.project.id}`,
     `Project title: ${state.project.title}`,
@@ -367,7 +368,7 @@ export function createStudioDshRuntime({
     const run = state.reviewRuns.find(row => row.reviewRunId === reviewRun.reviewRunId)
     run.executionMode = 'native'
     const live = sessions?.get?.(sessionId)
-    if (Array.isArray(live?.events)) run.nativeStartSeq = live.events.length
+    if (Number.isSafeInteger(live?.seq)) run.nativeStartSeq = live.seq
     Object.assign(reviewRun, structuredClone(run))
   }
 
@@ -389,7 +390,7 @@ export function createStudioDshRuntime({
   }
 
   function nativeEvidence(session, run) {
-    const events = session?.events
+    const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : null
     if (!Array.isArray(events) || !Number.isInteger(run.nativeStartSeq)) return null
     let folds = nativeFolds.get(session)
     if (!folds) { folds = new Map(); nativeFolds.set(session, folds) }
@@ -400,7 +401,7 @@ export function createStudioDshRuntime({
     }
     const matches = message => message?.role === 'user' && message?.source?.kind === 'user' && (message.content ?? []).some(block =>
       block.type === 'text' && typeof block.text === 'string'
-      && block.text.startsWith('[Report Studio v0.1.1 · DSH Native Review]\n')
+      && block.text.startsWith(`[Report Studio ${PRODUCT_VERSION} · DSH Native Review]\n`)
       && block.text.includes(`\nReviewSubmission ID: ${run.reviewSubmissionId}\n`)
       && block.text.includes(`\nReviewRun ID: ${run.reviewRunId}\n`))
     for (; fold.cursor < events.length; fold.cursor++) {

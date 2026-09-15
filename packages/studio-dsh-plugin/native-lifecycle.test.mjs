@@ -10,14 +10,24 @@ import { Readable } from 'node:stream'
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'studio-native-lifecycle-'))
   const sessionId = 'native-lifecycle'
-  const session = { id: sessionId, header: { cwd: root }, events: [], get seq() { return this.events.length } }
+  const log = []
+  const session = {
+    id: sessionId,
+    header: { cwd: root },
+    get seq() { return log.length },
+    snapshotEvents() { return Object.freeze([...log]) },
+  }
   const runtime = createStudioDshRuntime({ dataRoot: join(root, 'data'), sessions: { get: id => id === sessionId ? session : undefined } })
   t.after(async () => { await runtime.close(); await rm(root, { recursive: true, force: true }) })
   await runtime.executeAction(sessionId, { type: 'outline.add', parentId: null, title: '原始', baseRevision: 0 })
   await runtime.executeAction(sessionId, { type: 'annotation.add', scopeKey: 'outline:root', instruction: '修改标题' })
   const task = await runtime.submitReview(sessionId, { scopeKey: 'outline:root' })
   const repository = await runtime.repositoryFor(sessionId)
-  const append = (type, data) => session.events.push({ type, data, seq: session.seq, time: Date.now() })
+  const append = (type, data) => {
+    const event = { type, data, seq: session.seq, time: Date.now() }
+    log.push(event)
+    return event
+  }
   const prompt = selected => ({ id: `message-${selected.reviewRun.reviewRunId}`, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: selected.dshPrompt.text }] })
   const expire = () => repository.transactOperational(state => { state.reviewRuns.at(-1).leaseExpiresAt = '2000-01-01T00:00:00.000Z'; return state })
   const read = () => runtime.getState(sessionId)
@@ -85,7 +95,13 @@ test('an old native turn end cannot finish a retry of the same frozen submission
 
 test('native lifecycle events persist a failure even when no Studio browser is polling', async t => {
   const root = await mkdtemp(join(tmpdir(), 'studio-native-event-'))
-  const session = { id: 'event-session', header: { cwd: root }, events: [], get seq() { return this.events.length } }
+  const log = []
+  const session = {
+    id: 'event-session',
+    header: { cwd: root },
+    get seq() { return log.length },
+    snapshotEvents() { return Object.freeze([...log]) },
+  }
   const listeners = new Map()
   let route
   let cleanup
@@ -112,7 +128,7 @@ test('native lifecycle events persist a failure even when no Studio browser is p
     ['turn/end', { turn: 20, reason: { kind: 'error', error: { code: 'QUOTA' } } }],
   ]) {
     const event = { type, data, seq: session.seq, time: Date.now() }
-    session.events.push(event)
+    log.push(event)
     await listeners.get('session/event')?.(session, event)
   }
   // The dispatch route does not run getState reconciliation: the event hook must have persisted the failure.

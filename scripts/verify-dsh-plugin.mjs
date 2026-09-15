@@ -109,12 +109,21 @@ assert.doesNotMatch(standaloneServer, /0\.2\.0-beta\.1/)
 const runtime = await read('packages/studio-dsh-plugin/lib/runtime.js')
 assert.match(runtime, /\.\.\/vendor\/apps\/studio-local\/repository\.mjs/)
 for (const token of [
+  "const PRODUCT_VERSION = '0.2.0-alpha.3'",
   'sessions?.get(sessionId)',
   'session?.header?.cwd',
+  'Number.isSafeInteger(live?.seq)',
+  'session.snapshotEvents()',
   'createWorkspaceWatcher',
   'applyWorkspaceCandidate',
-]) assert.ok(runtime.includes(token), `missing Workspace runtime token: ${token}`)
+]) assert.ok(runtime.includes(token), `missing DSH 0.1.5 runtime token: ${token}`)
 assert.ok(!runtime.includes('session.events'), 'DSH 0.1.5 Session V3 must not use the removed session.events array')
+assert.ok(!runtime.includes('Report Studio v0.1.1'), 'native prompts must not identify the active product as v0.1.1')
+
+const nativeLifecycle = await read('packages/studio-dsh-plugin/native-lifecycle.test.mjs')
+assert.match(nativeLifecycle, /snapshotEvents\(\)/)
+assert.match(nativeLifecycle, /get seq\(\)/)
+assert.ok(!nativeLifecycle.includes('session.events'), 'native lifecycle fixtures must model Session V3 without session.events')
 
 const client = await read('packages/studio-dsh-plugin/lib/client.js')
 for (const token of [
@@ -167,6 +176,7 @@ assert.match(html, /id="report-studio-standalone-notice"/)
 assert.match(html, /当前为 Report Studio 独立工作台。模型、推理等级和 Agent 会话由 DSH 主界面管理。/)
 assert.match(html, /id="report-studio-return-dsh" href="\/"/)
 assert.match(html, /id="agent-fab"[^>]+aria-controls="agent-modal"[^>]+aria-expanded="false"/)
+assert.match(html, /v0\.2\.0-alpha\.3/)
 assert.doesNotMatch(html, /<select[^>]+(?:model|reasoning|推理|模型)/i)
 
 const css = await read('apps/studio-local/public/styles.css')
