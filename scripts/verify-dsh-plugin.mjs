@@ -4,9 +4,10 @@ import {registerDesignTools} from '../packages/studio-dsh-plugin/lib/design-tool
 import {getDesignRules} from '../packages/studio-dsh-plugin/vendor/apps/studio-local/design-rules.mjs'
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
+const ACTIVE_RUNTIME_WORKFLOW = '.github/workflows/report-studio-v0.2.0-runtime-ci.yml'
 
 const activeDeploymentFiles = [
-  '.github/workflows/report-studio-v0.1.1-ci.yml',
+  ACTIVE_RUNTIME_WORKFLOW,
   '.github/workflows/presentation-standard-project-v0.1.0-ci.yml',
   '.github/workflows/report-studio-ci.yml',
   'package.json',
@@ -26,6 +27,7 @@ for (const path of activeDeploymentFiles) {
 const packageJson = JSON.parse(await read('packages/studio-dsh-plugin/package.json'))
 assert.equal(packageJson.name, '@architectureworld/report-studio-dsh')
 assert.equal(packageJson.version, '0.1.1')
+assert.match(packageJson.description, /Report Studio 0\.2\.0-alpha\.3/)
 assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
 assert.equal(packageJson.dsh?.client?.platform, 'web')
 assert.deepEqual(packageJson.dsh?.client?.inject, [
@@ -55,7 +57,8 @@ assert.deepEqual(baseline.clientSlots, ['conversation.view', 'conversation.sessi
 assert.deepEqual(baseline.tools, ['studio_open_workspace_project', 'studio_reload_upstream', 'studio_get_context', 'studio_apply_commands'])
 assert.equal(baseline.designToolFamily, true)
 
-const activeWorkflow = await read('.github/workflows/report-studio-v0.1.1-ci.yml')
+const activeWorkflow = await read(ACTIVE_RUNTIME_WORKFLOW)
+assert.match(activeWorkflow, /^name:\s*Report Studio v0\.2\.0 Runtime CI\s*$/m)
 assert.match(activeWorkflow, /REPORT_STUDIO_DSH_VERSION:\s*'0\.1\.5-rc\.1'/)
 assert.match(activeWorkflow, /@deepseek-ai\/dsh@0\.1\.5-rc\.1/)
 assert.match(activeWorkflow, /node-version:\s*'24\.11\.0'/)
@@ -69,6 +72,8 @@ assert.match(patch, /@architectureworld\/report-studio-dsh/)
 const host = await read('packages/studio-dsh-plugin/lib/index.js')
 for (const token of [
   "inject = ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy']",
+  "const PLUGIN_VERSION = '0.1.1'",
+  "const PRODUCT_VERSION = '0.2.0-alpha.3'",
   "path: '/report-studio'",
   "name: 'studio_open_workspace_project'",
   "name: 'studio_reload_upstream'",
@@ -82,6 +87,7 @@ for (const token of [
   "networkSharedSecurity: false",
   "schema: {}",
 ]) assert.ok(host.includes(token), `missing host integration token: ${token}`)
+assert.ok(!host.includes('0.2.0-beta.1'), 'active DSH host must not expose stale product version 0.2.0-beta.1')
 assert.ok(!host.includes("from '@deepseek-ai/dsh-tools'"), 'native host must not require an uninstalled linked-package dependency')
 assert.ok(!host.includes('ctx.agent'), 'DSH 0.1.5 removed ctx.agent; use execution context or explicit services')
 const designTools=[]
@@ -95,6 +101,10 @@ for(const name of ['studio_get_layout_context','studio_prepare_layout_candidate'
 assert.equal(getDesignRules().schemaVersion,'report-studio.design-rules.v2')
 assert.equal(designTools.find(row=>row.name==='studio_render_layout_preview').output.render({}, {preview:{},image:{attachmentId:'native'}})[1].type,'image')
 assert.match(host, /\.\.\/vendor\/apps\/studio-local\/standard-project\.mjs/)
+
+const standaloneServer = await read('apps/studio-local/server.mjs')
+assert.match(standaloneServer, /const PRODUCT_VERSION = '0\.2\.0-alpha\.3'/)
+assert.doesNotMatch(standaloneServer, /0\.2\.0-beta\.1/)
 
 const runtime = await read('packages/studio-dsh-plugin/lib/runtime.js')
 assert.match(runtime, /\.\.\/vendor\/apps\/studio-local\/repository\.mjs/)
@@ -145,7 +155,7 @@ assert.match(smoke, /DEFAULT_DSH_VERSION = '0\.1\.5-rc\.1'/)
 assert.match(smoke, /DSH version mismatch/)
 assert.match(smoke, /Node >=24\.11\.0/)
 assert.match(smoke, /playwright-core/)
-assert.match(smoke, /Report Studio Web Client was not loaded/)
+assert.match(smoke, /DSH Web Client did not request the Report Studio client bundle/)
 assert.doesNotMatch(smoke, /dist.+architectureworld-report-studio-dsh-0\.1\.1\.tgz/s)
 
 const html = await read('apps/studio-local/public/index.html')
@@ -163,6 +173,7 @@ const css = await read('apps/studio-local/public/styles.css')
 assert.doesNotMatch(css, /\.report-studio-dsh-native\s+#agent-fab[\s\S]{0,160}display:\s*none\s*!important/)
 
 console.log('Report Studio native DSH plugin verification PASS')
+console.log('product=0.2.0-alpha.3')
 console.log('plugin=@architectureworld/report-studio-dsh@0.1.1')
 console.log('baseline=@deepseek-ai/dsh@0.1.5-rc.1')
 console.log('node=>=24.11.0')
