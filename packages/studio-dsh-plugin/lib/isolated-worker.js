@@ -189,14 +189,30 @@ export function createIsolatedReviewWorker({ llm, resolveModel, timeoutMs = 120_
   })
 }
 
+async function resolveDshSessionModel(ctx, parentSessionId, signal) {
+  let session = ctx.sessions?.get?.(parentSessionId)
+  if (session === undefined) {
+    const resolved = await ctx.sessionController.resolveAgent(parentSessionId)
+    if (!resolved || 'error' in resolved) throw resolved?.error ?? new Error('DSH session is unavailable')
+    session = resolved.agent?.session
+  }
+  if (session === undefined) throw new Error('DSH session is unavailable')
+  const selected = ctx.sessionProjections.snapshot(session).values?.modelSelection?.next
+    ?? ctx.agentDefaultModel.currentSelection()
+  if (!selected?.provider || !selected?.model) throw new Error('DSH session model is unavailable')
+  if (typeof ctx.llm?.resolveModelInfo !== 'function') throw new Error('DSH model route verification is unavailable')
+  await ctx.llm.resolveModelInfo(selected.provider, selected.model, signal)
+  return {
+    provider: selected.provider,
+    model: selected.model,
+    ...(selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort }),
+  }
+}
+
 export function createDshReviewWorker(ctx, options = {}) {
   return createIsolatedReviewWorker({
     ...options,
     llm: ctx.llm,
-    resolveModel: ctx.apiProxy?.sessions?.models ? async parentSessionId => {
-      const response = await ctx.apiProxy.sessions.models({ rpcId: randomUUID(), payload: { sessionId: parentSessionId } })
-      if (!response.result?.ok || !response.result.value.routable) throw new Error('DSH session model is unavailable')
-      return response.result.value.current
-    } : undefined,
+    resolveModel: (parentSessionId, signal) => resolveDshSessionModel(ctx, parentSessionId, signal),
   })
 }

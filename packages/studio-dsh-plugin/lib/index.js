@@ -15,7 +15,7 @@ import { registerDesignTools, designSessionId } from './design-tools.js'
 import { executeDesignApi, readDesignImage } from '../vendor/apps/studio-local/design-api.mjs'
 
 export const name = 'report-studio-dsh'
-export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy']
+export const inject = ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'sessionController', 'sessionProjections', 'agentDefaultModel']
 const SECURITY_MODE = 'local-single-user-only'
 const PLUGIN_VERSION = '0.1.1'
 const PRODUCT_VERSION = '0.2.0-alpha.3'

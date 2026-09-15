@@ -1,6 +1,6 @@
 # Report Studio 0.2.0-alpha.3 — DSH 0.1.5-rc.1 安装、升级与回滚
 
-本文件是 `feat/report-studio-v0.2.0-layout` 的当前部署入口。Report Studio 运行在 DSH Web Profile 内，复用 DSH 的 Session、模型与 Agent 能力；独立 `4173` 仅用于源码调试。当前目标 DSH 固定为 `0.1.5-rc.1`，不能用历史 `0.1.1-rc.2` 验收结果代替本轮兼容验证。
+本文件是 `feat/report-studio-v0.2.0-layout` 的当前部署入口。Report Studio 运行在 DSH Web Profile 内，复用 DSH 的 Session、模型与 Agent 能力；独立 `4173` 仅用于源码调试。当前目标 DSH 固定为 `0.1.5-rc.1`，不能用历史 DSH 基线的验收结果代替本轮兼容验证。
 
 ## 固定基线
 
@@ -79,9 +79,9 @@ npm run verify:all
 
 当前 DSH 兼容 Review：`docs/review/2026-09-15-dsh-0.1.5-rc.1-compatibility-review.md`。
 
-## 4. 0.1.5 Web Client 适配点
+## 4. DSH 0.1.5 适配点
 
-当前插件不再声明已退出 0.1.5 组合的 `@deepseek-ai/dsh-client-runtime`。浏览器端依赖图固定为：
+当前插件不再声明已退出 0.1.5 组合的旧 Client Runtime。浏览器端依赖图固定为：
 
 ```text
 @deepseek-ai/dsh-api-remotes
@@ -91,18 +91,42 @@ npm run verify:all
 @deepseek-ai/dsh-client-ui-session
 ```
 
+Host 侧当前硬依赖固定为：
+
+```text
+tools
+webServer
+systemPrompt
+sessions
+llm
+sessionController
+sessionProjections
+agentDefaultModel
+```
+
+Report Studio 不再依赖 DSH 旧 Host `apiProxy` 服务。隔离批注 worker 读取当前 Session 的正式模型选择投影：
+
+```text
+sessionProjections.snapshot(session).values.modelSelection.next
+    ↓ 若当前 Session 没有选择
+agentDefaultModel.currentSelection()
+    ↓
+llm.resolveModelInfo(provider, model, signal)
+```
+
 Report Studio 继续使用：
 
 ```text
 ctx.sessions / SessionHeader.cwd
 session/event / session/disposed
+session.seq / session.snapshotEvents()
 sessions.binding(sessionId)
 session.prompt(..., 'queue')
 conversation.view
 conversation.session.header.actions
 ```
 
-它不读取旧的 `session.events` 数组，也不依赖已移除的 `ctx.agent`。Host 工具从 DSH tool execution context 取得 Agent/Session 身份。隔离批注 worker 继续使用 DSH `llm` 与当前兼容的 Host 模型目录接口；真实 `0.1.5-rc.1` smoke 是该兼容性的发布门禁。
+它不读取旧的 `session.events` 数组，也不依赖已移除的 `ctx.agent`。Host 工具从 DSH tool execution context 取得 Agent/Session 身份。真实 `0.1.5-rc.1` smoke 必须验证插件实际激活、Host health route、DSH Web Client bundle 和浏览器组合，而不能只验证自定义 baseline JSON。
 
 ## 5. 构建并安装 Report Studio 插件
 
@@ -123,7 +147,7 @@ dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
 
-首次安装时 `remove` 提示插件不存在可以继续。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。`dump-config` 必须仍包含用户原有插件，同时包含 `@architectureworld/report-studio-dsh`。
+首次安装时 `remove` 提示插件不存在可以继续。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。`dump-config` 必须仍包含用户原有插件，同时包含 `@architectureworld/report-studio-dsh`，并且启动日志不得出现 Report Studio `pending (waiting for service: ...)`。
 
 正式入口：`http://127.0.0.1:3080/`。
 
@@ -150,7 +174,7 @@ DSH 0.1.5 自身某些第三方 `connection.rpc.handle()` 插件存在 rc.1 已�
 
 ## 7. Workspace Live Link
 
-Report Studio 只从当前 DSH Session 的 `SessionHeader.cwd` 解析 Workspace。`studio_open_workspace_project` 检查 `project.json` 并执行 Presentation Standard Project Directory `0.1.0` 全量验证。
+Report Studio 只从当前 DSH Session 的 `SessionHeader.cwd` 解析 Workspace。`studio_open_workspace_project` 检查 `project.json` 并执行 Presentation Standard Project Directory `0.1.0` 全量验证；`studio_reload_upstream` 重新扫描当前 Workspace，并在存在本地修改时保持冲突保护而不是静默覆盖。
 
 Live Link 默认 `750 ms` 防抖。连续 change、Windows rename 或目录替换都会完整重扫；无效中间态不会替换当前合法快照。已保存的本地内容偏离上游基线时进入 `local_saved_conflict`，没有用户明确放弃不得覆盖。`layouts/` 归 Presentation 管理。
 
@@ -186,6 +210,8 @@ objects/sha256/*.json
 
 批注默认由插件内 `dsh-local-worker` 执行：只接收冻结 ReviewSubmission 上下文和受控工具，不复制主会话历史。修改通过 CAS/Revision 网关直接应用，不等待 Proposal 二次确认；`proposals` / `proposalId` 仅作为旧兼容记录字段。
 
+模型解析只复用 DSH 0.1.5 Host 的 `sessionController`、`sessionProjections`、`agentDefaultModel` 与 `llm`。如果当前 Session 不在内存，先由 `sessionController.resolveAgent()` 恢复；随后读取 `modelSelection.next`，无 Session 级选择时使用 Host 默认模型，并通过 `llm.resolveModelInfo()` 验证实际路由。不会复制模型凭据、主会话历史或旧 Host RPC 代理对象。
+
 如果隔离 worker 缺少 DSH `llm` / 模型解析能力，插件应失败关闭该路由而不是悄悄退回主会话。`/report-studio/api/health` 应暴露 `reviewWorkerConfigured` 与 `reviewWorkerMode`。
 
 补图中断继续使用 `studio_resume_design_visual`，复用原 `runId + pageId + sourceStateHash + requestId`，不得用新 requestId 重复付费生成。
@@ -207,11 +233,12 @@ npm run smoke:dsh
 真实环境至少验收：
 
 - `dsh --version` = `0.1.5-rc.1`；
-- DSH Web 能正常启动，浏览器客户端无模块缺失；
+- DSH Web 能正常启动，Report Studio 不得停在 service pending 状态；
+- 浏览器客户端无模块缺失；
 - Session 创建/恢复、`Report Studio` 视图与 header action 正常；
 - 当前 Session 的 `SessionHeader.cwd` 能打开 Workspace；
 - 普通聊天 `session.prompt(..., 'queue')` 可用；
-- 隔离批注 worker 可解析当前模型并完成一次直接修改；
+- 隔离批注 worker 能从当前 Session projection / Host default 解析模型并完成一次直接修改；
 - `session/event` / `session/disposed` 驱动的任务状态恢复正常；
 - 大纲、草案、批注、Layout、OpenPencil、导出与重启恢复通过；
 - `/report-studio/api/health` 保持 `securityMode=local-single-user-only`、`listenHost=127.0.0.1`；

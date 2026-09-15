@@ -49,7 +49,7 @@ test('v0.2.0 convergence uses the OpenPencil Node floor and deterministic reposi
 })
 
 test('all v0.2.0 CI execution paths use Node 24.11 or newer', async () => {
-  const productWorkflow = await readFile(join(root, '.github/workflows/report-studio-v0.1.1-ci.yml'), 'utf8')
+  const productWorkflow = await readFile(join(root, '.github/workflows/report-studio-v0.2.0-runtime-ci.yml'), 'utf8')
   const layoutWorkflow = await readFile(join(root, '.github/workflows/report-studio-v0.2.0-layout-ci.yml'), 'utf8')
   assert.match(productWorkflow, /node-version:\s*'24\.11\.0'/u)
   assert.match(layoutWorkflow, /node-version:\s*'24\.11\.0'/u)

@@ -5,6 +5,7 @@ import {getDesignRules} from '../packages/studio-dsh-plugin/vendor/apps/studio-l
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const ACTIVE_RUNTIME_WORKFLOW = '.github/workflows/report-studio-v0.2.0-runtime-ci.yml'
+const DSH_015_HOST_SERVICES = ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'sessionController', 'sessionProjections', 'agentDefaultModel']
 
 const activeDeploymentFiles = [
   ACTIVE_RUNTIME_WORKFLOW,
@@ -13,6 +14,8 @@ const activeDeploymentFiles = [
   'package.json',
   'packages/studio-dsh-plugin/package.json',
   'packages/studio-dsh-plugin/compatibility/dsh-baseline.json',
+  'packages/studio-dsh-plugin/lib/index.js',
+  'packages/studio-dsh-plugin/lib/isolated-worker.js',
   'scripts/smoke-dsh-native.mjs',
   'scripts/release-integrity.mjs',
   'scripts/release-integrity.test.mjs',
@@ -21,6 +24,7 @@ for (const path of activeDeploymentFiles) {
   const source = await read(path)
   assert.ok(!source.includes('0.1.1-rc.2'), `${path} still contains the legacy DSH baseline`)
   assert.ok(!source.includes('@deepseek-ai/dsh-client-runtime'), `${path} still contains the legacy DSH client runtime package`)
+  assert.ok(!source.includes('apiProxy'), `${path} still contains the removed DSH 0.1.5 apiProxy service`)
   assert.doesNotMatch(source, /node-version:\s*['"]?22(?:\.\d+)?['"]?/u, `${path} still contains the legacy Node 22 CI baseline`)
 }
 
@@ -50,7 +54,7 @@ assert.equal(baseline.testedDshVersion, '0.1.5-rc.1')
 assert.equal(baseline.testedProfile, 'web')
 assert.equal(baseline.testedNodeVersion, '>=24.11.0')
 assert.equal(baseline.sessionFormat, 'V3')
-assert.deepEqual(baseline.hostServices, ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy'])
+assert.deepEqual(baseline.hostServices, DSH_015_HOST_SERVICES)
 assert.deepEqual(baseline.clientServices, ['slots', 'sessions'])
 assert.deepEqual(baseline.clientPackages, packageJson.dsh.client.inject)
 assert.deepEqual(baseline.clientSlots, ['conversation.view', 'conversation.session.header.actions'])
@@ -71,7 +75,7 @@ assert.match(patch, /@architectureworld\/report-studio-dsh/)
 
 const host = await read('packages/studio-dsh-plugin/lib/index.js')
 for (const token of [
-  "inject = ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy']",
+  `inject = ${JSON.stringify(DSH_015_HOST_SERVICES).replaceAll('"', "'").replaceAll(',', ', ')}`,
   "const PLUGIN_VERSION = '0.1.1'",
   "const PRODUCT_VERSION = '0.2.0-alpha.3'",
   "path: '/report-studio'",
@@ -87,6 +91,7 @@ for (const token of [
   "networkSharedSecurity: false",
   "schema: {}",
 ]) assert.ok(host.includes(token), `missing host integration token: ${token}`)
+assert.ok(!host.includes('apiProxy'), 'DSH 0.1.5 host must not inject the removed apiProxy service')
 assert.ok(!host.includes('0.2.0-beta.1'), 'active DSH host must not expose stale product version 0.2.0-beta.1')
 assert.ok(!host.includes("from '@deepseek-ai/dsh-tools'"), 'native host must not require an uninstalled linked-package dependency')
 assert.ok(!host.includes('ctx.agent'), 'DSH 0.1.5 removed ctx.agent; use execution context or explicit services')
@@ -101,6 +106,15 @@ for(const name of ['studio_get_layout_context','studio_prepare_layout_candidate'
 assert.equal(getDesignRules().schemaVersion,'report-studio.design-rules.v2')
 assert.equal(designTools.find(row=>row.name==='studio_render_layout_preview').output.render({}, {preview:{},image:{attachmentId:'native'}})[1].type,'image')
 assert.match(host, /\.\.\/vendor\/apps\/studio-local\/standard-project\.mjs/)
+
+const isolatedWorker = await read('packages/studio-dsh-plugin/lib/isolated-worker.js')
+for (const token of [
+  'ctx.sessionController.resolveAgent(parentSessionId)',
+  'ctx.sessionProjections.snapshot(session).values?.modelSelection?.next',
+  'ctx.agentDefaultModel.currentSelection()',
+  'ctx.llm.resolveModelInfo(selected.provider, selected.model, signal)',
+]) assert.ok(isolatedWorker.includes(token), `missing DSH 0.1.5 model-resolution token: ${token}`)
+assert.ok(!isolatedWorker.includes('apiProxy'), 'isolated review worker must not depend on removed apiProxy')
 
 const standaloneServer = await read('apps/studio-local/server.mjs')
 assert.match(standaloneServer, /const PRODUCT_VERSION = '0\.2\.0-alpha\.3'/)
