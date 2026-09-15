@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile)
 const EXPECTED_SCHEMA_HASH = '5bd329fcc8503ff7a48b3430e41b38dd264ae486cee7372a39cbbcccc2de2ebc'
 const EXPECTED_PLUGIN_NAME = '@architectureworld/report-studio-dsh'
 const EXPECTED_PLUGIN_VERSION = '0.1.1'
+const ACTIVE_RUNTIME_WORKFLOW = 'report-studio-v0.2.0-runtime-ci.yml'
+const ACTIVE_RUNTIME_WORKFLOW_NAME = 'Report Studio v0.2.0 Runtime CI'
 
 async function exists(path) {
   try {
@@ -67,9 +69,11 @@ export async function verifyReleaseConfiguration(root) {
     assertCondition(packageLock.packages?.['']?.devDependencies?.[name] === version, `root lockfile must pin ${name}@${version}`)
   }
 
-  const oldWorkflow = join(root, '.github', 'workflows', 'report-studio-v0.1.0-ci.yml')
-  assertCondition(!await exists(oldWorkflow), 'legacy Report Studio v0.1.0 workflow must be removed')
-  const workflowPath = join(root, '.github', 'workflows', 'report-studio-v0.1.1-ci.yml')
+  for (const legacy of ['report-studio-v0.1.0-ci.yml', 'report-studio-v0.1.1-ci.yml']) {
+    const legacyPath = join(root, '.github', 'workflows', legacy)
+    assertCondition(!await exists(legacyPath), `legacy Report Studio workflow must be removed: ${legacy}`)
+  }
+  const workflowPath = join(root, '.github', 'workflows', ACTIVE_RUNTIME_WORKFLOW)
   const workflow = (await readFile(workflowPath, 'utf8')).replace(/\r\n/g, '\n')
   const requiredPaths = [
     'apps/studio-local/**',
@@ -89,9 +93,9 @@ export async function verifyReleaseConfiguration(root) {
     'package-lock.json',
     'README.md',
     'DSH_INSTALL.md',
-    '.github/workflows/report-studio-v0.1.1-ci.yml',
+    `.github/workflows/${ACTIVE_RUNTIME_WORKFLOW}`,
   ]
-  assertCondition(/^name:\s*Report Studio v0\.1\.1 CI\s*$/m.test(workflow), 'workflow name must be Report Studio v0.1.1 CI')
+  assertCondition(new RegExp(`^name:\\s*${ACTIVE_RUNTIME_WORKFLOW_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm').test(workflow), `workflow name must be ${ACTIVE_RUNTIME_WORKFLOW_NAME}`)
   assertCondition(/^\s*push:\s*$/m.test(workflow) && /^\s*pull_request:\s*$/m.test(workflow), 'workflow must run for pushes and pull requests')
   const workflowLines = workflow.split(/\r?\n/)
   const pushIndex = workflowLines.indexOf('  push:')
@@ -150,7 +154,7 @@ export async function verifyReleaseConfiguration(root) {
 
   const platforms = ['ubuntu-latest', 'windows-latest'].filter(platform => workflow.includes(platform))
   assertCondition(platforms.length === 2, 'workflow must verify ubuntu-latest and windows-latest')
-  return { workflowName: 'Report Studio v0.1.1 CI', platforms }
+  return { workflowName: ACTIVE_RUNTIME_WORKFLOW_NAME, platforms }
 }
 
 export async function verifyVendorTree(root) {
