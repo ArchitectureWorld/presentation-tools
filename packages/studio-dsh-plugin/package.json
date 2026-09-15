@@ -1,7 +1,7 @@
 {
   "name": "@architectureworld/report-studio-dsh",
   "version": "0.1.1",
-  "description": "Report Studio v0.1.1 native DSH Web profile plugin",
+  "description": "Report Studio 0.2.0-alpha.3 native DSH Web profile plugin (compat package 0.1.1)",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
