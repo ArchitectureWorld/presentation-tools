@@ -22,7 +22,7 @@ Node.js: >=24.11.0
 Security: local-single-user-only
 ```
 
-0.1.5 Web Client 已不再以旧 `@deepseek-ai/dsh-client-runtime` 作为组合依赖。本插件的客户端依赖图固定为：
+0.1.5 Web Client 使用拆分后的 Session/API/UI 组合依赖。本插件的客户端依赖图固定为：
 
 ```text
 @deepseek-ai/dsh-api-remotes
@@ -34,7 +34,7 @@ Security: local-single-user-only
 
 浏览器侧继续使用 `sessions.binding(sessionId)`、`session.prompt(..., 'queue')` 和当前两个 Conversation slots。Host 侧继续使用 `ctx.sessions` / `SessionHeader.cwd`、`session/event` / `session/disposed`、`ctx.llm` 与当前兼容的模型目录接口。
 
-插件不读取已移除的 `session.events` 数组，也不依赖已移除的 `ctx.agent`。Session V3 日志格式由 DSH 自身管理，Report Studio Repository 不解析 DSH 持久化日志。
+插件不读取旧 Session 事件数组，也不依赖已移除的宿主 Agent 快捷上下文。Session V3 日志格式由 DSH 自身管理，Report Studio Repository 不解析 DSH 持久化日志。
 
 ## 安装
 
