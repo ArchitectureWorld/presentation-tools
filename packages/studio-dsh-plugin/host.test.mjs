@@ -89,7 +89,7 @@ test('native DSH host plugin loads, registers tools and serves a session-bound h
     apply(ctx, { dataDir, allowNativeReview: true })
 
     assert.equal(name, 'report-studio-dsh')
-    assert.deepEqual(inject, ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy'])
+    assert.deepEqual(inject, ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'sessionController', 'sessionProjections', 'agentDefaultModel'])
     assert.ok(['studio_open_workspace_project','studio_reload_upstream','studio_get_context','studio_apply_commands','studio_get_layout_context','studio_prepare_layout_candidate','studio_render_layout_preview','studio_submit_layout_review'].every(name=>tools.some(tool=>tool.name===name)))
     const openWorkspace = tools.find(tool => tool.name === 'studio_open_workspace_project')
     const reloadWorkspace = tools.find(tool => tool.name === 'studio_reload_upstream')
