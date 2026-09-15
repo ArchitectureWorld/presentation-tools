@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { access, mkdtemp, rm } from 'node:fs/promises'
-import { constants } from 'node:fs'
+import { constants, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
+import { chromium } from 'playwright-core'
 import { resolveRequiredPluginPackage } from './release-integrity.mjs'
 
 const DEFAULT_DSH_VERSION = '0.1.5-rc.1'
@@ -26,6 +27,73 @@ function assertDshVersion(result) {
   const matched = lines.some(line => line === EXPECTED_DSH_VERSION || line === `dsh ${EXPECTED_DSH_VERSION}` || line.endsWith(` ${EXPECTED_DSH_VERSION}`))
   if (!matched) {
     throw new Error(`DSH version mismatch: expected ${EXPECTED_DSH_VERSION}, received ${lines.join(' | ') || '<empty output>'}`)
+  }
+}
+
+function findBrowser() {
+  const configured = process.env.CHROMIUM_PATH?.trim()
+  const windowsCandidates = process.platform === 'win32'
+    ? [
+        process.env.ProgramFiles && join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      ]
+    : []
+  const candidates = [configured, ...windowsCandidates, 'google-chrome-stable', 'google-chrome', 'chromium', 'chromium-browser'].filter(Boolean)
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+    const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' })
+    if (!probe.error && probe.status === 0) return candidate
+  }
+  throw new Error('DSH browser smoke 未找到 Chromium/Chrome，请设置 CHROMIUM_PATH')
+}
+
+async function verifyWebClient(baseUrl) {
+  const executablePath = findBrowser()
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath,
+    args: process.platform === 'linux' ? ['--no-sandbox'] : [],
+  })
+  try {
+    const page = await browser.newPage()
+    const pageErrors = []
+    const clientErrors = []
+    const failedPluginRequests = []
+    page.on('pageerror', error => pageErrors.push(error?.stack || error?.message || String(error)))
+    page.on('console', message => {
+      if (message.type() !== 'error') return
+      const text = message.text()
+      if (/report-studio|dsh-client-runtime|moduleloader|missing.+module|service.+unavailable|cannot get property|inject/i.test(text)) {
+        clientErrors.push(text)
+      }
+    })
+    page.on('requestfailed', request => {
+      const url = request.url()
+      if (/report-studio-dsh/i.test(decodeURIComponent(url))) {
+        failedPluginRequests.push(`${url}: ${request.failure()?.errorText || 'request failed'}`)
+      }
+    })
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await page.waitForTimeout(1500)
+    const resources = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name))
+    const pluginResources = resources.filter(url => {
+      try { return decodeURIComponent(url).includes('report-studio-dsh') } catch { return url.includes('report-studio-dsh') }
+    })
+    if (!pluginResources.length) {
+      throw new Error(`DSH Web Client did not request the Report Studio client bundle. resources=${resources.slice(-30).join('\n')}`)
+    }
+    if (pageErrors.length || clientErrors.length || failedPluginRequests.length) {
+      throw new Error([
+        'DSH Web Client plugin composition failed.',
+        ...pageErrors.map(value => `pageerror: ${value}`),
+        ...clientErrors.map(value => `console: ${value}`),
+        ...failedPluginRequests.map(value => `request: ${value}`),
+      ].join('\n'))
+    }
+    return { executablePath, pluginResource: pluginResources[0] }
+  } finally {
+    await browser.close()
   }
 }
 
@@ -227,10 +295,10 @@ try {
     throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
   }
 
-  console.log('DSH smoke 5/5: verify production UI and native browser bridge')
-  const shellResponse = await fetch(`http://127.0.0.1:${port}/`)
-  const pageResponse = await fetch(`http://127.0.0.1:${port}/report-studio/?sessionId=smoke-session`)
-  const runtimeResponse = await fetch(`http://127.0.0.1:${port}/report-studio/dsh-native-runtime.js`)
+  console.log('DSH smoke 5/5: verify production UI, native browser bridge and DSH Web Client composition')
+  const shellResponse = await fetch(`${baseUrl}/`)
+  const pageResponse = await fetch(`${baseUrl}/report-studio/?sessionId=smoke-session`)
+  const runtimeResponse = await fetch(`${baseUrl}/report-studio/dsh-native-runtime.js`)
   if (!shellResponse.ok || !pageResponse.ok || !runtimeResponse.ok) {
     throw new Error(`DSH route failed: shell=${shellResponse.status}, page=${pageResponse.status}, runtime=${runtimeResponse.status}`)
   }
@@ -240,11 +308,14 @@ try {
   if (!shell.includes('<!doctype html>') || !page.includes('report-studio-standalone-notice') || !nativeRuntime.includes('report-studio.prompt')) {
     throw new Error('DSH route did not serve the production Report Studio UI.')
   }
+  const webClient = await verifyWebClient(baseUrl)
 
   console.log('Report Studio native DSH runtime smoke PASS')
   console.log(`dsh=${EXPECTED_DSH_VERSION}`)
   console.log('profile=web')
   console.log(`health=${healthUrl}`)
+  console.log(`browser=${webClient.executablePath}`)
+  console.log(`client=${webClient.pluginResource}`)
   console.log('plugin=@architectureworld/report-studio-dsh')
 } finally {
   if (child && child.exitCode === null) {
