@@ -50,6 +50,7 @@ jobs:
     env:
       REQUIRE_REAL_OPENPENCIL: '1'
       REPORT_STUDIO_OPENPENCIL_PACKAGE_ROOT: ${{ github.workspace }}/.tmp/openpencil-runtime/node_modules/@zseven-w/dsh-openpencil
+      REPORT_STUDIO_DSH_VERSION: '0.1.5-rc.1'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -105,14 +106,17 @@ jobs:
           node scripts/release-integrity.mjs
           --package .tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
           --source-commit ${{ github.sha }}
-          --dsh-version 0.1.1-rc.2
+          --dsh-version 0.1.5-rc.1
           --build-command "npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack"
           --manifest .tmp/report-studio-pack/artifact-manifest-${{ runner.os }}.json
 
       - name: Install the pinned DSH CLI
         run: |
-          npm install --global @deepseek-ai/dsh@0.1.1-rc.2
+          npm install --global @deepseek-ai/dsh@0.1.5-rc.1
           node -e "const fs=require('node:fs'),p=require('node:path'),c=require('node:child_process');const win=process.platform==='win32';const npmCli=win?[p.join(p.dirname(process.execPath),'node_modules','npm','bin','npm-cli.js')]:[];const prefix=c.execFileSync(win?process.execPath:'npm',[...npmCli,'prefix','-g'],{encoding:'utf8'}).trim();const bin=win?p.join(prefix,'dsh.cmd'):p.join(prefix,'bin','dsh');fs.appendFileSync(process.env.GITHUB_ENV,'REPORT_STUDIO_DSH_BIN='+bin+'\n')"
+
+      - name: Verify pinned DSH CLI version
+        run: dsh --version
 
       - name: Smoke the tarball built by this job
         env:

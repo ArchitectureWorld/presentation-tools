@@ -10,12 +10,31 @@ assert.equal(packageJson.version, '0.1.1')
 assert.equal(packageJson.dsh?.bundle?.patch, './cordis.patch.yml')
 assert.equal(packageJson.dsh?.client?.platform, 'web')
 assert.deepEqual(packageJson.dsh?.client?.inject, [
-  '@deepseek-ai/dsh-client-runtime',
+  '@deepseek-ai/dsh-api-remotes',
+  '@deepseek-ai/dsh-api-session-controller',
   '@deepseek-ai/dsh-client-ui-conversation',
+  '@deepseek-ai/dsh-client-ui-renderer',
+  '@deepseek-ai/dsh-client-ui-session',
 ])
 assert.equal(packageJson.exports?.['./client'], './lib/client.js')
+assert.equal(packageJson.engines?.node, '>=24.11.0')
 assert.deepEqual(packageJson.dependencies, { ajv: '8.17.1', 'ajv-formats': '3.0.1', 'playwright-core':'1.63.0' })
 assert.equal(packageJson.peerDependencies, undefined)
+
+const baseline = JSON.parse(await read('packages/studio-dsh-plugin/compatibility/dsh-baseline.json'))
+assert.equal(baseline.plugin, '@architectureworld/report-studio-dsh')
+assert.equal(baseline.pluginVersion, '0.1.1')
+assert.equal(baseline.reportStudioVersion, '0.2.0-alpha.3')
+assert.equal(baseline.testedDshVersion, '0.1.5-rc.1')
+assert.equal(baseline.testedProfile, 'web')
+assert.equal(baseline.testedNodeVersion, '>=24.11.0')
+assert.equal(baseline.sessionFormat, 'V3')
+assert.deepEqual(baseline.hostServices, ['tools', 'webServer', 'systemPrompt', 'sessions', 'llm', 'apiProxy'])
+assert.deepEqual(baseline.clientServices, ['slots', 'sessions'])
+assert.deepEqual(baseline.clientPackages, packageJson.dsh.client.inject)
+assert.deepEqual(baseline.clientSlots, ['conversation.view', 'conversation.session.header.actions'])
+assert.deepEqual(baseline.tools, ['studio_open_workspace_project', 'studio_reload_upstream', 'studio_get_context', 'studio_apply_commands'])
+assert.equal(baseline.designToolFamily, true)
 
 const patch = await read('packages/studio-dsh-plugin/cordis.patch.yml')
 assert.match(patch, /id: report-studio-dsh/)
@@ -38,6 +57,7 @@ for (const token of [
   "schema: {}",
 ]) assert.ok(host.includes(token), `missing host integration token: ${token}`)
 assert.ok(!host.includes("from '@deepseek-ai/dsh-tools'"), 'native host must not require an uninstalled linked-package dependency')
+assert.ok(!host.includes('ctx.agent'), 'DSH 0.1.5 removed ctx.agent; use execution context or explicit services')
 const designTools=[]
 registerDesignTools({tools:{register:tool=>designTools.push(tool)}},{runtime:{}})
 for(const name of ['studio_get_layout_context','studio_prepare_layout_candidate','studio_render_layout_preview','studio_submit_layout_review','studio_read_design_image','studio_generate_design_visual','studio_adopt_design_visual','studio_prepare_design_content']){
@@ -58,6 +78,7 @@ for (const token of [
   'createWorkspaceWatcher',
   'applyWorkspaceCandidate',
 ]) assert.ok(runtime.includes(token), `missing Workspace runtime token: ${token}`)
+assert.ok(!runtime.includes('session.events'), 'DSH 0.1.5 Session V3 must not use the removed session.events array')
 
 const client = await read('packages/studio-dsh-plugin/lib/client.js')
 for (const token of [
@@ -70,6 +91,7 @@ for (const token of [
   "Report Studio · 独立打开",
   'window.confirm(',
 ]) assert.ok(client.includes(token), `missing client integration token: ${token}`)
+assert.ok(!packageJson.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'), 'DSH 0.1.5 no longer composes dsh-client-runtime')
 
 const browser = await read('apps/studio-local/public/dsh-native-runtime.js')
 for (const token of [
@@ -93,6 +115,9 @@ for (const token of [
 const smoke = await read('scripts/smoke-dsh-native.mjs')
 assert.match(smoke, /REPORT_STUDIO_PLUGIN_PACKAGE/)
 assert.match(smoke, /resolveRequiredPluginPackage/)
+assert.match(smoke, /DEFAULT_DSH_VERSION = '0\.1\.5-rc\.1'/)
+assert.match(smoke, /DSH version mismatch/)
+assert.match(smoke, /Node >=24\.11\.0/)
 assert.doesNotMatch(smoke, /dist.+architectureworld-report-studio-dsh-0\.1\.1\.tgz/s)
 
 const html = await read('apps/studio-local/public/index.html')
@@ -111,6 +136,8 @@ assert.doesNotMatch(css, /\.report-studio-dsh-native\s+#agent-fab[\s\S]{0,160}di
 
 console.log('Report Studio native DSH plugin verification PASS')
 console.log('plugin=@architectureworld/report-studio-dsh@0.1.1')
-console.log('baseline=@deepseek-ai/dsh@0.1.1-rc.2')
+console.log('baseline=@deepseek-ai/dsh@0.1.5-rc.1')
+console.log('node=>=24.11.0')
+console.log('sessionFormat=V3')
 console.log('route=/report-studio')
 console.log(`tools=studio_open_workspace_project,studio_reload_upstream,studio_get_context,studio_apply_commands,${designTools.map(tool=>tool.name).join(',')}`)

@@ -4,7 +4,7 @@
 
 用户提交本轮修改要求后，Agent 通过受控工具直接修改，不再等待 Proposal 二次审批。内部旧字段 `proposals` / `proposalId` 暂作兼容操作记录，不代表审批步骤。AI 来源保留在内部资产与生成记录，不强制渲染来源标签，也不删除用户自己的图注。补图挂接中断时使用 `studio_resume_design_visual` 按原 `runId + pageId + sourceStateHash + requestId` 续接；不得换 requestId 重新付费生成。
 
-本轮自动化源码与剩余验收范围见 [2026-09-11 开发交接](docs/handoff/2026-09-11-unattended-production.md)。历史绿色 CI 不能证明当前修订通过；安装前运行下面的完整验证命令。未经过真实 DSH 双插件验收，不合并 `main`、不发布 Release。
+本轮自动化源码与剩余验收范围见 [2026-09-11 开发交接](docs/handoff/2026-09-11-unattended-production.md)。DSH `0.1.5-rc.1` 适配结论与剩余真实宿主门禁见 [2026-09-15 DSH 兼容 Review](docs/review/2026-09-15-dsh-0.1.5-rc.1-compatibility-review.md)。历史绿色 CI 不能证明当前修订通过；安装前运行下面的完整验证命令。未经过真实 DSH 双插件验收，不合并 `main`、不发布 Release。
 
 ## 本轮自动化增量（开发态）
 
@@ -36,10 +36,13 @@ npm run verify:unattended
 Branch: feat/report-studio-v0.2.0-layout
 Report Studio: 0.2.0-alpha.3
 DSH plugin: @architectureworld/report-studio-dsh@0.1.1
-Tested DSH: 0.1.1-rc.2
+DSH target: 0.1.5-rc.1
+DSH Session format: V3
 Profile: web
 Node.js: >=24.11.0
 ```
+
+Node `24.11.0+` 是本分支现有要求，也避开了 DSH 0.1.5 CLI 在不支持 `import.meta.main` 的 Node 运行时上可能出现的“退出码为 0 但没有版本输出”假成功。`smoke:dsh` 会强制校验实际 CLI 版本，空输出或非 `0.1.5-rc.1` 直接失败。
 
 ## 安装
 
@@ -48,6 +51,8 @@ git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
 git checkout feat/report-studio-v0.2.0-layout
 git pull --ff-only
+node --version
+dsh --version
 npm ci
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
@@ -63,20 +68,20 @@ dsh --profile web --no-open
 
 正式入口统一为 `http://127.0.0.1:3080/`：先在 DSH 中选择或创建 Session，再点击会话顶部的 `Report Studio` 标签；模型和推理等级继续在 DSH 底部原生控制栏选择。不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。
 
-会话头部的 `Report Studio · 独立打开` 只是带提示的备用动作。独立窗口不显示 DSH 模型、推理等级、Session 侧栏或主对话区。完整备份、升级和回滚说明见 [DSH_INSTALL.md](DSH_INSTALL.md)。
+会话头部的 `Report Studio · 独立打开` 只是带提示的备用动作。独立窗口不显示 DSH 模型、推理等级、Session 侧栏或主对话区。**首次从旧 DSH 升到 0.1.5-rc.1 前必须先停止 DSH 并冷备份整个 `DSH_HOME`**；完整备份、Session V3 升级和回滚说明见 [DSH_INSTALL.md](DSH_INSTALL.md)。
 
 ## A1.1 旧数据升级
 
-检测到旧 `state.json` 时，工作台保持只读并显示“备份并升级”。只有用户确认后才会：
+Report Studio 自身的 A1.1 数据迁移与 DSH Session V3 迁移是两套独立机制。检测到旧 `state.json` 时，工作台保持只读并显示“备份并升级”。只有用户确认后才会：
 
 1. 逐字节备份旧文件；
 2. 生成并持久化稳定 ID 映射；
 3. 校验候选对象和引用；
 4. 原子发布新 `control.json`。
 
-旧 `state.json` 不会被覆盖或删除；失败时不会切换 Head，可使用同一映射重试。
+旧 `state.json` 不会被覆盖或删除；失败时不会切换 Head，可使用同一映射重试。DSH `0.1.5` 的 Session V3 则由 DSH 自己管理，不能用 Report Studio 的 A1.1 回滚替代 DSH Session 备份。
 
-## DSH 原生能力
+## DSH 0.1.5 原生能力与适配边界
 
 ```text
 /report-studio              DSH 同源内部 UI/API 路由，不是正式入口
@@ -86,7 +91,9 @@ studio_get_context          按 Submission 冻结 Revision 读取上下文
 studio_apply_commands       按任务范围幂等直接修改，返回逐条批注结果
 ```
 
-正式模式不需要 `REPORT_STUDIO_AGENT_URL`，也不会启动第二套 Agent Runtime。
+本分支不再依赖已退出 0.1.5 Web 组合的 `@deepseek-ai/dsh-client-runtime`。浏览器模块改为依赖 `dsh-api-remotes`、`dsh-api-session-controller`、`ui-session`、`ui-conversation` 与 `ui-renderer`；`ctx.sessions` / `sessions.binding()`、`conversation.view`、`conversation.session.header.actions` 与 `session.prompt(..., 'queue')` 仍按当前 DSH Client 模型工作。
+
+Host 侧继续使用 `ctx.sessions`、`session.header.cwd`、`session/event` / `session/disposed`、`ctx.llm` 和当前兼容的 `apiProxy` 模型目录接口。Report Studio **不读取 DSH Session 日志内部数组**，也不依赖已移除的 `ctx.agent`；因此 Session V3 的 `session.events → snapshotEvents()` 变化不会侵入 Studio Repository。正式模式不需要第二套 Agent Runtime。
 
 ### Workspace Live Link
 
@@ -110,7 +117,7 @@ npm run verify:workspace
 
 ### Session 安全边界
 
-当前验证基线 DSH `0.1.1-rc.2` 的 `webServer` 只提供 HTTP 路由与监听地址，未提供可把 iframe 请求绑定到可信服务端 Session 身份的 capability hook。因此本版本明确运行在 `securityMode=local-single-user-only`：DSH Web 与独立调试服务都必须监听 `127.0.0.1`，配置为 `0.0.0.0` 会拒绝启动；不支持多人或网络共享安全，也不把 query `sessionId` 宣称为认证。`/api/health` 会返回 `securityMode`、`listenHost` 和 `networkSharedSecurity=false`。Agent 工具的 Session 仍只取自 DSH exec context，模型参数不能选择其他 Session。
+当前目标 DSH `0.1.5-rc.1` 下，本插件仍不把 iframe query `sessionId` 当作可信认证信息。因此安全模型保持 `securityMode=local-single-user-only`：DSH Web 与独立调试服务必须监听 `127.0.0.1`，配置为 `0.0.0.0` 会拒绝启动；不支持多人或网络共享安全。`/api/health` 返回 `securityMode`、`listenHost` 和 `networkSharedSecurity=false`。Agent 工具的 Session 身份仍来自 DSH 工具执行上下文，模型参数不能选择其他 Session。
 
 ## 验证
 
@@ -121,10 +128,10 @@ git diff --exit-code -- packages/studio-dsh-plugin/vendor
 rm -rf .tmp/report-studio-pack
 mkdir -p .tmp/report-studio-pack
 npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
-REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+REPORT_STUDIO_DSH_VERSION=0.1.5-rc.1 REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
 ```
 
-`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、6 个浏览器视口和 DSH 静态集成；`smoke:dsh` 只安装 `REPORT_STUDIO_PLUGIN_PACKAGE` 明确指定的当前 checkout 新打 tarball，不会自动读取 `dist`。旧版曾验证人工接受 Proposal 的闭环，但该记录不证明本轮直接修改流程通过真实模型验收；本轮须另行验证主会话 → 直接修改 → 新 Revision → 重启恢复。
+`verify:all` 覆盖单元/集成测试、Contract、迁移、并发 CAS、E2E、浏览器视口、排版/OpenPencil、DSH 静态集成和无人值守生产链；`smoke:dsh` 只安装当前 checkout 新打 tarball，并强制验证 DSH `0.1.5-rc.1` 后再组合 Web Profile。旧版历史验收不能替代本轮 `0.1.5-rc.1` 的真实 DSH + Pre + Provider 验收。
 
 ## 独立调试
 

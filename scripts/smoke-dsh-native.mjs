@@ -7,10 +7,27 @@ import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 import { resolveRequiredPluginPackage } from './release-integrity.mjs'
 
-const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || '@deepseek-ai/dsh@0.1.1-rc.2'
+const DEFAULT_DSH_VERSION = '0.1.5-rc.1'
+const DSH_PACKAGE = process.env.REPORT_STUDIO_DSH_PACKAGE || `@deepseek-ai/dsh@${DEFAULT_DSH_VERSION}`
+const EXPECTED_DSH_VERSION = process.env.REPORT_STUDIO_DSH_VERSION?.trim() || DEFAULT_DSH_VERSION
 const DSH_BIN = process.env.REPORT_STUDIO_DSH_BIN?.trim() || ''
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const smokeWorkspace = resolve(root, 'contracts', 'presentation-standard-project', 'examples', 'unformatted-project', 'project_01992a80-0000-7000-8000-000000000101-campus-renewal-brief')
+
+function assertRuntimeBaseline() {
+  const [major, minor] = process.versions.node.split('.').map(Number)
+  if (major < 24 || (major === 24 && minor < 11)) {
+    throw new Error(`Report Studio DSH smoke requires Node >=24.11.0; current ${process.version}`)
+  }
+}
+
+function assertDshVersion(result) {
+  const lines = `${result.stdout}\n${result.stderr}`.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const matched = lines.some(line => line === EXPECTED_DSH_VERSION || line === `dsh ${EXPECTED_DSH_VERSION}` || line.endsWith(` ${EXPECTED_DSH_VERSION}`))
+  if (!matched) {
+    throw new Error(`DSH version mismatch: expected ${EXPECTED_DSH_VERSION}, received ${lines.join(' | ') || '<empty output>'}`)
+  }
+}
 
 async function resolveDshCommand() {
   if (DSH_BIN) {
@@ -43,7 +60,7 @@ async function resolveDshCommand() {
         }
       } catch {}
     }
-    throw new Error('Windows 未找到全局 DSH，请先安装 @deepseek-ai/dsh@0.1.1-rc.2')
+    throw new Error(`Windows 未找到全局 DSH，请先安装 @deepseek-ai/dsh@${EXPECTED_DSH_VERSION}`)
   }
   return {
     command: 'npx',
@@ -153,6 +170,7 @@ async function createSmokeSession(baseUrl, child, logs, timeoutMs = 120000) {
   throw new Error(`Timed out creating smoke-session at ${baseUrl}: ${lastResponse}\n${logs()}`)
 }
 
+assertRuntimeBaseline()
 const home = await mkdtemp(join(tmpdir(), 'report-studio-dsh-home-'))
 const env = { ...process.env, DSH_HOME: home, CI: '1', NO_COLOR: '1' }
 const plugin = await resolveRequiredPluginPackage(process.env.REPORT_STUDIO_PLUGIN_PACKAGE, root)
@@ -167,6 +185,7 @@ try {
     env,
     timeoutMs: dsh.packageResolution ? 600000 : 30000,
   })
+  assertDshVersion(version)
 
   console.log(`DSH smoke 2/5: install Report Studio bundle into an isolated web profile (${plugin})`)
   const [addCommand, addArgs] = invoke(['plugin', '--profile', 'web', 'add', '--workspace-root', plugin])
@@ -223,7 +242,7 @@ try {
   }
 
   console.log('Report Studio native DSH runtime smoke PASS')
-  console.log(`dsh=${version.stdout.trim()}`)
+  console.log(`dsh=${EXPECTED_DSH_VERSION}`)
   console.log('profile=web')
   console.log(`health=${healthUrl}`)
   console.log('plugin=@architectureworld/report-studio-dsh')

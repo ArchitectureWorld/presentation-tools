@@ -1,6 +1,6 @@
-# Report Studio 0.2.0-alpha.3 — DSH 原生安装、升级与回滚
+# Report Studio 0.2.0-alpha.3 — DSH 0.1.5-rc.1 安装、升级与回滚
 
-本文件是现有开发分支的安装入口，不是发布通过证明。正式产品运行在 DSH Web Profile 内，绑定当前 DSH Session；不需要独立 `4173` 服务，也不依赖 `REPORT_STUDIO_AGENT_URL`。默认批注由插件内 `dsh-local-worker` 独立执行，不把批注 prompt 投递到当前 DSH 主会话；Pre-design 的 Skill 负责设计判断，Studio 只执行工具。新任务直接修改并保存，不再要求接受 Proposal。真实 DSH / Provider 联合验收仍需针对当前源码构建的两个安装包执行；不得用历史证据替代。
+本文件是 `feat/report-studio-v0.2.0-layout` 的当前部署入口。Report Studio 运行在 DSH Web Profile 内，复用 DSH 的 Session、模型与 Agent 能力；独立 `4173` 仅用于源码调试。当前目标 DSH 固定为 `0.1.5-rc.1`，不能用历史 `0.1.1-rc.2` 验收结果代替本轮兼容验证。
 
 ## 固定基线
 
@@ -9,56 +9,102 @@ Repository: ArchitectureWorld/presentation-tools
 Branch: feat/report-studio-v0.2.0-layout
 Report Studio: 0.2.0-alpha.3
 Plugin: @architectureworld/report-studio-dsh@0.1.1
-Tested DSH: 0.1.1-rc.2
+DSH: 0.1.5-rc.1
+DSH Session format: V3
 Profile: web
 Node.js: >=24.11.0
+Security mode: local-single-user-only
 ```
 
-## 1. 获取并验证发布代码
+插件包仍保持 `0.1.1` 只是当前开发分支的兼容包版本，不代表重新发布了同版本 npm 包。
+
+## 1. DSH 升级前：必须先做冷备份
+
+**先停止所有 DSH 进程，再备份整个 `DSH_HOME`。** DSH `0.1.5` 使用 Session V3；DSH Session 数据迁移与 Report Studio 自身 A1.1 迁移是两套不同机制。仅备份 `profiles/web` 或 Report Studio 数据不足以覆盖 DSH Session 回滚。
+
+PowerShell 示例：
+
+```powershell
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$dshRoot = if ($env:DSH_HOME) { $env:DSH_HOME } else { "$env:USERPROFILE\.dsh" }
+$backupRoot = Join-Path (Split-Path $dshRoot -Parent) "dsh-backup-pre-0.1.5-rc.1-$stamp"
+
+if (Get-Process node -ErrorAction SilentlyContinue) {
+  Write-Host '请确认没有正在运行的 DSH/Node 进程写入 DSH_HOME。'
+}
+
+Copy-Item -LiteralPath $dshRoot -Destination $backupRoot -Recurse
+Get-ChildItem -LiteralPath $backupRoot -Recurse -File | Get-FileHash -Algorithm SHA256 |
+  Export-Csv -LiteralPath (Join-Path $backupRoot 'sha256.csv') -NoTypeInformation -Encoding UTF8
+
+$backupRoot
+```
+
+同时建议单独再备份：
+
+```text
+$DSH_HOME/profiles/web
+$DSH_HOME/report-studio-v0.1.0
+```
+
+### Session V3 文件系统要求
+
+首次让 `0.1.5-rc.1` 打开旧 Session 前，`DSH_HOME` 应位于本机原生、支持可靠原子写入与硬链接语义的文件系统。不要直接在 exFAT、部分 FUSE 挂载、网络盘/NAS 映射目录上执行首次 Session V3 迁移。需要迁移时，先复制到本机 NTFS/APFS/ext4/btrfs 等原生文件系统，完成验证后再决定后续存储策略。
+
+**降级 DSH 包不等于 Session 回滚。** 若 `0.1.5` 已迁移 Session，而旧版本不能读取 V3，正确回退方式是停止 DSH 后恢复完整的升级前 `DSH_HOME` 冷备份。
+
+## 2. 安装 DSH 0.1.5-rc.1
+
+本分支要求 Node `>=24.11.0`：
+
+```bash
+node --version
+npm install --global @deepseek-ai/dsh@0.1.5-rc.1
+dsh --version
+```
+
+`dsh --version` 必须实际输出 `0.1.5-rc.1`。空输出即视为失败，不接受“退出码 0 但没有版本号”。仓库 `smoke:dsh` 也会执行同样的硬校验。
+
+## 3. 获取并验证 Presentation
 
 ```bash
 git clone https://github.com/ArchitectureWorld/presentation-tools.git
 cd presentation-tools
 git checkout feat/report-studio-v0.2.0-layout
 git pull --ff-only
-node --version
-dsh --version
 npm ci
 npm ci --prefix contracts/presentation-standard-project --ignore-scripts --no-audit --no-fund
 npm run verify:all
 ```
 
-缺少 DSH 时：
+当前 DSH 兼容 Review：`docs/review/2026-09-15-dsh-0.1.5-rc.1-compatibility-review.md`。
 
-```bash
-npm install --global @deepseek-ai/dsh@0.1.1-rc.2
+## 4. 0.1.5 Web Client 适配点
+
+当前插件不再声明已退出 0.1.5 组合的 `@deepseek-ai/dsh-client-runtime`。浏览器端依赖图固定为：
+
+```text
+@deepseek-ai/dsh-api-remotes
+@deepseek-ai/dsh-api-session-controller
+@deepseek-ai/dsh-client-ui-conversation
+@deepseek-ai/dsh-client-ui-renderer
+@deepseek-ai/dsh-client-ui-session
 ```
 
-## 2. 更新前备份
+Report Studio 继续使用：
 
-停止正在运行的 DSH Web。备份 Web Profile 配置和 Report Studio 数据根；不要删除旧数据。
-
-```powershell
-$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$dshRoot = if ($env:DSH_HOME) { $env:DSH_HOME } else { "$env:USERPROFILE\.dsh" }
-$profile = Join-Path $dshRoot 'profiles\web'
-$dataRoot = Join-Path $dshRoot 'report-studio-v0.1.0'
-$backup = Join-Path $dshRoot "backups\report-studio-v0.1.1-pre-$stamp"
-New-Item -ItemType Directory -Path $backup -Force | Out-Null
-
-if (Test-Path -LiteralPath $profile) {
-  Copy-Item -LiteralPath $profile -Destination (Join-Path $backup 'web-profile') -Recurse
-}
-if (Test-Path -LiteralPath $dataRoot) {
-  Copy-Item -LiteralPath $dataRoot -Destination (Join-Path $backup 'report-studio-data') -Recurse
-}
-Get-ChildItem -LiteralPath $backup -Recurse -File | Get-FileHash -Algorithm SHA256 |
-  Export-Csv -LiteralPath (Join-Path $backup 'sha256.csv') -NoTypeInformation -Encoding UTF8
+```text
+ctx.sessions / SessionHeader.cwd
+session/event / session/disposed
+sessions.binding(sessionId)
+session.prompt(..., 'queue')
+conversation.view
+conversation.session.header.actions
 ```
 
-`report-studio-v0.1.0` 是为无损识别旧 Session 数据而保留的兼容数据根名称；插件和数据结构版本已经是 `0.1.1`。
+它不读取旧的 `session.events` 数组，也不依赖已移除的 `ctx.agent`。Host 工具从 DSH tool execution context 取得 Agent/Session 身份。隔离批注 worker 继续使用 DSH `llm` 与当前兼容的 Host 模型目录接口；真实 `0.1.5-rc.1` smoke 是该兼容性的发布门禁。
 
-## 3. 安装或更新插件
+## 5. 构建并安装 Report Studio 插件
 
 在仓库根目录执行：
 
@@ -69,79 +115,82 @@ git diff --exit-code -- packages/studio-dsh-plugin/vendor
 rm -rf .tmp/report-studio-pack
 mkdir -p .tmp/report-studio-pack
 npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
-REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+REPORT_STUDIO_DSH_VERSION=0.1.5-rc.1 \
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz \
+npm run smoke:dsh
 dsh plugin --profile web add ./.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz
 dsh --profile web --dump-config
 dsh --profile web --no-open
 ```
 
-首次安装时，`remove` 提示插件不存在可以继续。发布 tarball 已包含 Studio Runtime、UI 和标准 Adapter，并显式安装 AJV 运行依赖。`dump-config` 必须包含 `@architectureworld/report-studio-dsh`，并继续保留用户原有插件。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。
+首次安装时 `remove` 提示插件不存在可以继续。不要在 `packages/studio-dsh-plugin/` 内额外执行 `npm install`。`dump-config` 必须仍包含用户原有插件，同时包含 `@architectureworld/report-studio-dsh`。
 
-DSH Web 的正式入口是 `http://127.0.0.1:3080/`。使用顺序固定为：
+正式入口：`http://127.0.0.1:3080/`。
 
-1. 在 DSH 中选择现有 Session 或创建新 Session；
-2. 点击会话顶部原生视图栏中的 `Report Studio` 标签；
-3. 在 DSH 底部原生控制栏选择模型和推理等级，并使用 DSH 原生输入区与 Agent 交互；
-4. 在 Report Studio 中完成编辑、批注、任务提交与直接修改结果检查。
+使用顺序：
 
-不要把 `/report-studio/?sessionId=...` 作为安装后的默认入口。会话头部的 `Report Studio · 独立打开` 只用于备用独立窗口，点击前会说明该窗口不显示 DSH 模型、推理等级、会话侧栏和主对话区。独立页面顶部提供“返回 DSH 主界面”。
+1. 在 DSH 中选择或创建 Session；
+2. 点击当前 Session 的 `Report Studio` 视图；
+3. 模型、推理等级与普通对话继续由 DSH 原生界面管理；
+4. Studio 负责内容编辑、批注、排版、检查、保存与交付。
 
-### Session 安全边界
+`/report-studio/?sessionId=...` 是内部 iframe/备用独立窗口地址，不是正式入口。
 
-当前 DSH `0.1.1-rc.2` 没有向插件路由提供可信服务端 Session 身份或 iframe capability 签发接口。本插件因此采用机器可读的 `securityMode=local-single-user-only`，只允许 DSH Web 监听 `127.0.0.1`；若 Profile 配置成 `0.0.0.0`，插件会拒绝启动。query `sessionId` 只是本机单用户路由键，不是认证令牌，本版本不支持多人或网络共享部署。Agent 工具仍只使用 DSH exec context 中的 Session，忽略模型提供的 Session 选择。
+## 6. Session 与网络安全边界
 
-### Workspace Live Link 使用方式
+当前插件继续采用 `securityMode=local-single-user-only`：
 
-Report Studio 从当前 DSH Session 的 `SessionHeader.cwd` 获取 Workspace，`studio_open_workspace_project` 会检查 `project.json`、执行 Contract `0.1.0` 全量验证并自动载入合法项目。不得把 Profile 目录当作 Workspace，也不得从浏览器传入另一个绝对路径。
+- DSH Web 必须监听 `127.0.0.1`；
+- `0.0.0.0` 会被插件拒绝；
+- query `sessionId` 只是本机路由键，不是认证令牌；
+- 不声明多人或网络共享安全；
+- Agent 工具的 Session 身份来自 DSH 执行上下文，而不是浏览器传入值。
 
-Live Link 以默认 `750 ms` 防抖监听 `project.json`、`rules.json`、`outline.json`、页面清单与草案、source-materials manifest 和 assets manifest。收到连续 change、Windows rename 或目录替换后，会完整重扫并重新验证；无效中间态不会替换当前合法快照，监听会继续等待恢复。
+DSH 0.1.5 自身某些第三方 `connection.rpc.handle()` 插件存在 rc.1 已知问题，但 Report Studio 的 `/report-studio` 路由直接注册在 Host `webServer`，不走该私有 client-connection RPC 注册路径。若同一 Profile 内其他插件使用该 API，应分别升级/验证，不能把它们的 405 故障归因于 Report Studio。
 
-同步状态位于 Report Studio 顶部。需要主动检查时，可点击“重新读取 Workspace”或调用 `studio_reload_upstream`。如果本地存在 dirty 编辑，上游候选不会自动覆盖，必须由用户选择保存、放弃或暂时保留。`layouts/` 由 Presentation 独占管理，Workspace 其他文件不受刷新影响。
+## 7. Workspace Live Link
 
-部署前后都应执行：
+Report Studio 只从当前 DSH Session 的 `SessionHeader.cwd` 解析 Workspace。`studio_open_workspace_project` 检查 `project.json` 并执行 Presentation Standard Project Directory `0.1.0` 全量验证。
+
+Live Link 默认 `750 ms` 防抖。连续 change、Windows rename 或目录替换都会完整重扫；无效中间态不会替换当前合法快照。已保存的本地内容偏离上游基线时进入 `local_saved_conflict`，没有用户明确放弃不得覆盖。`layouts/` 归 Presentation 管理。
 
 ```bash
 npm run verify:workspace
 ```
 
-只有输出 `PRESENTATION_WORKSPACE_LIVE_LINK_PASS`，并在正式入口 `http://127.0.0.1:3080/` 完成真实 Workspace 验收，才可视为 Live Link 发布候选通过。
+通过标志：`PRESENTATION_WORKSPACE_LIVE_LINK_PASS`。
 
-## 4. A1.1 旧数据无损升级
+## 8. Report Studio A1.1 数据迁移
 
-每个 Session 的兼容数据目录是：
-
-```text
-$DSH_HOME/report-studio-v0.1.0/sessions/<session-id-sha256>/
-```
-
-如果旧数据来自独立服务，先停止 DSH，把原始 `state.json` 复制到目标 Session 目录；不要覆盖已有业务文件，复制前后核对 SHA-256。目录名计算方式：
-
-```powershell
-$sessionId = '替换为实际 sessionId'
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($sessionId)
-$hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
-$directoryName = [System.Convert]::ToHexString($hash).ToLowerInvariant().Substring(0, 32)
-$dshRoot = if ($env:DSH_HOME) { $env:DSH_HOME } else { "$env:USERPROFILE\.dsh" }
-$sessionDir = Join-Path $dshRoot "report-studio-v0.1.0\sessions\$directoryName"
-New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
-$sessionDir
-```
-
-再次启动 DSH 并打开 Report Studio。检测到旧 `state.json` 后，界面保持只读。点击“备份并升级”才会执行：逐字节备份、稳定 ID 映射、对象校验和 `control.json` 原子切换。完成后应看到 Revision 和编辑功能恢复。
-
-升级生成：
+兼容数据根继续使用：
 
 ```text
-state.json                         原文件，保持不变
+$DSH_HOME/report-studio-v0.1.0/
+```
+
+这是为了识别旧 Studio `state.json`，与 DSH Session V3 的版本号无关。检测到旧 Studio 数据后，界面保持只读；用户点击“备份并升级”后才执行逐字节备份、稳定 ID 映射、对象校验和 `control.json` 原子切换。
+
+迁移结果：
+
+```text
+state.json                         原文件，保留
 backups/<timestamp>/state.v0.1.0.json
 migration-map.json
 control.json
 objects/sha256/*.json
 ```
 
-同一 Session 数据目录只允许一个 Node.js/DSH 进程写入；第二个写入进程会被拒绝。
+同一 Studio 数据目录只允许一个 DSH/Node 写进程。
 
-## 5. 验证
+## 9. 当前直接修改与隔离批注 worker
+
+批注默认由插件内 `dsh-local-worker` 执行：只接收冻结 ReviewSubmission 上下文和受控工具，不复制主会话历史。修改通过 CAS/Revision 网关直接应用，不等待 Proposal 二次确认；`proposals` / `proposalId` 仅作为旧兼容记录字段。
+
+如果隔离 worker 缺少 DSH `llm` / 模型解析能力，插件应失败关闭该路由而不是悄悄退回主会话。`/report-studio/api/health` 应暴露 `reviewWorkerConfigured` 与 `reviewWorkerMode`。
+
+补图中断继续使用 `studio_resume_design_visual`，复用原 `runId + pageId + sourceStateHash + requestId`，不得用新 requestId 重复付费生成。
+
+## 10. 验证清单
 
 ```bash
 npm run verify:all
@@ -150,44 +199,46 @@ git diff --exit-code -- packages/studio-dsh-plugin/vendor
 rm -rf .tmp/report-studio-pack
 mkdir -p .tmp/report-studio-pack
 npm pack ./packages/studio-dsh-plugin --pack-destination .tmp/report-studio-pack
-REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz npm run smoke:dsh
+REPORT_STUDIO_DSH_VERSION=0.1.5-rc.1 \
+REPORT_STUDIO_PLUGIN_PACKAGE=.tmp/report-studio-pack/architectureworld-report-studio-dsh-0.1.1.tgz \
+npm run smoke:dsh
 ```
 
-正式环境至少验收：
+真实环境至少验收：
 
-- 从 `http://127.0.0.1:3080/` 进入后，DSH 会话侧栏、模型选择器、推理等级和消息输入区保持可用；
-- 点击原生 `Report Studio` 标签后仍留在 DSH 外壳内，并以当前 Session ID 加载工作台；
-- `/report-studio/api/health` 返回 `version=v0.1.1`、`agentMode=dsh-native`、`agentConfigured=true`、`migrationStatus=ready`、`securityMode=local-single-user-only`、`listenHost=127.0.0.1`、`networkSharedSecurity=false`；
-- 迁移前旧 `state.json` 与备份 SHA-256 一致；
-- 大纲、草案、批注、直接修改和重启恢复需要按当前安装包验证；
-- 标准项目导出通过 Contract `0.1.0`；
-- `studio_get_context` 和 `studio_apply_commands` 已注册；
-- 原有 DSH 插件仍在，且没有把独立 `4173` 服务作为正式入口。
+- `dsh --version` = `0.1.5-rc.1`；
+- DSH Web 能正常启动，浏览器客户端无模块缺失；
+- Session 创建/恢复、`Report Studio` 视图与 header action 正常；
+- 当前 Session 的 `SessionHeader.cwd` 能打开 Workspace；
+- 普通聊天 `session.prompt(..., 'queue')` 可用；
+- 隔离批注 worker 可解析当前模型并完成一次直接修改；
+- `session/event` / `session/disposed` 驱动的任务状态恢复正常；
+- 大纲、草案、批注、Layout、OpenPencil、导出与重启恢复通过；
+- `/report-studio/api/health` 保持 `securityMode=local-single-user-only`、`listenHost=127.0.0.1`；
+- Pre-design 与用户原有 DSH 插件仍存在，没有被安装流程覆盖。
 
-历史版本验证过包含 Proposal 人工接受的路径。本轮改为当前主会话直接修改，历史记录不能代替新路径的真实 DSH / Provider 验收。
+## 11. 回滚
 
-## 6. 回滚
+### Report Studio 插件回滚
 
-如果插件启动失败：停止 DSH，移除 `0.1.1` 插件，恢复第 2 步备份的 Web Profile，再启动 DSH。不要删除数据目录。
+停止 DSH，移除当前插件，恢复插件升级前的 `profiles/web` 与 Report Studio 数据备份，再启动 DSH。不要删除 `$DSH_HOME/report-studio-v0.1.0/`。
 
-如果已完成 A1.1 数据升级但需要回退：停止 DSH，把 `control.json`、`objects/` 和 `migration-map.json` 移入带时间戳的隔离目录，保留原 `state.json` 和 `backups/`，再恢复旧插件。不要在 DSH 运行时移动这些文件。
+### DSH 0.1.5 / Session V3 回滚
 
-## 7. 卸载
+如果问题涉及 DSH `0.1.5` 自身或 Session V3：
+
+1. 停止所有 DSH 进程；
+2. 保存当前故障现场副本；
+3. 恢复**首次启动 0.1.5 前**的完整 `DSH_HOME` 冷备份；
+4. 再安装需要回退的 DSH 包版本；
+5. 启动并验证 Session/Profile。
+
+不要只执行 `npm install -g` 降级后继续使用已迁移的 V3 Session 目录。
+
+## 12. 卸载
 
 ```bash
 dsh plugin --profile web remove @architectureworld/report-studio-dsh
 ```
 
-卸载插件不授权删除 `$DSH_HOME/report-studio-v0.1.0/` 下的数据。
-
-## 本轮直接修改与恢复
-
-新界面提交设计要求即授权所选且未保护的页面；旧客户端显式 `allowApply:false` 会被拒绝升级为写入，须刷新界面，不能静默改变只读意图。拆合页生成的新页仅继承被替换来源页的范围。内部兼容 Proposal 记录不等待确认，历史未接受候选不自动应用。补图若已生成或已挂页但回执中断，使用 `studio_resume_design_visual` 并复用原四项请求身份；该操作只补缺失步骤，不重复生成或挂图。
-
-`local_saved_conflict` 保护已经保存的本地改动；无明确放弃指令不得覆盖。批注支持 completed / partial / unresolved，只有实际完成的同版本批注关闭。执行冲突或中断可重试；基线变动时冻结新提交，旧提交保留历史。没有可执行修改返回 `no_changes`，不伪造已完成。
-
-草案中的“正文段落”和“正文要点”都属于页面展示内容；讲解稿独立保存。草案支持批注标题、正文段落、单条要点；在正文或要点输入框中选中文字后点击对应批注按钮，批注会保存稳定对象 ID、原文和选区。提交时重新校验目标，Agent 命令不得改动选区之外的文字。内容已变化时需要重新选择目标，不会自动退回整页批注。单条要点使用 `draft.list.update` 修改并保留原列表项 ID。
-
-批注默认由 `dsh-local-worker` 在进程内隔离上下文中执行；主 DSH 会话只负责界面、任务引用和状态轮询。每次提交、失败重试和退回调整均创建新的 task 与 ReviewRun；worker 只接收冻结的 ReviewSubmission 上下文和允许的两个工具，不复制主会话历史。若隔离 worker 不可用，插件拒绝启动批注路由，不再静默降级到主会话。旧失败任务保留原历史，不在升级时重放。
-
-根包 `0.2.0-alpha.3`、插件包 `0.1.1`、存储 Schema `report-studio.control.v0.1.1` 与标准目录 `0.1.0` 是不同对象的版本。本批不伪造新 Release，不随意迁移旧数据目录。
+卸载插件不授权删除任何 DSH Session、Report Studio 数据、Workspace 或交付文件。
