@@ -8,7 +8,8 @@ import test from 'node:test'
 const root = resolve(new URL('..', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1'))
 const integrity = await import('./release-integrity.mjs').catch(() => null)
 const DSH_VERSION = '0.1.5-rc.1'
-const REPORT_STUDIO_WORKFLOW = 'report-studio-v0.1.1-ci.yml'
+const REPORT_STUDIO_WORKFLOW = 'report-studio-v0.2.0-runtime-ci.yml'
+const REPORT_STUDIO_WORKFLOW_NAME = 'Report Studio v0.2.0 Runtime CI'
 const STANDARD_WORKFLOW = 'presentation-standard-project-v0.1.0-ci.yml'
 
 function run(command, args, options = {}) {
@@ -51,7 +52,7 @@ test('release integrity API is available to enforce the packaging boundary', () 
 if (integrity) {
   test('release configuration enforces clean installs and the active runtime workflow', async () => {
     const result = await integrity.verifyReleaseConfiguration(root)
-    assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
+    assert.equal(result.workflowName, REPORT_STUDIO_WORKFLOW_NAME)
     assert.equal(result.platforms.sort().join(','), 'ubuntu-latest,windows-latest')
   })
 
@@ -128,7 +129,7 @@ if (integrity) {
       standard: fixture.standardWorkflow.replace(/\r?\n/g, '\n').replace(/\n/g, '\r\n'),
     })
     const result = await integrity.verifyReleaseConfiguration(fixture.configurationRoot)
-    assert.equal(result.workflowName, 'Report Studio v0.1.1 CI')
+    assert.equal(result.workflowName, REPORT_STUDIO_WORKFLOW_NAME)
   })
 
   test('release configuration rejects a Report Studio workflow that omits pinned pnpm before DSH smoke', async t => {
