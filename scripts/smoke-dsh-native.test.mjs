@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -76,4 +76,18 @@ test('DSH smoke rejects a silent or mismatched CLI version before plugin install
     assert.match(`${result.stdout}\n${result.stderr}`, /DSH version mismatch/)
     assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /FAKE_DSH_ARGS=.*"add","--workspace-root"/)
   }
+})
+
+test('DSH smoke exchanges the 0.1.5 launch token for a browser-session cookie and redacts secrets', async () => {
+  const source = await readFile(join(root, 'scripts', 'smoke-dsh-native.mjs'), 'utf8')
+  for (const token of [
+    'dsh web:',
+    "redirect: 'manual'",
+    "headers.get('set-cookie')",
+    'redactRuntimeSecrets',
+    '$1<redacted>',
+    'context.addCookies',
+    'authenticatedFetch',
+  ]) assert.ok(source.includes(token), `missing DSH browser-auth smoke token: ${token}`)
+  assert.doesNotMatch(source, /authorization.{0,100}(?:launch|token)/is)
 })
