@@ -30,6 +30,72 @@ function assertDshVersion(result) {
   }
 }
 
+function redactRuntimeSecrets(value) {
+  return String(value).replace(
+    /(https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/\?token=)[^\s]+/gi,
+    '$1<redacted>',
+  )
+}
+
+function launchUrlFromLogs(text, baseUrl) {
+  const pattern = /dsh web:\s+(https?:\/\/[^\s]+)/g
+  let match
+  while ((match = pattern.exec(text))) {
+    try {
+      const url = new URL(match[1])
+      if (url.origin === baseUrl && url.searchParams.get('token')) return url
+    } catch {}
+  }
+  return null
+}
+
+function cookieHeader(headers) {
+  const values = typeof headers.getSetCookie === 'function'
+    ? headers.getSetCookie()
+    : [headers.get('set-cookie')].filter(Boolean)
+  const pair = values.map(value => value?.split(';', 1)[0]?.trim()).find(Boolean)
+  if (!pair || !pair.includes('=')) throw new Error('DSH launch-token exchange did not return a browser-session cookie')
+  return pair
+}
+
+function authenticatedHeaders(cookie, headers = {}) {
+  const result = new Headers(headers)
+  result.set('cookie', cookie)
+  return result
+}
+
+function authenticatedFetch(url, cookie, options = {}) {
+  return fetch(url, { ...options, headers: authenticatedHeaders(cookie, options.headers) })
+}
+
+async function waitForBrowserSession(baseUrl, child, rawLogs, logs, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs
+  let lastError = 'DSH launch URL 尚未出现'
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`DSH exited before browser authentication (${child.exitCode})\n${logs()}`)
+    const launchUrl = launchUrlFromLogs(rawLogs(), baseUrl)
+    if (!launchUrl) {
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
+      continue
+    }
+    try {
+      const response = await fetch(launchUrl, { redirect: 'manual' })
+      if (![301, 302, 303, 307, 308].includes(response.status)) {
+        lastError = `launch-token exchange returned HTTP ${response.status}`
+        await new Promise(resolvePromise => setTimeout(resolvePromise, 200))
+        continue
+      }
+      const cookie = cookieHeader(response.headers)
+      console.log('DSH browser authentication established through launch-token exchange')
+      return cookie
+    } catch (error) {
+      lastError = redactRuntimeSecrets(error?.message || error)
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 200))
+    }
+  }
+  throw new Error(`Timed out establishing DSH browser authentication: ${lastError}\n${logs()}`)
+}
+
 function findBrowser() {
   const configured = process.env.CHROMIUM_PATH?.trim()
   const windowsCandidates = process.platform === 'win32'
@@ -48,7 +114,7 @@ function findBrowser() {
   throw new Error('DSH browser smoke 未找到 Chromium/Chrome，请设置 CHROMIUM_PATH')
 }
 
-async function verifyWebClient(baseUrl) {
+async function verifyWebClient(baseUrl, cookie) {
   const executablePath = findBrowser()
   const browser = await chromium.launch({
     headless: true,
@@ -56,7 +122,15 @@ async function verifyWebClient(baseUrl) {
     args: process.platform === 'linux' ? ['--no-sandbox'] : [],
   })
   try {
-    const page = await browser.newPage()
+    const separator = cookie.indexOf('=')
+    if (separator <= 0) throw new Error('Invalid DSH browser-session cookie')
+    const context = await browser.newContext()
+    await context.addCookies([{
+      name: cookie.slice(0, separator),
+      value: cookie.slice(separator + 1),
+      url: baseUrl,
+    }])
+    const page = await context.newPage()
     const pageErrors = []
     const clientErrors = []
     const failedPluginRequests = []
@@ -190,12 +264,12 @@ async function freePort() {
   return port
 }
 
-async function waitForHealth(url, child, logs, timeoutMs = 120000) {
+async function waitForHealth(url, cookie, child, logs, timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`DSH exited before health check (${child.exitCode})\n${logs()}`)
     try {
-      const response = await fetch(url)
+      const response = await authenticatedFetch(url, cookie)
       if (response.ok) return response.json()
     } catch {}
     await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
@@ -203,7 +277,7 @@ async function waitForHealth(url, child, logs, timeoutMs = 120000) {
   throw new Error(`Timed out waiting for ${url}\n${logs()}`)
 }
 
-async function createSmokeSession(baseUrl, child, logs, timeoutMs = 120000) {
+async function createSmokeSession(baseUrl, cookie, child, logs, timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs
   let lastResponse = 'DSH API 尚未响应'
   const request = {
@@ -216,13 +290,13 @@ async function createSmokeSession(baseUrl, child, logs, timeoutMs = 120000) {
     if (child.exitCode !== null) throw new Error(`DSH exited before Session creation (${child.exitCode})\n${logs()}`)
     let response
     try {
-      response = await fetch(`${baseUrl}/api/session.create`, {
+      response = await authenticatedFetch(`${baseUrl}/api/session.create`, cookie, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(request),
       })
     } catch (error) {
-      lastResponse = String(error)
+      lastResponse = redactRuntimeSecrets(error?.message || error)
       await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
       continue
     }
@@ -279,26 +353,28 @@ try {
   child.stdout.on('data', chunk => {
     const text = chunk.toString()
     stdout += text
-    process.stdout.write(text)
+    process.stdout.write(redactRuntimeSecrets(text))
   })
   child.stderr.on('data', chunk => {
     const text = chunk.toString()
     stderr += text
-    process.stderr.write(text)
+    process.stderr.write(redactRuntimeSecrets(text))
   })
-  const logs = () => `${stdout}\n${stderr}`
+  const rawLogs = () => `${stdout}\n${stderr}`
+  const logs = () => redactRuntimeSecrets(rawLogs())
   const baseUrl = `http://127.0.0.1:${port}`
-  await createSmokeSession(baseUrl, child, logs)
+  const cookie = await waitForBrowserSession(baseUrl, child, rawLogs, logs)
+  await createSmokeSession(baseUrl, cookie, child, logs)
   const healthUrl = `${baseUrl}/report-studio/api/health?sessionId=smoke-session`
-  const health = await waitForHealth(healthUrl, child, logs)
+  const health = await waitForHealth(healthUrl, cookie, child, logs)
   if (health.version !== 'v0.1.1' || health.agentMode !== 'dsh-native' || health.agentConfigured !== true || health.migrationStatus !== 'ready' || health.securityMode !== 'local-single-user-only' || health.listenHost !== '127.0.0.1' || health.networkSharedSecurity !== false) {
     throw new Error(`Unexpected native health payload: ${JSON.stringify(health)}`)
   }
 
   console.log('DSH smoke 5/5: verify production UI, native browser bridge and DSH Web Client composition')
-  const shellResponse = await fetch(`${baseUrl}/`)
-  const pageResponse = await fetch(`${baseUrl}/report-studio/?sessionId=smoke-session`)
-  const runtimeResponse = await fetch(`${baseUrl}/report-studio/dsh-native-runtime.js`)
+  const shellResponse = await authenticatedFetch(`${baseUrl}/`, cookie)
+  const pageResponse = await authenticatedFetch(`${baseUrl}/report-studio/?sessionId=smoke-session`, cookie)
+  const runtimeResponse = await authenticatedFetch(`${baseUrl}/report-studio/dsh-native-runtime.js`, cookie)
   if (!shellResponse.ok || !pageResponse.ok || !runtimeResponse.ok) {
     throw new Error(`DSH route failed: shell=${shellResponse.status}, page=${pageResponse.status}, runtime=${runtimeResponse.status}`)
   }
@@ -308,7 +384,7 @@ try {
   if (!shell.includes('<!doctype html>') || !page.includes('report-studio-standalone-notice') || !nativeRuntime.includes('report-studio.prompt')) {
     throw new Error('DSH route did not serve the production Report Studio UI.')
   }
-  const webClient = await verifyWebClient(baseUrl)
+  const webClient = await verifyWebClient(baseUrl, cookie)
 
   console.log('Report Studio native DSH runtime smoke PASS')
   console.log(`dsh=${EXPECTED_DSH_VERSION}`)
